@@ -361,10 +361,10 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                       >
                         <div className="min-w-0">
                           <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block">
-                            CNPJ
+                            CNPJ (Bling ERP)
                           </span>
                           <span className="font-semibold text-slate-800 dark:text-slate-200 font-mono text-xs truncate block">
-                            {empresa.cnpj || 'Não configurado'}
+                            {empresa.cnpj || 'Importando do Bling...'}
                           </span>
                         </div>
                         <div className="pl-2 shrink-0">
@@ -378,6 +378,7 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                         </div>
                       </div>
 
+                      {/* Localidade e Banco Emissor */}
                       <div className="grid grid-cols-2 gap-2">
                         {/* Localidade */}
                         <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-[#162f27]/50 border border-slate-200/60 dark:border-[#214739]">
@@ -387,7 +388,7 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                           <div className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200 text-xs truncate">
                             <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                             <span className="truncate">
-                              {empresa.cidade ? `${empresa.cidade}/${empresa.uf}` : 'Brasil'}
+                              {empresa.cidade ? `${empresa.cidade}/${empresa.uf || 'SP'}` : 'Brasil'}
                             </span>
                           </div>
                         </div>
@@ -400,6 +401,35 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                           <div className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200 text-xs truncate">
                             <span className="text-xs">{banco.logoIcon}</span>
                             <span className="truncate">{banco.name}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Novos Blocos: Situação Cadastral & Apontamentos em Órgãos de Crédito */}
+                      <div className="grid grid-cols-2 gap-2 pt-0.5">
+                        {/* Situação Cadastral */}
+                        <div className="p-2.5 rounded-xl bg-emerald-500/5 dark:bg-[#162f27]/30 border border-emerald-500/20 dark:border-[#214739]">
+                          <span className="text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider block mb-0.5">
+                            Situação Cadastral
+                          </span>
+                          <div className="flex items-center gap-1 font-bold text-emerald-700 dark:text-[#11d493] text-[11px] truncate">
+                            <ShieldCheck className="w-3.5 h-3.5 text-[#11d493] shrink-0" />
+                            <span className="truncate">
+                              {empresa.situacaoCadastral || (empresa.cnpj ? 'Ativa na Receita' : 'Pendente Bling')}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Apontamentos em Órgãos de Crédito */}
+                        <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-[#162f27]/30 border border-slate-200/60 dark:border-[#214739]">
+                          <span className="text-[10px] font-bold text-slate-400 dark:text-slate-400 uppercase tracking-wider block mb-0.5">
+                            Órgãos de Crédito
+                          </span>
+                          <div className="flex items-center gap-1 font-bold text-slate-700 dark:text-slate-200 text-[11px] truncate">
+                            <span className="text-[10px]">🛡️</span>
+                            <span className="truncate">
+                              {empresa.apontamentosCredito?.mensagem || (empresa.cnpj ? 'Sem Apontamentos' : 'Aguardando API')}
+                            </span>
                           </div>
                         </div>
                       </div>

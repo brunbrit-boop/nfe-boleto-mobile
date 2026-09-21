@@ -56,6 +56,18 @@ export interface EmpresaTenant {
   // Universo Bancário
   bancoPadrao: BankProvider;
   
+  // Análise Cadastral & Crédito (Pronto para API)
+  situacaoCadastral?: string; // Ex: 'Ativa / Regular na Receita Federal'
+  dataConsultaCadastral?: string;
+  apontamentosCredito?: {
+    total: number;
+    protestos: number;
+    pendencias: number;
+    score?: number;
+    status: 'limpo' | 'atencao' | 'pendente_consulta';
+    mensagem?: string;
+  };
+  
   // Customização Visual
   corAvatar?: string;
   criadoEm: string;
