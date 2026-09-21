@@ -1,15 +1,15 @@
 import React from 'react';
 import type { EmpresaTenant } from '../../types';
 import type { BtMenuOption } from './BtSidebar';
-import { Menu, RefreshCw, Building, ArrowLeft, Landmark } from 'lucide-react';
+import { Menu, Building, ArrowLeft } from 'lucide-react';
 
 interface BtHeaderProps {
   empresa: EmpresaTenant;
   activeMenu: BtMenuOption;
   onOpenMobile: () => void;
   onBackToEmpresas: () => void;
-  onRefreshBling: () => void;
-  carregando: boolean;
+  onRefreshBling?: () => void;
+  carregando?: boolean;
 }
 
 const TITULOS_MENU: Record<BtMenuOption, { titulo: string; sub: string }> = {
@@ -30,8 +30,6 @@ export const BtHeader: React.FC<BtHeaderProps> = ({
   activeMenu,
   onOpenMobile,
   onBackToEmpresas,
-  onRefreshBling,
-  carregando,
 }) => {
   const info = TITULOS_MENU[activeMenu] || TITULOS_MENU.finances;
 
@@ -65,23 +63,6 @@ export const BtHeader: React.FC<BtHeaderProps> = ({
 
       {/* Direita: Ações Rápidas */}
       <div className="flex items-center gap-2 md:gap-3">
-        {/* Banco Emissor Badge */}
-        <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-[#162f27] border border-slate-200 dark:border-[#1e4236] text-[11px] font-semibold text-slate-700 dark:text-slate-300">
-          <Landmark className="w-3.5 h-3.5 text-[#11d493]" />
-          <span>Banco: {empresa.bancoPadrao ? empresa.bancoPadrao.toUpperCase() : 'INTER'}</span>
-        </div>
-
-        {/* Botão Sincronizar com Bling */}
-        <button
-          onClick={onRefreshBling}
-          disabled={carregando}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-[#11d493] border border-emerald-500/30 text-xs font-semibold transition-all disabled:opacity-50"
-          title="Atualizar dados da API do Bling"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${carregando ? 'animate-spin' : ''}`} />
-          <span className="hidden sm:inline">{carregando ? 'Sincronizando...' : 'Atualizar Bling'}</span>
-        </button>
-
         {/* Botão Voltar para Lista de Empresas */}
         <button
           onClick={onBackToEmpresas}

@@ -401,15 +401,17 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({
 export const FinancesView: React.FC<FinancesViewProps> = ({
   contasPagar = [],
   contasReceber = [],
-  onRefreshBling,
-  carregando = false,
+  onRefreshBling: _onRefreshBling,
+  carregando: _carregando = false,
   onViewBoletoReceber,
   empresaNome,
 }) => {
-  // Suppress unused warning if onViewBoletoReceber is not yet hooked
+  // Suppress unused warnings
+  void _onRefreshBling;
+  void _carregando;
   void onViewBoletoReceber;
   // --- Estados de Controle Visual e Temporal ---
-  const [tableMode, setTableMode] = useState<TableMode>('forecast');
+  const [tableMode, setTableMode] = useState<TableMode>('all');
   const [visibleDays, setVisibleDays] = useState<number>(30);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isChartMinimized, setIsChartMinimized] = useState<boolean>(false);
@@ -453,7 +455,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   } | null>(null);
 
   // Filtros Globais do Topo (MultiSelect)
-  const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
   const [selectedBankIds, setSelectedBankIds] = useState<string[]>([]);
   const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([]);
   const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
@@ -728,12 +729,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   }, [contasPagar, contasReceber, todayISO]);
 
   // --- Opções Dinâmicas dos Filtros Globais MultiSelect ---
-  const companyOptions: MultiSelectOption[] = useMemo(() => {
-    const set = new Set<string>();
-    allTransactions.forEach((t) => t.companyName && set.add(t.companyName));
-    return Array.from(set).sort().map((name) => ({ id: name, name }));
-  }, [allTransactions]);
-
   const bankOptions: MultiSelectOption[] = useMemo(() => {
     const set = new Set<string>();
     allTransactions.forEach((t) => t.bankName && set.add(t.bankName));
@@ -752,16 +747,15 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     return Array.from(set).sort().map((name) => ({ id: name, name }));
   }, [allTransactions]);
 
-  // --- Filtro Global Base (Empresas, Bancos, Unidades, Categorias) ---
+  // --- Filtro Global Base (Bancos, Unidades, Categorias) ---
   const baseFilteredTransactions = useMemo(() => {
     return allTransactions.filter((tx) => {
-      if (selectedCompanyIds.length > 0 && !selectedCompanyIds.includes(tx.companyName)) return false;
       if (selectedBankIds.length > 0 && !selectedBankIds.includes(tx.bankName)) return false;
       if (selectedUnitIds.length > 0 && !selectedUnitIds.includes(tx.unit)) return false;
       if (selectedCategoryIds.length > 0 && !selectedCategoryIds.includes(tx.category)) return false;
       return true;
     });
-  }, [allTransactions, selectedCompanyIds, selectedBankIds, selectedUnitIds, selectedCategoryIds]);
+  }, [allTransactions, selectedBankIds, selectedUnitIds, selectedCategoryIds]);
 
   // --- Operação de Arraste da Barra Divisória (Split Resizer) ---
   useEffect(() => {
@@ -1093,44 +1087,81 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     setPinnedFilterDate(date);
   };
 
-  // Clique na coluna do gráfico (Fixa Tooltip, altera modo Realizado/Previsão e sincroniza data)
-  const handleChartClick = (state: any) => {
-    if (!state) return;
-    const payload =
-      state.activePayload?.[0]?.payload ||
-      (state.activeTooltipIndex !== undefined ? chartData[state.activeTooltipIndex] : null);
+  // Clique na bolinha de saldo do dia (Fixa Tooltip, altera modo Realizado/Previsão e sincroniza data)
+  const handleDotClick = (payload: any, pos: { x: number; y: number }) => {
+    if (!payload) return;
 
-    if (payload) {
-      const posX =
-        state.activeCoordinate?.x !== undefined
-          ? state.activeCoordinate.x
-          : (state.chartX || 220);
+    setPinnedTooltipData(payload);
+    setPinnedTooltipPos({
+      x: pos.x,
+      y: Math.max(15, pos.y - 20),
+    });
 
-      setPinnedTooltipData(payload);
-      setPinnedTooltipPos({
-        x: posX,
-        y: Math.max(15, (state.chartY || 100) - 20),
+    if (!previousFilters) {
+      setPreviousFilters({
+        category: pinnedFilterCategory,
+        unit: pinnedFilterUnit,
+        date: pinnedFilterDate,
       });
-
-      if (!previousFilters) {
-        setPreviousFilters({
-          category: pinnedFilterCategory,
-          unit: pinnedFilterUnit,
-          date: pinnedFilterDate,
-        });
-      }
-
-      setPinnedFilterDate(payload.date);
-      setPinnedFilterCategory(null);
-      setPinnedFilterUnit(null);
-
-      // Sincronização Inteligente com a Data Clicada (Passado = Realizado, Futuro/Hoje = Previsão)
-      if (payload.date < todayISO) {
-        setTableMode('realized');
-      } else {
-        setTableMode('forecast');
-      }
     }
+
+    setPinnedFilterDate(payload.date);
+    setPinnedFilterCategory(null);
+    setPinnedFilterUnit(null);
+
+    // Sincronização Inteligente com a Data Clicada (Passado = Realizado, Futuro/Hoje = Previsão)
+    if (payload.date < todayISO) {
+      setTableMode('realized');
+    } else {
+      setTableMode('forecast');
+    }
+  };
+
+  // Renderizador SVG personalizado da bolinha de saldo com área de clique interativa
+  const renderBalanceDot = (props: any) => {
+    const { cx, cy, payload } = props;
+    if (cx === undefined || cy === undefined || !payload) return null;
+
+    const isPinned = pinnedFilterDate === payload.date;
+
+    return (
+      <g
+        key={`dot-${payload.date}`}
+        className="cursor-pointer group"
+        onClick={(e) => {
+          e.stopPropagation();
+          handleDotClick(payload, { x: cx, y: cy });
+        }}
+      >
+        {/* Hitbox expandida transparente para toque/clique fácil */}
+        <circle cx={cx} cy={cy} r={14} fill="transparent" className="cursor-pointer" />
+
+        {/* Halo animado quando fixado */}
+        {isPinned && (
+          <circle
+            cx={cx}
+            cy={cy}
+            r={10}
+            fill="#3b82f6"
+            fillOpacity={0.25}
+            stroke="#2563eb"
+            strokeWidth={1.5}
+            className="animate-pulse"
+          />
+        )}
+
+        {/* Bolinha central de saldo */}
+        <circle
+          cx={cx}
+          cy={cy}
+          r={isPinned ? 5.5 : 4}
+          fill={isPinned ? '#1d4ed8' : '#2563eb'}
+          stroke="#ffffff"
+          strokeWidth={2}
+          className="transition-transform duration-150 hover:scale-125"
+        />
+      </g>
+    );
   };
 
   // --- Filtragem das Tabelas com Suporte a Drill-Down e Filtros Globais ---
@@ -1317,7 +1348,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   };
 
   const hasAnyGlobalFilter =
-    selectedCompanyIds.length > 0 ||
     selectedBankIds.length > 0 ||
     selectedUnitIds.length > 0 ||
     selectedCategoryIds.length > 0;
@@ -1338,15 +1368,9 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             <span className="material-symbols-outlined text-lg">monitoring</span>
           </div>
           <div>
-            <h2 className="text-sm font-extrabold text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
-              Financeiro (Passado & Futuro)
-              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 font-bold border border-blue-200 dark:border-blue-800">
-                BT Business
-              </span>
+            <h2 className="text-sm font-extrabold text-gray-900 dark:text-white uppercase tracking-wider">
+              Fluxo de Caixa
             </h2>
-            <p className="text-[10px] text-gray-400 hidden sm:block">
-              Extratos Bancários (Passado Bege) + Previsões Bling ERP (Futuro Branco)
-            </p>
           </div>
         </div>
 
@@ -1474,37 +1498,16 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
               {isFullscreen ? 'fullscreen_exit' : 'fullscreen'}
             </span>
           </button>
-
-          {/* Sincronizar Bling */}
-          {onRefreshBling && (
-            <button
-              onClick={onRefreshBling}
-              disabled={carregando}
-              className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-[#11d493] text-xs font-bold border border-emerald-500/30 transition-all disabled:opacity-50"
-            >
-              <span className={`material-symbols-outlined text-[15px] ${carregando ? 'animate-spin' : ''}`}>
-                sync
-              </span>
-              <span>{carregando ? 'Bling...' : 'Atualizar Bling'}</span>
-            </button>
-          )}
         </div>
       </div>
 
-      {/* 2. Barra de Filtros Globais Multi-Dimensão (Empresas, Bancos, Unidades, Categorias) */}
+      {/* 2. Barra de Filtros Globais Multi-Dimensão (Bancos, Unidades, Categorias) */}
       <div className="px-4 py-1.5 bg-gray-50 dark:bg-[#10221c]/90 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between gap-3 shrink-0 flex-wrap">
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center gap-1 text-xs font-extrabold text-gray-600 dark:text-gray-300 mr-1">
             <span className="material-symbols-outlined text-sm text-[#11d493]">tune</span>
             <span>FILTROS GLOBAIS:</span>
           </div>
-
-          <MultiSelect
-            label="Empresas"
-            options={companyOptions}
-            selectedIds={selectedCompanyIds}
-            onChange={setSelectedCompanyIds}
-          />
 
           <MultiSelect
             label="Contas/Bancos"
@@ -1530,7 +1533,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
           {hasAnyGlobalFilter && (
             <button
               onClick={() => {
-                setSelectedCompanyIds([]);
                 setSelectedBankIds([]);
                 setSelectedUnitIds([]);
                 setSelectedCategoryIds([]);
@@ -1569,7 +1571,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart
               data={chartData}
-              onClick={handleChartClick}
               margin={{ top: 15, right: 20, left: 10, bottom: 5 }}
             >
               <defs>
@@ -1620,7 +1621,30 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
               <Bar yAxisId="left" dataKey="receitas" name="Receitas" shape={<EqualizerBar type="receivable" />} maxBarSize={32} />
 
               {/* Curva de Saldo Projetado */}
-              <Line yAxisId="right" type="monotone" dataKey="saldo" name="Saldo Projetado" stroke="#2563eb" strokeWidth={2.5} dot={false} activeDot={{ r: 4, fill: '#2563eb' }} />
+              <Line
+                yAxisId="right"
+                type="monotone"
+                dataKey="saldo"
+                name="Saldo Projetado"
+                stroke="#2563eb"
+                strokeWidth={2.5}
+                dot={renderBalanceDot}
+                activeDot={{
+                  r: 6,
+                  fill: '#2563eb',
+                  stroke: '#ffffff',
+                  strokeWidth: 2,
+                  cursor: 'pointer',
+                  onClick: (_e: any, eventPayload: any) => {
+                    if (eventPayload?.payload) {
+                      handleDotClick(eventPayload.payload, {
+                        x: eventPayload.cx,
+                        y: eventPayload.cy,
+                      });
+                    }
+                  },
+                }}
+              />
 
               {/* Tooltip Dinâmico no Hover (se não estiver fixado) */}
               {!pinnedTooltipData && (
@@ -1840,7 +1864,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                       title="Selecionar todas as despesas exibidas"
                     />
                   </th>
-                  <th className="p-2">{renderHeaderWithFilter('payable', 'company', 'EMPRESA')}</th>
                   <th className="p-2">{renderHeaderWithFilter('payable', 'bank', 'BANCO')}</th>
                   <th className="p-2">DATA / ADIAR</th>
                   <th className="p-2">{renderHeaderWithFilter('payable', 'entity', 'DESTINO')}</th>
@@ -1855,7 +1878,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {payablesList.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="text-center py-12 text-gray-400 italic text-xs">
+                    <td colSpan={10} className="text-center py-12 text-gray-400 italic text-xs">
                       Nenhuma transação encontrada com os filtros atuais.
                     </td>
                   </tr>
@@ -1887,10 +1910,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                             className="rounded cursor-pointer text-red-600 focus:ring-red-500 accent-red-600"
                             title="Selecionar para operações em lote"
                           />
-                        </td>
-
-                        <td className="p-2 font-semibold text-gray-800 dark:text-gray-200 truncate max-w-[90px]">
-                          {tx.companyName}
                         </td>
 
                         {/* Banco (Dropdown Editável Inline) */}
@@ -2061,7 +2080,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                       title="Selecionar todas as receitas exibidas"
                     />
                   </th>
-                  <th className="p-2">{renderHeaderWithFilter('receivable', 'company', 'EMPRESA')}</th>
                   <th className="p-2">{renderHeaderWithFilter('receivable', 'bank', 'BANCO')}</th>
                   <th className="p-2">DATA / ADIAR</th>
                   <th className="p-2">{renderHeaderWithFilter('receivable', 'entity', 'ORIGEM')}</th>
@@ -2076,7 +2094,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {receivablesList.length === 0 ? (
                   <tr>
-                    <td colSpan={11} className="text-center py-12 text-gray-400 italic text-xs">
+                    <td colSpan={10} className="text-center py-12 text-gray-400 italic text-xs">
                       Nenhuma transação encontrada com os filtros atuais.
                     </td>
                   </tr>
@@ -2108,10 +2126,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                             className="rounded cursor-pointer text-emerald-600 focus:ring-emerald-500 accent-emerald-600"
                             title="Selecionar para operações em lote"
                           />
-                        </td>
-
-                        <td className="p-2 font-semibold text-gray-800 dark:text-gray-200 truncate max-w-[90px]">
-                          {tx.companyName}
                         </td>
 
                         {/* Banco (Dropdown Editável Inline) */}
@@ -2357,7 +2371,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
       <BankUploadModal
         isOpen={showUploadModal}
         onClose={() => setShowUploadModal(false)}
-        companies={companyOptions.map((c) => c.name)}
+        companies={[empresaNome || 'Empresa Matriz']}
         bankAccounts={bankOptions.map((b) => b.name)}
         onImportSuccess={(newTxs) => {
           setAllTransactions((prev) => [...newTxs, ...prev]);
