@@ -11,6 +11,7 @@ import {
   ReferenceLine,
   ReferenceArea,
   Legend,
+  Tooltip,
 } from 'recharts';
 import { MultiSelect, type MultiSelectOption } from '../finances/MultiSelect';
 import { BankUploadModal } from '../finances/BankUploadModal';
@@ -149,6 +150,247 @@ const EqualizerBar = (props: any) => {
   );
 };
 
+// Formatação monetária e de data para os componentes de Gráfico e Tooltip
+const formatDateBr = (isoStr: string) => {
+  if (!isoStr) return '';
+  const parts = isoStr.split('-');
+  if (parts.length < 3) return isoStr;
+  return `${parts[2]}/${parts[1]}`;
+};
+
+const formatBRL = (val: number) => {
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
+};
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: any[];
+  label?: string;
+  isInteractive?: boolean;
+  onFilterCategory?: (category: string, date: string) => void;
+  onFilterUnit?: (unit: string, date: string, category?: string) => void;
+  onClose?: () => void;
+}
+
+const CustomTooltip: React.FC<CustomTooltipProps> = ({
+  active,
+  payload,
+  label,
+  isInteractive = false,
+  onFilterCategory,
+  onFilterUnit,
+  onClose,
+}) => {
+  if (active && payload && payload.length > 0) {
+    const data = payload[0].payload;
+    if (!data) return null;
+
+    const todayISO = new Date().toISOString().split('T')[0];
+    const isPast = data.date < todayISO;
+
+    return (
+      <div
+        className={`bg-white dark:bg-[#162f27] border border-gray-200 dark:border-gray-700 p-3 rounded-2xl shadow-2xl text-xs z-[120] ${
+          isInteractive
+            ? 'max-h-[380px] min-w-[340px] md:min-w-[420px] overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-gray-200 dark:scrollbar-thumb-gray-700 ring-2 ring-[#11d493]/40 pointer-events-auto'
+            : 'min-w-[240px] pointer-events-none'
+        } transition-all`}
+      >
+        <div className="font-bold text-gray-800 dark:text-gray-100 mb-2 text-center border-b border-gray-100 dark:border-gray-800 pb-1.5 relative">
+          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+            <span className="material-symbols-outlined text-sm text-[#11d493]">event</span>
+            <span>{label || data.displayDate} ({data.date})</span>
+            <span
+              className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider ${
+                isPast
+                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
+                  : 'bg-blue-100 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300'
+              }`}
+            >
+              {isPast ? 'Passado / Auditado' : 'Previsão Bling'}
+            </span>
+          </div>
+
+          {isInteractive ? (
+            <span className="block text-[10px] text-[#11d493] font-semibold mt-0.5">
+              Clique em um item para filtrar a tabela
+            </span>
+          ) : (
+            <span className="block text-[9px] text-gray-400 font-normal mt-0.5">
+              Clique na barra para fixar e filtrar
+            </span>
+          )}
+
+          {isInteractive && onClose && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onClose();
+              }}
+              className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow-lg transition-colors"
+              title="Fechar e desmarcar fixação"
+            >
+              <span className="material-symbols-outlined text-[14px]">close</span>
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          {/* Receitas */}
+          <div className="min-w-0">
+            <div className="flex items-center gap-1 mb-2 text-emerald-600 dark:text-emerald-400 font-bold border-b border-emerald-100 dark:border-emerald-900/30 pb-1">
+              <span className="material-symbols-outlined text-sm">arrow_upward</span>
+              <span className="truncate">Receitas: {formatBRL(data.receitas || 0)}</span>
+            </div>
+
+            {data.receivableBreakdown && data.receivableBreakdown.length > 0 ? (
+              <ul className="space-y-2">
+                {data.receivableBreakdown.map((item: any, idx: number) => (
+                  <li key={idx} className="flex flex-col text-gray-600 dark:text-gray-300">
+                    <div
+                      className={`flex justify-between items-center gap-1 p-1 rounded transition-colors group ${
+                        isInteractive
+                          ? 'cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-900/30'
+                          : ''
+                      }`}
+                      onClick={() => isInteractive && onFilterCategory && onFilterCategory(item.category, data.date)}
+                      title={isInteractive ? `Filtrar tabela por ${item.category}` : undefined}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <div
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{
+                            backgroundColor:
+                              INCOME_SEGMENT_COLORS[idx % INCOME_SEGMENT_COLORS.length],
+                          }}
+                        />
+                        <span className="font-bold truncate text-[11px]" title={item.category}>
+                          {item.category}
+                        </span>
+                      </div>
+                      <span className="font-mono font-semibold shrink-0 text-[10px]">
+                        {formatBRL(item.totalValue)}
+                      </span>
+                    </div>
+
+                    {item.units && item.units.length > 0 && (
+                      <div className="pl-2.5 mt-0.5 border-l-2 border-emerald-200 dark:border-emerald-900/40 space-y-0.5">
+                        {item.units.map((u: any, uIdx: number) => (
+                          <div
+                            key={uIdx}
+                            className={`flex justify-between text-[10px] text-gray-400 dark:text-gray-400 py-0.5 px-1 rounded group ${
+                              isInteractive
+                                ? 'cursor-pointer hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20'
+                                : ''
+                            }`}
+                            onClick={(e) => {
+                              if (isInteractive && onFilterUnit) {
+                                e.stopPropagation();
+                                onFilterUnit(u.unitName, data.date, item.category);
+                              }
+                            }}
+                            title={isInteractive ? `Filtrar por unidade ${u.unitName}` : undefined}
+                          >
+                            <span className="truncate max-w-[85px]" title={u.unitName}>
+                              {u.unitName}
+                            </span>
+                            <span className="shrink-0 font-mono">{formatBRL(u.value)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-gray-400 italic text-[10px] py-1">Sem receitas</p>
+            )}
+          </div>
+
+          {/* Despesas */}
+          <div className="min-w-0">
+            <div className="flex items-center gap-1 mb-2 text-rose-600 dark:text-rose-400 font-bold border-b border-rose-100 dark:border-rose-900/30 pb-1">
+              <span className="material-symbols-outlined text-sm">arrow_downward</span>
+              <span className="truncate">Despesas: {formatBRL(data.despesas || 0)}</span>
+            </div>
+
+            {data.payableBreakdown && data.payableBreakdown.length > 0 ? (
+              <ul className="space-y-2">
+                {data.payableBreakdown.map((item: any, idx: number) => (
+                  <li key={idx} className="flex flex-col text-gray-600 dark:text-gray-300">
+                    <div
+                      className={`flex justify-between items-center gap-1 p-1 rounded transition-colors group ${
+                        isInteractive
+                          ? 'cursor-pointer hover:bg-rose-50 dark:hover:bg-rose-900/30'
+                          : ''
+                      }`}
+                      onClick={() => isInteractive && onFilterCategory && onFilterCategory(item.category, data.date)}
+                      title={isInteractive ? `Filtrar tabela por ${item.category}` : undefined}
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <div
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{
+                            backgroundColor:
+                              EXPENSE_SEGMENT_COLORS[idx % EXPENSE_SEGMENT_COLORS.length],
+                          }}
+                        />
+                        <span className="font-bold truncate text-[11px]" title={item.category}>
+                          {item.category}
+                        </span>
+                      </div>
+                      <span className="font-mono font-semibold shrink-0 text-[10px]">
+                        {formatBRL(item.totalValue)}
+                      </span>
+                    </div>
+
+                    {item.units && item.units.length > 0 && (
+                      <div className="pl-2.5 mt-0.5 border-l-2 border-rose-200 dark:border-rose-900/40 space-y-0.5">
+                        {item.units.map((u: any, uIdx: number) => (
+                          <div
+                            key={uIdx}
+                            className={`flex justify-between text-[10px] text-gray-400 dark:text-gray-400 py-0.5 px-1 rounded group ${
+                              isInteractive
+                                ? 'cursor-pointer hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50/50 dark:hover:bg-rose-900/20'
+                                : ''
+                            }`}
+                            onClick={(e) => {
+                              if (isInteractive && onFilterUnit) {
+                                e.stopPropagation();
+                                onFilterUnit(u.unitName, data.date, item.category);
+                              }
+                            }}
+                            title={isInteractive ? `Filtrar por unidade ${u.unitName}` : undefined}
+                          >
+                            <span className="truncate max-w-[85px]" title={u.unitName}>
+                              {u.unitName}
+                            </span>
+                            <span className="shrink-0 font-mono">{formatBRL(u.value)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-gray-400 italic text-[10px] py-1">Sem despesas</p>
+            )}
+          </div>
+        </div>
+
+        <div className="mt-3 pt-2 border-t border-gray-100 dark:border-gray-800 flex justify-between items-center text-xs">
+          <span className="text-blue-600 dark:text-blue-400 font-bold">Saldo Projetado:</span>
+          <span className="font-mono font-bold text-gray-800 dark:text-white">
+            {formatBRL(data.saldo || 0)}
+          </span>
+        </div>
+      </div>
+    );
+  }
+  return null;
+};
+
 export const FinancesView: React.FC<FinancesViewProps> = ({
   contasPagar = [],
   contasReceber = [],
@@ -183,6 +425,11 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   const [pinnedFilterDate, setPinnedFilterDate] = useState<string | null>(null);
   const [pinnedFilterCategory, setPinnedFilterCategory] = useState<string | null>(null);
   const [pinnedFilterUnit, setPinnedFilterUnit] = useState<string | null>(null);
+  const [previousFilters, setPreviousFilters] = useState<{
+    category: string | null;
+    unit: string | null;
+    date: string | null;
+  } | null>(null);
 
   // Drag / Rolagem horizontal
   const [isDragging, setIsDragging] = useState(false);
@@ -217,17 +464,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   const [deletedTransactions, setDeletedTransactions] = useState<FinanceTransaction[]>([]);
 
   const todayISO = useMemo(() => new Date().toISOString().split('T')[0], []);
-
-  const formatDateBr = (isoStr: string) => {
-    if (!isoStr) return '';
-    const parts = isoStr.split('-');
-    if (parts.length < 3) return isoStr;
-    return `${parts[2]}/${parts[1]}`;
-  };
-
-  const formatBRL = (val: number) => {
-    return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
-  };
 
   // --- Base de Transações com Simulação em Estado Local ---
   const [allTransactions, setAllTransactions] = useState<FinanceTransaction[]>([]);
@@ -709,27 +945,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     setDragStartDate(null);
   };
 
-  // Clique no gráfico
-  const handleChartClick = (state: any) => {
-    if (state && state.activePayload && state.activePayload.length > 0) {
-      const payload = state.activePayload[0].payload;
-      setPinnedTooltipData(payload);
-      setPinnedTooltipPos({
-        x: state.chartX || 220,
-        y: Math.max(20, (state.chartY || 100) - 30),
-      });
-      setPinnedFilterDate(payload.date);
-      setPinnedFilterCategory(null);
-      setPinnedFilterUnit(null);
-
-      if (payload.date < todayISO) {
-        setTableMode('realized');
-      } else {
-        setTableMode('forecast');
-      }
-    }
-  };
-
   // --- Montagem do Gráfico com Equalizador e Decomposição Hierárquica ---
   const chartData = useMemo(() => {
     const daysMap = new Map<
@@ -816,18 +1031,104 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     return dataPoints;
   }, [baseFilteredTransactions, referenceDate, visibleDays]);
 
+  // --- Handlers de Interação com Tooltip Fixado (Drill-down e Fechamento) ---
+  const handlePinFilterCategory = (categoryName: string, date: string) => {
+    if (!previousFilters) {
+      setPreviousFilters({
+        category: pinnedFilterCategory,
+        unit: pinnedFilterUnit,
+        date: pinnedFilterDate,
+      });
+    }
+    setPinnedFilterCategory(categoryName);
+    setPinnedFilterUnit(null);
+    setPinnedFilterDate(date);
+  };
+
+  const handlePinFilterUnit = (unitName: string, date: string, categoryName?: string) => {
+    if (!previousFilters) {
+      setPreviousFilters({
+        category: pinnedFilterCategory,
+        unit: pinnedFilterUnit,
+        date: pinnedFilterDate,
+      });
+    }
+    setPinnedFilterUnit(unitName);
+    if (categoryName) {
+      setPinnedFilterCategory(categoryName);
+    }
+    setPinnedFilterDate(date);
+  };
+
+  const handleClosePinnedTooltip = () => {
+    setPinnedTooltipData(null);
+    setPinnedTooltipPos(null);
+    setPinnedFilterDate(null);
+    setPinnedFilterCategory(null);
+    setPinnedFilterUnit(null);
+
+    if (previousFilters) {
+      setPinnedFilterCategory(previousFilters.category);
+      setPinnedFilterUnit(previousFilters.unit);
+      setPinnedFilterDate(previousFilters.date);
+      setPreviousFilters(null);
+    }
+  };
+
+  // Clique na coluna do gráfico (Fixa Tooltip, altera modo Realizado/Previsão e sincroniza data)
+  const handleChartClick = (state: any) => {
+    if (!state) return;
+    const payload =
+      state.activePayload?.[0]?.payload ||
+      (state.activeTooltipIndex !== undefined ? chartData[state.activeTooltipIndex] : null);
+
+    if (payload) {
+      const posX =
+        state.activeCoordinate?.x !== undefined
+          ? state.activeCoordinate.x
+          : (state.chartX || 220);
+
+      setPinnedTooltipData(payload);
+      setPinnedTooltipPos({
+        x: posX,
+        y: Math.max(15, (state.chartY || 100) - 20),
+      });
+
+      if (!previousFilters) {
+        setPreviousFilters({
+          category: pinnedFilterCategory,
+          unit: pinnedFilterUnit,
+          date: pinnedFilterDate,
+        });
+      }
+
+      setPinnedFilterDate(payload.date);
+      setPinnedFilterCategory(null);
+      setPinnedFilterUnit(null);
+
+      // Sincronização Inteligente com a Data Clicada (Passado = Realizado, Futuro/Hoje = Previsão)
+      if (payload.date < todayISO) {
+        setTableMode('realized');
+      } else {
+        setTableMode('forecast');
+      }
+    }
+  };
+
   // --- Filtragem das Tabelas com Suporte a Drill-Down e Filtros Globais ---
   const { payablesList, receivablesList } = useMemo(() => {
     let base = baseFilteredTransactions;
 
+    // Se houver data fixada pelo clique na barra do gráfico, filtra pelo dia
     if (pinnedFilterDate) {
       base = base.filter((tx) => tx.date === pinnedFilterDate);
-    } else {
-      if (tableMode === 'forecast') {
-        base = base.filter((tx) => tx.status !== 'paid');
-      } else if (tableMode === 'realized') {
-        base = base.filter((tx) => tx.status === 'paid' || tx.status === 'marked_reopen');
-      }
+    }
+
+    // Aplica o tableMode (Realizado vs Previsão vs Todas)
+    if (tableMode === 'forecast') {
+      base = base.filter((tx) => tx.status !== 'paid');
+    } else if (tableMode === 'realized') {
+      base = base.filter((tx) => tx.status === 'paid' || tx.status === 'marked_reopen');
     }
 
     if (pinnedFilterCategory) {
@@ -879,12 +1180,22 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   }, [payablesList, receivablesList]);
 
   const counts = useMemo(() => {
+    let base = baseFilteredTransactions;
+    if (pinnedFilterDate) {
+      base = base.filter((tx) => tx.date === pinnedFilterDate);
+    }
+    if (pinnedFilterCategory) {
+      base = base.filter((tx) => tx.category.toLowerCase() === pinnedFilterCategory.toLowerCase());
+    }
+    if (pinnedFilterUnit) {
+      base = base.filter((tx) => tx.unit.toLowerCase() === pinnedFilterUnit.toLowerCase());
+    }
     return {
-      forecast: baseFilteredTransactions.filter((tx) => tx.status !== 'paid').length,
-      realized: baseFilteredTransactions.filter((tx) => tx.status === 'paid' || tx.status === 'marked_reopen').length,
-      all: baseFilteredTransactions.length,
+      forecast: base.filter((tx) => tx.status !== 'paid').length,
+      realized: base.filter((tx) => tx.status === 'paid' || tx.status === 'marked_reopen').length,
+      all: base.length,
     };
-  }, [baseFilteredTransactions]);
+  }, [baseFilteredTransactions, pinnedFilterDate, pinnedFilterCategory, pinnedFilterUnit]);
 
   // Funil de cabeçalho por coluna
   const renderHeaderWithFilter = (
@@ -1277,119 +1588,51 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
               {/* Curva de Saldo Projetado */}
               <Line yAxisId="right" type="monotone" dataKey="saldo" name="Saldo Projetado" stroke="#2563eb" strokeWidth={2.5} dot={false} activeDot={{ r: 4, fill: '#2563eb' }} />
+
+              {/* Tooltip Dinâmico no Hover (se não estiver fixado) */}
+              {!pinnedTooltipData && (
+                <Tooltip
+                  content={
+                    <CustomTooltip
+                      isInteractive={false}
+                      onFilterCategory={handlePinFilterCategory}
+                      onFilterUnit={handlePinFilterUnit}
+                    />
+                  }
+                  cursor={{ fill: 'transparent' }}
+                  allowEscapeViewBox={{ x: true, y: true }}
+                  wrapperStyle={{ pointerEvents: 'none', zIndex: 100 }}
+                />
+              )}
             </ComposedChart>
           </ResponsiveContainer>
 
-          {/* Card Flutuante Fixado com Drill-Down Clicável */}
+          {/* Card Flutuante Fixado com Drill-Down Clicável (Pinned Tooltip) */}
           {pinnedTooltipData && pinnedTooltipPos && (
             <div
-              className="absolute z-50 bg-white/95 dark:bg-[#162f27]/95 backdrop-blur-md border border-gray-200 dark:border-gray-700 p-3 rounded-2xl shadow-2xl pointer-events-auto text-xs min-w-[280px] max-w-[340px] animate-in fade-in zoom-in-95 duration-150"
+              className="absolute z-[120] pointer-events-auto animate-in fade-in zoom-in-95 duration-150"
               style={{
-                left: Math.min(window.innerWidth - 360, Math.max(20, pinnedTooltipPos.x - 140)),
-                top: Math.min(180, Math.max(10, pinnedTooltipPos.y)),
+                left: Math.min(
+                  typeof window !== 'undefined' ? window.innerWidth - 440 : 600,
+                  Math.max(220, pinnedTooltipPos.x)
+                ),
+                top: 15,
+                transform: 'translateX(-50%)',
               }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onMouseMove={(e) => e.stopPropagation()}
+              onMouseUp={(e) => e.stopPropagation()}
               onClick={(e) => e.stopPropagation()}
             >
-              <div className="flex items-center justify-between pb-1.5 border-b border-gray-100 dark:border-gray-800 mb-2">
-                <div className="flex items-center gap-1.5">
-                  <span className="material-symbols-outlined text-sm text-[#11d493]">event</span>
-                  <span className="font-extrabold text-gray-900 dark:text-white">
-                    {pinnedTooltipData.displayDate} ({pinnedTooltipData.date})
-                  </span>
-                  <span
-                    className={`text-[9px] px-1.5 py-0.2 rounded-full font-bold ${
-                      pinnedTooltipData.date < todayISO
-                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
-                        : 'bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300'
-                    }`}
-                  >
-                    {pinnedTooltipData.date < todayISO ? 'PASSADO AUDITADO' : 'PREVISÃO BLING'}
-                  </span>
-                </div>
-                <button
-                  onClick={() => {
-                    setPinnedTooltipData(null);
-                    setPinnedTooltipPos(null);
-                    setPinnedFilterDate(null);
-                    setPinnedFilterCategory(null);
-                    setPinnedFilterUnit(null);
-                  }}
-                  className="w-5 h-5 rounded-full hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-400 hover:text-gray-600"
-                >
-                  <span className="material-symbols-outlined text-xs">close</span>
-                </button>
-              </div>
-
-              {/* Categorias e Unidades com Drill-Down */}
-              <div className="space-y-2 mb-2">
-                <div>
-                  <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1 flex items-center justify-between">
-                    <span>Receitas ({formatBRL(pinnedTooltipData.receitas)})</span>
-                    <span className="text-[9px] text-gray-400 font-normal">Clique para filtrar</span>
-                  </div>
-                  {pinnedTooltipData.receivableBreakdown?.length > 0 ? (
-                    <div className="space-y-1">
-                      {pinnedTooltipData.receivableBreakdown.map((cat: any) => (
-                        <div
-                          key={cat.category}
-                          onClick={() => {
-                            setPinnedFilterCategory(cat.category);
-                            setPinnedFilterUnit(null);
-                          }}
-                          className={`flex items-center justify-between p-1 rounded-lg cursor-pointer transition-colors ${
-                            pinnedFilterCategory === cat.category
-                              ? 'bg-emerald-100 dark:bg-emerald-950/60 font-bold text-emerald-900 dark:text-emerald-300'
-                              : 'hover:bg-gray-50 dark:hover:bg-white/5 text-gray-700 dark:text-gray-300'
-                          }`}
-                        >
-                          <span className="truncate">{cat.category}</span>
-                          <span className="font-mono">{formatBRL(cat.totalValue)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-[10px] text-gray-400 italic">Sem receitas</span>
-                  )}
-                </div>
-
-                <div>
-                  <div className="text-[10px] font-bold text-red-600 dark:text-red-400 uppercase tracking-wider mb-1 flex items-center justify-between">
-                    <span>Despesas ({formatBRL(pinnedTooltipData.despesas)})</span>
-                    <span className="text-[9px] text-gray-400 font-normal">Clique para filtrar</span>
-                  </div>
-                  {pinnedTooltipData.payableBreakdown?.length > 0 ? (
-                    <div className="space-y-1">
-                      {pinnedTooltipData.payableBreakdown.map((cat: any) => (
-                        <div
-                          key={cat.category}
-                          onClick={() => {
-                            setPinnedFilterCategory(cat.category);
-                            setPinnedFilterUnit(null);
-                          }}
-                          className={`flex items-center justify-between p-1 rounded-lg cursor-pointer transition-colors ${
-                            pinnedFilterCategory === cat.category
-                              ? 'bg-red-100 dark:bg-red-950/60 font-bold text-red-900 dark:text-red-300'
-                              : 'hover:bg-gray-50 dark:hover:bg-white/5 text-gray-700 dark:text-gray-300'
-                          }`}
-                        >
-                          <span className="truncate">{cat.category}</span>
-                          <span className="font-mono">{formatBRL(cat.totalValue)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <span className="text-[10px] text-gray-400 italic">Sem despesas</span>
-                  )}
-                </div>
-              </div>
-
-              {/* Rodapé: Saldo Projetado */}
-              <div className="flex items-center justify-between text-xs pt-1.5 border-t border-gray-100 dark:border-gray-800 font-bold">
-                <span className="text-blue-600 dark:text-blue-400">Saldo Projetado:</span>
-                <span className="font-mono text-gray-900 dark:text-white">
-                  {formatBRL(pinnedTooltipData.saldo)}
-                </span>
-              </div>
+              <CustomTooltip
+                active={true}
+                payload={[{ payload: pinnedTooltipData }]}
+                label={pinnedTooltipData.displayDate}
+                isInteractive={true}
+                onFilterCategory={handlePinFilterCategory}
+                onFilterUnit={handlePinFilterUnit}
+                onClose={handleClosePinnedTooltip}
+              />
             </div>
           )}
         </div>
@@ -1405,12 +1648,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
           <div className="flex bg-gray-200 dark:bg-gray-700/60 p-0.5 rounded-lg text-xs font-semibold gap-1">
             <button
-              onClick={() => {
-                setTableMode('forecast');
-                setPinnedFilterDate(null);
-                setPinnedFilterCategory(null);
-                setPinnedFilterUnit(null);
-              }}
+              onClick={() => setTableMode('forecast')}
               className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
                 tableMode === 'forecast'
                   ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm font-bold'
@@ -1424,12 +1662,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             </button>
 
             <button
-              onClick={() => {
-                setTableMode('realized');
-                setPinnedFilterDate(null);
-                setPinnedFilterCategory(null);
-                setPinnedFilterUnit(null);
-              }}
+              onClick={() => setTableMode('realized')}
               className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
                 tableMode === 'realized'
                   ? 'bg-white dark:bg-gray-900 text-purple-600 dark:text-purple-400 shadow-sm font-bold'
@@ -1443,12 +1676,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             </button>
 
             <button
-              onClick={() => {
-                setTableMode('all');
-                setPinnedFilterDate(null);
-                setPinnedFilterCategory(null);
-                setPinnedFilterUnit(null);
-              }}
+              onClick={() => setTableMode('all')}
               className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
                 tableMode === 'all'
                   ? 'bg-white dark:bg-gray-900 text-emerald-600 dark:text-emerald-400 shadow-sm font-bold'
@@ -1468,13 +1696,22 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
           {pinnedFilterDate && (
             <div className="flex items-center gap-1.5 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 px-2.5 py-0.5 rounded-full text-xs">
               <span className="material-symbols-outlined text-[13px]">calendar_month</span>
-              <span>Data: <strong>{formatDateBr(pinnedFilterDate)}</strong></span>
-              <button
-                onClick={() => setPinnedFilterDate(null)}
-                className="hover:text-red-500 ml-0.5"
-                title="Limpar filtro de data"
+              <span>Data Selecionada: <strong>{formatDateBr(pinnedFilterDate)}</strong></span>
+              <span
+                className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
+                  pinnedFilterDate < todayISO
+                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
+                    : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                }`}
               >
-                <span className="material-symbols-outlined text-[13px]">cancel</span>
+                {pinnedFilterDate < todayISO ? 'Passado / Auditado' : 'Futuro / Previsão'}
+              </span>
+              <button
+                onClick={handleClosePinnedTooltip}
+                className="hover:text-red-500 ml-1 flex items-center"
+                title="Limpar filtro da coluna e fechar painel"
+              >
+                <span className="material-symbols-outlined text-[14px]">cancel</span>
               </button>
             </div>
           )}
@@ -1482,13 +1719,13 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
           {pinnedFilterCategory && (
             <div className="flex items-center gap-1.5 bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 px-2.5 py-0.5 rounded-full text-xs">
               <span className="material-symbols-outlined text-[13px]">category</span>
-              <span>Cat: <strong>{pinnedFilterCategory}</strong></span>
+              <span>Categoria: <strong>{pinnedFilterCategory}</strong></span>
               <button
                 onClick={() => setPinnedFilterCategory(null)}
-                className="hover:text-red-500 ml-0.5"
+                className="hover:text-red-500 ml-0.5 flex items-center"
                 title="Limpar filtro de categoria"
               >
-                <span className="material-symbols-outlined text-[13px]">cancel</span>
+                <span className="material-symbols-outlined text-[14px]">cancel</span>
               </button>
             </div>
           )}
@@ -1499,10 +1736,10 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
               <span>Unidade: <strong>{pinnedFilterUnit}</strong></span>
               <button
                 onClick={() => setPinnedFilterUnit(null)}
-                className="hover:text-red-500 ml-0.5"
+                className="hover:text-red-500 ml-0.5 flex items-center"
                 title="Limpar filtro de unidade"
               >
-                <span className="material-symbols-outlined text-[13px]">cancel</span>
+                <span className="material-symbols-outlined text-[14px]">cancel</span>
               </button>
             </div>
           )}
