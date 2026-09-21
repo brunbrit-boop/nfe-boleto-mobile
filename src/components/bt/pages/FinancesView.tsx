@@ -11,7 +11,6 @@ import {
   ReferenceLine,
   ReferenceArea,
   Legend,
-  Tooltip,
 } from 'recharts';
 import { MultiSelect, type MultiSelectOption } from '../finances/MultiSelect';
 import { BankUploadModal } from '../finances/BankUploadModal';
@@ -224,7 +223,7 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({
             </span>
           ) : (
             <span className="block text-[9px] text-gray-400 font-normal mt-0.5">
-              Clique na barra para fixar e filtrar
+              Clique na bolinha de saldo para fixar e filtrar
             </span>
           )}
 
@@ -431,6 +430,10 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   // Pinned Tooltip / Drill-down
   const [pinnedTooltipData, setPinnedTooltipData] = useState<any>(null);
   const [pinnedTooltipPos, setPinnedTooltipPos] = useState<{ x: number; y: number } | null>(null);
+  const [hoveredDotData, setHoveredDotData] = useState<{
+    payload: any;
+    pos: { x: number; y: number };
+  } | null>(null);
   const [pinnedFilterDate, setPinnedFilterDate] = useState<string | null>(null);
   const [pinnedFilterCategory, setPinnedFilterCategory] = useState<string | null>(null);
   const [pinnedFilterUnit, setPinnedFilterUnit] = useState<string | null>(null);
@@ -1117,12 +1120,13 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     }
   };
 
-  // Renderizador SVG personalizado da bolinha de saldo com área de clique interativa
+  // Renderizador SVG personalizado da bolinha de saldo com área de clique interativa e hover isolado
   const renderBalanceDot = (props: any) => {
     const { cx, cy, payload } = props;
     if (cx === undefined || cy === undefined || !payload) return null;
 
     const isPinned = pinnedFilterDate === payload.date;
+    const isHovered = hoveredDotData?.payload?.date === payload.date;
 
     return (
       <g
@@ -1130,23 +1134,32 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         className="cursor-pointer group"
         onClick={(e) => {
           e.stopPropagation();
+          setHoveredDotData(null);
           handleDotClick(payload, { x: cx, y: cy });
         }}
+        onMouseEnter={() => {
+          if (!pinnedTooltipData) {
+            setHoveredDotData({ payload, pos: { x: cx, y: cy } });
+          }
+        }}
+        onMouseLeave={() => {
+          setHoveredDotData((prev) => (prev?.payload?.date === payload.date ? null : prev));
+        }}
       >
-        {/* Hitbox expandida transparente para toque/clique fácil */}
-        <circle cx={cx} cy={cy} r={14} fill="transparent" className="cursor-pointer" />
+        {/* Hitbox expandida transparente para toque/clique e hover fácil (somente na bolinha da linha de saldo) */}
+        <circle cx={cx} cy={cy} r={16} fill="transparent" className="cursor-pointer" />
 
-        {/* Halo animado quando fixado */}
-        {isPinned && (
+        {/* Halo animado quando fixado ou com hover */}
+        {(isPinned || isHovered) && (
           <circle
             cx={cx}
             cy={cy}
-            r={10}
+            r={isPinned ? 10 : 8}
             fill="#3b82f6"
-            fillOpacity={0.25}
+            fillOpacity={isPinned ? 0.25 : 0.15}
             stroke="#2563eb"
             strokeWidth={1.5}
-            className="animate-pulse"
+            className={isPinned ? 'animate-pulse' : ''}
           />
         )}
 
@@ -1154,11 +1167,11 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         <circle
           cx={cx}
           cy={cy}
-          r={isPinned ? 5.5 : 4}
-          fill={isPinned ? '#1d4ed8' : '#2563eb'}
+          r={isPinned ? 5.5 : isHovered ? 5 : 4}
+          fill={isPinned ? '#1d4ed8' : isHovered ? '#3b82f6' : '#2563eb'}
           stroke="#ffffff"
           strokeWidth={2}
-          className="transition-transform duration-150 hover:scale-125"
+          className="transition-transform duration-150"
         />
       </g>
     );
@@ -1637,6 +1650,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                   cursor: 'pointer',
                   onClick: (_e: any, eventPayload: any) => {
                     if (eventPayload?.payload) {
+                      setHoveredDotData(null);
                       handleDotClick(eventPayload.payload, {
                         x: eventPayload.cx,
                         y: eventPayload.cy,
@@ -1645,24 +1659,30 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                   },
                 }}
               />
-
-              {/* Tooltip Dinâmico no Hover (se não estiver fixado) */}
-              {!pinnedTooltipData && (
-                <Tooltip
-                  content={
-                    <CustomTooltip
-                      isInteractive={false}
-                      onFilterCategory={handlePinFilterCategory}
-                      onFilterUnit={handlePinFilterUnit}
-                    />
-                  }
-                  cursor={{ fill: 'transparent' }}
-                  allowEscapeViewBox={{ x: true, y: true }}
-                  wrapperStyle={{ pointerEvents: 'none', zIndex: 100 }}
-                />
-              )}
             </ComposedChart>
           </ResponsiveContainer>
+
+          {/* Card Flutuante de Hover (Aparece SOMENTE ao passar o mouse em cima da linha/bolinha de saldo) */}
+          {!pinnedTooltipData && hoveredDotData && (
+            <div
+              className="absolute z-[110] pointer-events-none animate-in fade-in zoom-in-95 duration-100"
+              style={{
+                left: Math.min(
+                  typeof window !== 'undefined' ? window.innerWidth - 380 : 500,
+                  Math.max(180, hoveredDotData.pos.x)
+                ),
+                top: 15,
+                transform: 'translateX(-50%)',
+              }}
+            >
+              <CustomTooltip
+                active={true}
+                payload={[{ payload: hoveredDotData.payload }]}
+                label={hoveredDotData.payload.displayDate}
+                isInteractive={false}
+              />
+            </div>
+          )}
 
           {/* Card Flutuante Fixado com Drill-Down Clicável (Pinned Tooltip) */}
           {pinnedTooltipData && pinnedTooltipPos && (
