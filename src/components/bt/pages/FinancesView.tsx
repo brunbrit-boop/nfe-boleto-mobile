@@ -12,6 +12,10 @@ import {
   ReferenceArea,
   Legend,
 } from 'recharts';
+import { MultiSelect, type MultiSelectOption } from '../finances/MultiSelect';
+import { BankUploadModal } from '../finances/BankUploadModal';
+import { ClassifyTransactionsModal, type ClassificationRule } from '../finances/ClassifyTransactionsModal';
+import { BankPatternChatbotModal } from '../finances/BankPatternChatbotModal';
 
 export interface FinanceTransaction {
   id: string;
@@ -151,6 +155,8 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   carregando = false,
   onViewBoletoReceber,
 }) => {
+  // Suppress unused warning if onViewBoletoReceber is not yet hooked
+  void onViewBoletoReceber;
   // --- Estados de Controle Visual e Temporal ---
   const [tableMode, setTableMode] = useState<TableMode>('forecast');
   const [visibleDays, setVisibleDays] = useState<number>(30);
@@ -182,7 +188,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   const [dragStartDate, setDragStartDate] = useState<Date | null>(null);
   const chartContainerRef = useRef<HTMLDivElement>(null);
 
-  // Filtros de cabeçalho
+  // Filtros de cabeçalho por coluna (funil)
   const [filtersPayable, setFiltersPayable] = useState<Record<string, string>>({});
   const [filtersReceivable, setFiltersReceivable] = useState<Record<string, string>>({});
   const [activeFilterDropdown, setActiveFilterDropdown] = useState<{
@@ -190,10 +196,22 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     column: string;
   } | null>(null);
 
-  // Modais de Criação & Lixeira
+  // Filtros Globais do Topo (MultiSelect)
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
+  const [selectedBankIds, setSelectedBankIds] = useState<string[]>([]);
+  const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([]);
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
+
+  // Modais Avançados do BT Business
   const [showAddPayable, setShowAddPayable] = useState(false);
   const [showAddReceivable, setShowAddReceivable] = useState(false);
   const [showTrashModal, setShowTrashModal] = useState(false);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showClassifyModal, setShowClassifyModal] = useState(false);
+  const [showBotModal, setShowBotModal] = useState(false);
+
+  // Seleção em lote para tabelas
+  const [selectedTableItemIds, setSelectedTableItemIds] = useState<Set<string>>(new Set());
   const [deletedTransactions, setDeletedTransactions] = useState<FinanceTransaction[]>([]);
 
   const todayISO = useMemo(() => new Date().toISOString().split('T')[0], []);
@@ -217,7 +235,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     const list: FinanceTransaction[] = [];
 
     // 1. FUTURO: Contas a Receber Bling
-    contasReceber.forEach((cr) => {
+    contasReceber.forEach((cr: BlingContaReceber) => {
       const dateISO = cr.vencimento || cr.dataEmissao || todayISO;
       const isPaid = cr.situacao === 2 || dateISO < todayISO;
       list.push({
@@ -234,7 +252,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         type: 'receivable',
         status: isPaid ? 'paid' : 'open',
         originType: isPaid ? 'bank_statement' : 'bling_erp',
-        companyName: 'Empresa Ativa',
+        companyName: 'TechCorp Global',
         bankName: 'Banco Inter',
         method: cr.pixCopiaECola ? 'PIX' : cr.linkBoleto ? 'Boleto' : 'Bolepix',
         unit: 'Matriz',
@@ -244,7 +262,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     });
 
     // 2. FUTURO: Contas a Pagar Bling
-    contasPagar.forEach((cp) => {
+    contasPagar.forEach((cp: BlingContaPagar) => {
       const dateISO = cp.vencimento || cp.dataEmissao || todayISO;
       const isPaid = cp.situacao === 2 || dateISO < todayISO;
       list.push({
@@ -261,7 +279,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         type: 'payable',
         status: isPaid ? 'paid' : 'open',
         originType: isPaid ? 'bank_statement' : 'bling_erp',
-        companyName: 'Empresa Ativa',
+        companyName: 'TechCorp Global',
         bankName: 'Banco Inter',
         method: cp.formaPagamento?.descricao || 'Boleto 30d',
         unit: 'Matriz',
@@ -300,7 +318,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         date: getOffsetDate(-12),
         displayDate: formatDateBr(getOffsetDate(-12)),
         description: 'PIX RECEBIDO MERCADO BOM PRECO',
-        category: 'Vendas',
+        category: 'Vendas & Faturamento',
         entity: 'Mercado Bom Preço',
         amount: 8650.0,
         type: 'receivable',
@@ -332,7 +350,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         date: getOffsetDate(-8),
         displayDate: formatDateBr(getOffsetDate(-8)),
         description: 'TED RECEBIMENTO SILVA DISTRIBUIDORA',
-        category: 'Vendas',
+        category: 'Vendas & Faturamento',
         entity: 'Silva Distribuidora',
         amount: 5200.0,
         type: 'receivable',
@@ -357,7 +375,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         companyName: 'Matriz SP',
         bankName: 'Itaú',
         method: 'Transferência',
-        unit: 'Escritório',
+        unit: 'Matriz',
       },
       {
         id: 'ext-r3',
@@ -380,7 +398,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         date: getOffsetDate(-2),
         displayDate: formatDateBr(getOffsetDate(-2)),
         description: 'FOLHA PAGTO ADIANTAMENTO QUINZENA',
-        category: 'RH / Salários',
+        category: 'RH / Folha',
         entity: 'Folha de Pagamento',
         amount: 7400.0,
         type: 'payable',
@@ -389,11 +407,11 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         companyName: 'Matriz SP',
         bankName: 'Banco Inter',
         method: 'PIX Lote',
-        unit: 'Geral',
+        unit: 'Matriz',
       },
     ];
 
-    // Previsões complementares para demonstração completa de fluxo
+    // Previsões complementares
     const futureModel: FinanceTransaction[] = [
       {
         id: 'fut-p1',
@@ -416,7 +434,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         date: getOffsetDate(3),
         displayDate: formatDateBr(getOffsetDate(3)),
         description: 'Faturamento Pedido Venda #1089',
-        category: 'Vendas',
+        category: 'Vendas & Faturamento',
         entity: 'Supermercado Central',
         amount: 7800.0,
         type: 'receivable',
@@ -464,6 +482,42 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     setAllTransactions([...bankStatementPast, ...list, ...futureModel]);
   }, [contasPagar, contasReceber, todayISO]);
 
+  // --- Opções Dinâmicas dos Filtros Globais MultiSelect ---
+  const companyOptions: MultiSelectOption[] = useMemo(() => {
+    const set = new Set<string>();
+    allTransactions.forEach((t) => t.companyName && set.add(t.companyName));
+    return Array.from(set).sort().map((name) => ({ id: name, name }));
+  }, [allTransactions]);
+
+  const bankOptions: MultiSelectOption[] = useMemo(() => {
+    const set = new Set<string>();
+    allTransactions.forEach((t) => t.bankName && set.add(t.bankName));
+    return Array.from(set).sort().map((name) => ({ id: name, name }));
+  }, [allTransactions]);
+
+  const unitOptions: MultiSelectOption[] = useMemo(() => {
+    const set = new Set<string>();
+    allTransactions.forEach((t) => t.unit && set.add(t.unit));
+    return Array.from(set).sort().map((name) => ({ id: name, name }));
+  }, [allTransactions]);
+
+  const categoryOptions: MultiSelectOption[] = useMemo(() => {
+    const set = new Set<string>();
+    allTransactions.forEach((t) => t.category && set.add(t.category));
+    return Array.from(set).sort().map((name) => ({ id: name, name }));
+  }, [allTransactions]);
+
+  // --- Filtro Global Base (Empresas, Bancos, Unidades, Categorias) ---
+  const baseFilteredTransactions = useMemo(() => {
+    return allTransactions.filter((tx) => {
+      if (selectedCompanyIds.length > 0 && !selectedCompanyIds.includes(tx.companyName)) return false;
+      if (selectedBankIds.length > 0 && !selectedBankIds.includes(tx.bankName)) return false;
+      if (selectedUnitIds.length > 0 && !selectedUnitIds.includes(tx.unit)) return false;
+      if (selectedCategoryIds.length > 0 && !selectedCategoryIds.includes(tx.category)) return false;
+      return true;
+    });
+  }, [allTransactions, selectedCompanyIds, selectedBankIds, selectedUnitIds, selectedCategoryIds]);
+
   // --- Operação de Arraste da Barra Divisória (Split Resizer) ---
   useEffect(() => {
     const handleMouseMoveResizer = (e: MouseEvent) => {
@@ -489,6 +543,13 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     };
   }, [isResizingSplit]);
 
+  // --- Edição Direta Inline de Transações ---
+  const updateTransaction = (id: string, updates: Partial<FinanceTransaction>) => {
+    setAllTransactions((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, ...updates } : t))
+    );
+  };
+
   // --- Simulação Financeira (toggleSimulation) ---
   const toggleSimulation = (id: string) => {
     setAllTransactions((prev) =>
@@ -503,7 +564,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     );
   };
 
-  // Adiamento / Postergação de Vencimento
+  // Adiamento de Vencimento
   const moveDate = (id: string, days: number) => {
     setAllTransactions((prev) =>
       prev.map((item) => {
@@ -520,12 +581,45 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     );
   };
 
-  // Exclusão e Envio para a Lixeira
+  // Adiamento em Lote dos Selecionados
+  const handleBulkMoveDate = (days: number) => {
+    if (selectedTableItemIds.size === 0) return;
+    setAllTransactions((prev) =>
+      prev.map((item) => {
+        if (!selectedTableItemIds.has(item.id)) return item;
+        const d = new Date(item.date + 'T12:00:00');
+        d.setDate(d.getDate() + days);
+        const newIso = d.toISOString().split('T')[0];
+        return {
+          ...item,
+          date: newIso,
+          displayDate: formatDateBr(newIso),
+        };
+      })
+    );
+    setSelectedTableItemIds(new Set());
+  };
+
+  // Exclusão em Lote para Lixeira
+  const handleBulkDelete = () => {
+    if (selectedTableItemIds.size === 0) return;
+    const targets = allTransactions.filter((t) => selectedTableItemIds.has(t.id));
+    setDeletedTransactions((prev) => [...targets, ...prev]);
+    setAllTransactions((prev) => prev.filter((t) => !selectedTableItemIds.has(t.id)));
+    setSelectedTableItemIds(new Set());
+  };
+
+  // Exclusão individual
   const deleteTransaction = (id: string) => {
     const target = allTransactions.find((t) => t.id === id);
     if (!target) return;
     setDeletedTransactions((prev) => [target, ...prev]);
     setAllTransactions((prev) => prev.filter((t) => t.id !== id));
+    if (selectedTableItemIds.has(id)) {
+      const next = new Set(selectedTableItemIds);
+      next.delete(id);
+      setSelectedTableItemIds(next);
+    }
   };
 
   const restoreTransaction = (id: string) => {
@@ -660,7 +754,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
       });
     }
 
-    allTransactions.forEach((tx) => {
+    baseFilteredTransactions.forEach((tx) => {
       if (daysMap.has(tx.date)) {
         const slot = daysMap.get(tx.date)!;
         slot.items.push(tx);
@@ -685,7 +779,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
       }
     });
 
-    let runningBalance = 20800;
+    let runningBalance = 24500;
     const dataPoints: any[] = [];
 
     const convertGroupsToArray = (
@@ -718,11 +812,11 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
       });
 
     return dataPoints;
-  }, [allTransactions, referenceDate, visibleDays]);
+  }, [baseFilteredTransactions, referenceDate, visibleDays]);
 
-  // --- Filtragem das Tabelas com Suporte a Drill-Down ---
+  // --- Filtragem das Tabelas com Suporte a Drill-Down e Filtros Globais ---
   const { payablesList, receivablesList } = useMemo(() => {
-    let base = allTransactions;
+    let base = baseFilteredTransactions;
 
     if (pinnedFilterDate) {
       base = base.filter((tx) => tx.date === pinnedFilterDate);
@@ -752,41 +846,45 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         if (col === 'method' && !tx.method.toLowerCase().includes(low)) return false;
         if (col === 'description' && !tx.description.toLowerCase().includes(low)) return false;
         if (col === 'unit' && !tx.unit.toLowerCase().includes(low)) return false;
+        if (col === 'category' && !tx.category.toLowerCase().includes(low)) return false;
       }
       return true;
     };
 
     return {
-      payablesList: base.filter((t) => t.type === 'payable' && filterFn(t, filtersPayable)),
-      receivablesList: base.filter((t) => t.type === 'receivable' && filterFn(t, filtersReceivable)),
+      payablesList: base.filter((tx) => tx.type === 'payable' && filterFn(tx, filtersPayable)),
+      receivablesList: base.filter((tx) => tx.type === 'receivable' && filterFn(tx, filtersReceivable)),
     };
   }, [
-    allTransactions,
-    tableMode,
+    baseFilteredTransactions,
     pinnedFilterDate,
+    tableMode,
     pinnedFilterCategory,
     pinnedFilterUnit,
     filtersPayable,
     filtersReceivable,
   ]);
 
-  // Contadores
-  const counts = useMemo(() => {
-    const openP = allTransactions.filter((t) => t.type === 'payable' && t.status !== 'paid').length;
-    const openR = allTransactions.filter((t) => t.type === 'receivable' && t.status !== 'paid').length;
-    const paidP = allTransactions.filter((t) => t.type === 'payable' && t.status === 'paid').length;
-    const paidR = allTransactions.filter((t) => t.type === 'receivable' && t.status === 'paid').length;
+  // Totais e Contadores
+  const totals = useMemo(() => {
+    const totalPay = payablesList.reduce((acc, curr) => acc + curr.amount, 0);
+    const totalRec = receivablesList.reduce((acc, curr) => acc + curr.amount, 0);
     return {
-      forecast: openP + openR,
-      realized: paidP + paidR,
-      openP,
-      openR,
-      paidP,
-      paidR,
+      totalPayable: totalPay,
+      totalReceivable: totalRec,
+      balanceDiff: totalRec - totalPay,
     };
-  }, [allTransactions]);
+  }, [payablesList, receivablesList]);
 
-  // Renderizador de Colunas com Funil de Filtro
+  const counts = useMemo(() => {
+    return {
+      forecast: baseFilteredTransactions.filter((tx) => tx.status !== 'paid').length,
+      realized: baseFilteredTransactions.filter((tx) => tx.status === 'paid' || tx.status === 'marked_reopen').length,
+      all: baseFilteredTransactions.length,
+    };
+  }, [baseFilteredTransactions]);
+
+  // Funil de cabeçalho por coluna
   const renderHeaderWithFilter = (
     table: 'payable' | 'receivable',
     columnKey: string,
@@ -794,7 +892,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     alignRight = false
   ) => {
     const activeFilters = table === 'payable' ? filtersPayable : filtersReceivable;
-    const hasFilter = !!activeFilters[columnKey];
+    const hasFilter = Boolean(activeFilters[columnKey]);
     const isOpen =
       activeFilterDropdown?.table === table && activeFilterDropdown?.column === columnKey;
 
@@ -855,6 +953,33 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     );
   };
 
+  // Toggle de seleção em massa na tabela
+  const toggleSelectTableItem = (id: string) => {
+    const next = new Set(selectedTableItemIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedTableItemIds(next);
+  };
+
+  const handleSelectAllTable = (items: FinanceTransaction[]) => {
+    const allIds = items.map((i) => i.id);
+    const areAllSelected = allIds.every((id) => selectedTableItemIds.has(id));
+
+    const next = new Set(selectedTableItemIds);
+    if (areAllSelected) {
+      allIds.forEach((id) => next.delete(id));
+    } else {
+      allIds.forEach((id) => next.add(id));
+    }
+    setSelectedTableItemIds(next);
+  };
+
+  const hasAnyGlobalFilter =
+    selectedCompanyIds.length > 0 ||
+    selectedBankIds.length > 0 ||
+    selectedUnitIds.length > 0 ||
+    selectedCategoryIds.length > 0;
+
   return (
     <div
       className={`flex flex-col h-full bg-[#f6f8f7] dark:bg-[#0c1a15] select-none font-['Manrope',sans-serif] relative ${
@@ -864,36 +989,73 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         setActiveFilterDropdown(null);
       }}
     >
-      {/* 1. Header Superior com Controles Avançados do BT Business */}
-      <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#10221c] flex items-center justify-between gap-4 shrink-0 flex-wrap">
+      {/* 1. Header Superior Principal */}
+      <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-[#10221c] flex items-center justify-between gap-3 shrink-0 flex-wrap">
         <div className="flex items-center gap-2">
-          <div className="h-7 w-7 rounded-lg bg-[#11d493]/15 text-[#11d493] flex items-center justify-center">
-            <span className="material-symbols-outlined text-base">monitoring</span>
+          <div className="h-8 w-8 rounded-lg bg-[#11d493]/15 text-[#11d493] flex items-center justify-center">
+            <span className="material-symbols-outlined text-lg">monitoring</span>
           </div>
-          <h2 className="text-sm font-extrabold text-gray-900 dark:text-white uppercase tracking-wider">
-            Financeiro (Passado & Futuro)
-          </h2>
-          <span className="text-[10px] text-gray-400 hidden sm:inline">
-            • Extratos Bancários + Bling ERP
-          </span>
+          <div>
+            <h2 className="text-sm font-extrabold text-gray-900 dark:text-white uppercase tracking-wider flex items-center gap-1.5">
+              Financeiro (Passado & Futuro)
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 font-bold border border-blue-200 dark:border-blue-800">
+                BT Business
+              </span>
+            </h2>
+            <p className="text-[10px] text-gray-400 hidden sm:block">
+              Extratos Bancários (Passado Bege) + Previsões Bling ERP (Futuro Branco)
+            </p>
+          </div>
         </div>
 
-        {/* Barra de Ações: Lixeira, Chevrons, Zoom e Hoje (50/50) */}
-        <div className="flex items-center gap-2 flex-wrap">
+        {/* Botões de Ação do BT Business */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Botão Uploads de Extratos */}
+          <button
+            onClick={() => setShowUploadModal(true)}
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50 rounded-lg text-xs font-bold transition-all shadow-xs"
+            title="Importar Extrato Bancário (OFX/CSV)"
+          >
+            <span className="material-symbols-outlined text-base">upload_file</span>
+            <span className="hidden sm:inline">Uploads Extrato</span>
+          </button>
+
+          {/* Botão Classificação Inteligente de Extratos */}
+          <button
+            onClick={() => setShowClassifyModal(true)}
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-purple-50 text-purple-600 hover:bg-purple-100 dark:bg-purple-900/30 dark:text-purple-300 dark:hover:bg-purple-900/50 rounded-lg text-xs font-bold transition-all shadow-xs"
+            title="Classificação Inteligente & Regras de Extrato"
+          >
+            <span className="material-symbols-outlined text-base">auto_fix_high</span>
+            <span className="hidden sm:inline">Classificar</span>
+          </button>
+
+          {/* Botão Robô IA de Padrões */}
+          <button
+            onClick={() => setShowBotModal(true)}
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:bg-amber-900/30 dark:text-amber-300 dark:hover:bg-amber-900/50 rounded-lg text-xs font-bold transition-all shadow-xs"
+            title="Robô IA de Padrões Bancários"
+          >
+            <span className="material-symbols-outlined text-base">smart_toy</span>
+            <span className="hidden sm:inline">Robô IA</span>
+          </button>
+
           {/* Botão Lixeira */}
           <button
             onClick={() => setShowTrashModal(true)}
-            className="flex items-center gap-1 px-2 py-1 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 text-gray-600 dark:text-gray-300 text-xs font-bold transition-colors"
-            title="Abrir Lixeira"
+            className="flex items-center gap-1 px-2.5 py-1.5 bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 rounded-lg text-xs font-bold transition-colors shadow-xs"
+            title="Lixeira de Contas"
           >
-            <span className="material-symbols-outlined text-sm">auto_delete</span>
+            <span className="material-symbols-outlined text-base">auto_delete</span>
             <span className="hidden sm:inline">Lixeira</span>
             {deletedTransactions.length > 0 && (
-              <span className="text-[9px] px-1.5 py-0.2 rounded-full bg-red-500 text-white font-bold">
+              <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-red-500 text-white font-bold">
                 {deletedTransactions.length}
               </span>
             )}
           </button>
+
+          <div className="h-5 w-px bg-gray-200 dark:bg-gray-800 mx-1 hidden sm:block"></div>
 
           {/* Chevrons Temporais */}
           <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
@@ -967,7 +1129,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             </span>
           </button>
 
-          {/* Botão Sincronizar Bling */}
+          {/* Sincronizar Bling */}
           {onRefreshBling && (
             <button
               onClick={onRefreshBling}
@@ -977,13 +1139,75 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
               <span className={`material-symbols-outlined text-[15px] ${carregando ? 'animate-spin' : ''}`}>
                 sync
               </span>
-              <span>{carregando ? 'Sincronizando...' : 'Atualizar Bling'}</span>
+              <span>{carregando ? 'Bling...' : 'Atualizar Bling'}</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* 2. Área do Gráfico com Equalizador Hierárquico SVG e Zoom Contínuo por Roda do Mouse */}
+      {/* 2. Barra de Filtros Globais Multi-Dimensão (Empresas, Bancos, Unidades, Categorias) */}
+      <div className="px-4 py-1.5 bg-gray-50 dark:bg-[#10221c]/90 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between gap-3 shrink-0 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1 text-xs font-extrabold text-gray-600 dark:text-gray-300 mr-1">
+            <span className="material-symbols-outlined text-sm text-[#11d493]">tune</span>
+            <span>FILTROS GLOBAIS:</span>
+          </div>
+
+          <MultiSelect
+            label="Empresas"
+            options={companyOptions}
+            selectedIds={selectedCompanyIds}
+            onChange={setSelectedCompanyIds}
+          />
+
+          <MultiSelect
+            label="Contas/Bancos"
+            options={bankOptions}
+            selectedIds={selectedBankIds}
+            onChange={setSelectedBankIds}
+          />
+
+          <MultiSelect
+            label="Unidades"
+            options={unitOptions}
+            selectedIds={selectedUnitIds}
+            onChange={setSelectedUnitIds}
+          />
+
+          <MultiSelect
+            label="Categorias"
+            options={categoryOptions}
+            selectedIds={selectedCategoryIds}
+            onChange={setSelectedCategoryIds}
+          />
+
+          {hasAnyGlobalFilter && (
+            <button
+              onClick={() => {
+                setSelectedCompanyIds([]);
+                setSelectedBankIds([]);
+                setSelectedUnitIds([]);
+                setSelectedCategoryIds([]);
+              }}
+              className="text-[11px] text-red-500 hover:text-red-700 dark:hover:text-red-400 font-bold underline ml-1"
+            >
+              Limpar Filtros
+            </button>
+          )}
+        </div>
+
+        {/* Resumo do Período Atual */}
+        <div className="text-xs font-bold text-gray-600 dark:text-gray-300 hidden lg:flex items-center gap-3">
+          <span>
+            Total Despesas: <strong className="text-rose-500">{formatBRL(totals.totalPayable)}</strong>
+          </span>
+          <span>
+            Total Receitas: <strong className="text-emerald-500">{formatBRL(totals.totalReceivable)}</strong>
+          </span>
+        </div>
+      </div>
+
+      {/* 3. Área do Gráfico com Equalizador Hierárquico SVG e Zoom Contínuo */}
       {!isChartMinimized && (
         <div
           ref={chartContainerRef}
@@ -999,163 +1223,125 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart
               data={chartData}
-              margin={{ top: 12, right: 15, left: 0, bottom: 0 }}
-              barGap={2}
               onClick={handleChartClick}
+              margin={{ top: 15, right: 20, left: 10, bottom: 5 }}
             >
-              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" strokeOpacity={0.5} />
+              <defs>
+                <pattern id="diagonalHatch" width="6" height="6" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+                  <line x1="0" y1="0" x2="0" y2="6" stroke="#94a3b8" strokeWidth="1" strokeOpacity="0.15" />
+                </pattern>
+              </defs>
 
-              {/* Pano de Fundo Bicolor: Passado Bege (#f7f3e8) */}
-              <ReferenceArea
-                yAxisId="right"
-                x1={chartData[0]?.displayDate}
-                x2={formatDateBr(todayISO)}
-                y1={-9999999}
-                y2={9999999}
-                fill="#f7f3e8"
-                fillOpacity={0.65}
-                ifOverflow="extendDomain"
-                style={{ pointerEvents: 'none' }}
-              />
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" opacity={0.5} />
 
-              {/* Linha HOJE Centralizada */}
+              <XAxis dataKey="displayDate" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} />
+              <YAxis yAxisId="left" tick={{ fontSize: 10, fill: '#64748b' }} axisLine={false} tickLine={false} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} />
+              <YAxis yAxisId="right" orientation="right" tick={{ fontSize: 10, fill: '#3b82f6' }} axisLine={false} tickLine={false} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} />
+
+              {/* Fundo Bege Auditado no Passado */}
+              {chartData.length > 0 && chartData[0].date < todayISO && (
+                <ReferenceArea
+                  yAxisId="left"
+                  x1={chartData[0].displayDate}
+                  x2={formatDateBr(todayISO)}
+                  fill="#f7f3e8"
+                  fillOpacity={0.65}
+                />
+              )}
+
+              {/* Linha Vertical Pontilhada de HOJE */}
               <ReferenceLine
-                yAxisId="right"
+                yAxisId="left"
                 x={formatDateBr(todayISO)}
-                stroke="#2563EB"
+                stroke="#11d493"
                 strokeWidth={2}
                 strokeDasharray="4 4"
                 label={{
-                  value: 'HOJE',
+                  value: 'HOJE (Divisão Passado / Futuro)',
                   position: 'top',
-                  fill: '#2563EB',
+                  fill: '#11d493',
                   fontSize: 10,
-                  fontWeight: 900,
+                  fontWeight: 'bold',
                 }}
               />
 
-              <XAxis
-                dataKey="displayDate"
-                axisLine={false}
-                tickLine={false}
-                tick={{ fontSize: 10, fill: '#64748b' }}
-                minTickGap={10}
-              />
-              <YAxis yAxisId="left" orientation="left" hide />
-              <YAxis yAxisId="right" orientation="right" hide />
+              <Legend verticalAlign="top" height={24} wrapperStyle={{ fontSize: '11px', fontWeight: 'bold' }} />
 
-              <Legend
-                verticalAlign="bottom"
-                wrapperStyle={{ fontSize: 10, paddingTop: 4 }}
-                formatter={(value) => (
-                  <span className="text-[11px] text-gray-700 dark:text-gray-300 font-bold">
-                    {value}
-                  </span>
-                )}
-              />
+              {/* Equalizador de Despesas */}
+              <Bar yAxisId="left" dataKey="despesas" name="Despesas" shape={<EqualizerBar type="payable" />} maxBarSize={32} />
 
-              {/* Despesas: Shape EqualizerBar Hierárquico */}
-              <Bar
-                yAxisId="left"
-                dataKey="despesas"
-                name="Despesas (Categorias & Unidades)"
-                shape={<EqualizerBar type="payable" />}
-                maxBarSize={28}
-                isAnimationActive={!isDragging}
-              />
+              {/* Equalizador de Receitas */}
+              <Bar yAxisId="left" dataKey="receitas" name="Receitas" shape={<EqualizerBar type="receivable" />} maxBarSize={32} />
 
-              {/* Receitas: Shape EqualizerBar Hierárquico */}
-              <Bar
-                yAxisId="left"
-                dataKey="receitas"
-                name="Receitas (Categorias & Unidades)"
-                shape={<EqualizerBar type="receivable" />}
-                maxBarSize={28}
-                isAnimationActive={!isDragging}
-              />
-
-              {/* Linha de Saldo Azul com Recálculo Dinâmico */}
-              <Line
-                yAxisId="right"
-                type="monotone"
-                dataKey="saldo"
-                name="Saldo Projetado"
-                stroke="#2563EB"
-                strokeWidth={2.5}
-                dot={{ fill: '#2563EB', r: 2 }}
-                isAnimationActive={!isDragging}
-              />
+              {/* Curva de Saldo Projetado */}
+              <Line yAxisId="right" type="monotone" dataKey="saldo" name="Saldo Projetado" stroke="#2563eb" strokeWidth={2.5} dot={false} activeDot={{ r: 4, fill: '#2563eb' }} />
             </ComposedChart>
           </ResponsiveContainer>
 
-          {/* 3. Card Flutuante Interativo com Drill-Down Clicável por Categoria e Unidade */}
+          {/* Card Flutuante Fixado com Drill-Down Clicável */}
           {pinnedTooltipData && pinnedTooltipPos && (
             <div
-              className="absolute z-50 pointer-events-auto shadow-2xl rounded-2xl bg-white dark:bg-[#162f27] border border-gray-200 dark:border-gray-700 p-3 min-w-[340px] max-w-[420px] max-h-[360px] overflow-y-auto"
+              className="absolute z-50 bg-white/95 dark:bg-[#162f27]/95 backdrop-blur-md border border-gray-200 dark:border-gray-700 p-3 rounded-2xl shadow-2xl pointer-events-auto text-xs min-w-[280px] max-w-[340px] animate-in fade-in zoom-in-95 duration-150"
               style={{
-                left: Math.min(Math.max(pinnedTooltipPos.x, 170), window.innerWidth - 360),
-                top: Math.max(10, pinnedTooltipPos.y),
-                transform: 'translate(-50%, -100%)',
+                left: Math.min(window.innerWidth - 360, Math.max(20, pinnedTooltipPos.x - 140)),
+                top: Math.min(180, Math.max(10, pinnedTooltipPos.y)),
               }}
               onClick={(e) => e.stopPropagation()}
             >
-              <button
-                onClick={() => {
-                  setPinnedTooltipData(null);
-                  setPinnedTooltipPos(null);
-                  setPinnedFilterDate(null);
-                  setPinnedFilterCategory(null);
-                  setPinnedFilterUnit(null);
-                }}
-                className="absolute -top-2 -right-2 w-6 h-6 rounded-full bg-red-500 hover:bg-red-600 text-white flex items-center justify-center shadow-md transition-colors"
-                title="Fechar"
-              >
-                <span className="material-symbols-outlined text-[13px] font-bold">close</span>
-              </button>
-
-              <div className="text-center pb-2 mb-2 border-b border-gray-100 dark:border-gray-800">
-                <span className="text-xs font-black text-gray-900 dark:text-white">
-                  {pinnedTooltipData.displayDate}
-                </span>
-                <p className="text-[10px] text-[#11d493] font-bold">
-                  Clique em uma Categoria ou Unidade para filtrar
-                </p>
+              <div className="flex items-center justify-between pb-1.5 border-b border-gray-100 dark:border-gray-800 mb-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-sm text-[#11d493]">event</span>
+                  <span className="font-extrabold text-gray-900 dark:text-white">
+                    {pinnedTooltipData.displayDate} ({pinnedTooltipData.date})
+                  </span>
+                  <span
+                    className={`text-[9px] px-1.5 py-0.2 rounded-full font-bold ${
+                      pinnedTooltipData.date < todayISO
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                        : 'bg-blue-100 text-blue-800 dark:bg-blue-950/40 dark:text-blue-300'
+                    }`}
+                  >
+                    {pinnedTooltipData.date < todayISO ? 'PASSADO AUDITADO' : 'PREVISÃO BLING'}
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    setPinnedTooltipData(null);
+                    setPinnedTooltipPos(null);
+                    setPinnedFilterDate(null);
+                    setPinnedFilterCategory(null);
+                    setPinnedFilterUnit(null);
+                  }}
+                  className="w-5 h-5 rounded-full hover:bg-gray-100 dark:hover:bg-white/10 flex items-center justify-center text-gray-400 hover:text-gray-600"
+                >
+                  <span className="material-symbols-outlined text-xs">close</span>
+                </button>
               </div>
 
-              {/* Detalhamento Clicável com Drill-Down */}
-              <div className="grid grid-cols-2 gap-3 text-xs mb-3">
-                {/* Receitas */}
-                <div className="bg-emerald-50/70 dark:bg-emerald-950/20 p-2 rounded-lg">
-                  <span className="text-[#11d493] font-black text-[11px] block border-b border-emerald-200 dark:border-emerald-800/40 pb-1 mb-1">
-                    ↑ Receitas: {formatBRL(pinnedTooltipData.receitas)}
-                  </span>
-                  {pinnedTooltipData.receivableBreakdown && pinnedTooltipData.receivableBreakdown.length > 0 ? (
-                    <div className="space-y-1.5 mt-1">
-                      {pinnedTooltipData.receivableBreakdown.map((item: any, idx: number) => (
-                        <div key={idx} className="text-[10px]">
-                          <div
-                            onClick={() => setPinnedFilterCategory(item.category)}
-                            className="flex items-center justify-between font-bold cursor-pointer hover:underline text-emerald-800 dark:text-emerald-300"
-                            title={`Filtrar apenas ${item.category}`}
-                          >
-                            <span className="truncate">{item.category}</span>
-                            <span>{formatBRL(item.totalValue)}</span>
-                          </div>
-                          {item.units &&
-                            item.units.map((u: any, uIdx: number) => (
-                              <div
-                                key={uIdx}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setPinnedFilterUnit(u.unitName);
-                                }}
-                                className="flex items-center justify-between pl-2 text-[9px] text-gray-500 hover:text-[#11d493] cursor-pointer"
-                                title={`Filtrar unidade ${u.unitName}`}
-                              >
-                                <span className="truncate">{u.unitName}</span>
-                                <span>{formatBRL(u.value)}</span>
-                              </div>
-                            ))}
+              {/* Categorias e Unidades com Drill-Down */}
+              <div className="space-y-2 mb-2">
+                <div>
+                  <div className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider mb-1 flex items-center justify-between">
+                    <span>Receitas ({formatBRL(pinnedTooltipData.receitas)})</span>
+                    <span className="text-[9px] text-gray-400 font-normal">Clique para filtrar</span>
+                  </div>
+                  {pinnedTooltipData.receivableBreakdown?.length > 0 ? (
+                    <div className="space-y-1">
+                      {pinnedTooltipData.receivableBreakdown.map((cat: any) => (
+                        <div
+                          key={cat.category}
+                          onClick={() => {
+                            setPinnedFilterCategory(cat.category);
+                            setPinnedFilterUnit(null);
+                          }}
+                          className={`flex items-center justify-between p-1 rounded-lg cursor-pointer transition-colors ${
+                            pinnedFilterCategory === cat.category
+                              ? 'bg-emerald-100 dark:bg-emerald-950/60 font-bold text-emerald-900 dark:text-emerald-300'
+                              : 'hover:bg-gray-50 dark:hover:bg-white/5 text-gray-700 dark:text-gray-300'
+                          }`}
+                        >
+                          <span className="truncate">{cat.category}</span>
+                          <span className="font-mono">{formatBRL(cat.totalValue)}</span>
                         </div>
                       ))}
                     </div>
@@ -1164,38 +1350,28 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                   )}
                 </div>
 
-                {/* Despesas */}
-                <div className="bg-rose-50/70 dark:bg-rose-950/20 p-2 rounded-lg">
-                  <span className="text-rose-600 dark:text-rose-400 font-black text-[11px] block border-b border-rose-200 dark:border-rose-800/40 pb-1 mb-1">
-                    ↓ Despesas: {formatBRL(pinnedTooltipData.despesas)}
-                  </span>
-                  {pinnedTooltipData.payableBreakdown && pinnedTooltipData.payableBreakdown.length > 0 ? (
-                    <div className="space-y-1.5 mt-1">
-                      {pinnedTooltipData.payableBreakdown.map((item: any, idx: number) => (
-                        <div key={idx} className="text-[10px]">
-                          <div
-                            onClick={() => setPinnedFilterCategory(item.category)}
-                            className="flex items-center justify-between font-bold cursor-pointer hover:underline text-rose-800 dark:text-rose-300"
-                            title={`Filtrar apenas ${item.category}`}
-                          >
-                            <span className="truncate">{item.category}</span>
-                            <span>{formatBRL(item.totalValue)}</span>
-                          </div>
-                          {item.units &&
-                            item.units.map((u: any, uIdx: number) => (
-                              <div
-                                key={uIdx}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setPinnedFilterUnit(u.unitName);
-                                }}
-                                className="flex items-center justify-between pl-2 text-[9px] text-gray-500 hover:text-rose-600 cursor-pointer"
-                                title={`Filtrar unidade ${u.unitName}`}
-                              >
-                                <span className="truncate">{u.unitName}</span>
-                                <span>{formatBRL(u.value)}</span>
-                              </div>
-                            ))}
+                <div>
+                  <div className="text-[10px] font-bold text-red-600 dark:text-red-400 uppercase tracking-wider mb-1 flex items-center justify-between">
+                    <span>Despesas ({formatBRL(pinnedTooltipData.despesas)})</span>
+                    <span className="text-[9px] text-gray-400 font-normal">Clique para filtrar</span>
+                  </div>
+                  {pinnedTooltipData.payableBreakdown?.length > 0 ? (
+                    <div className="space-y-1">
+                      {pinnedTooltipData.payableBreakdown.map((cat: any) => (
+                        <div
+                          key={cat.category}
+                          onClick={() => {
+                            setPinnedFilterCategory(cat.category);
+                            setPinnedFilterUnit(null);
+                          }}
+                          className={`flex items-center justify-between p-1 rounded-lg cursor-pointer transition-colors ${
+                            pinnedFilterCategory === cat.category
+                              ? 'bg-red-100 dark:bg-red-950/60 font-bold text-red-900 dark:text-red-300'
+                              : 'hover:bg-gray-50 dark:hover:bg-white/5 text-gray-700 dark:text-gray-300'
+                          }`}
+                        >
+                          <span className="truncate">{cat.category}</span>
+                          <span className="font-mono">{formatBRL(cat.totalValue)}</span>
                         </div>
                       ))}
                     </div>
@@ -1217,7 +1393,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         </div>
       )}
 
-      {/* 4. Barra de Controle e Filtro ("EXIBIÇÃO:") */}
+      {/* 4. Barra de Controle e Abas de Exibição ("EXIBIÇÃO:") */}
       <div className="px-4 py-2 bg-gray-100 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between flex-wrap gap-2 shrink-0">
         <div className="flex items-center gap-2">
           <span className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase flex items-center gap-1">
@@ -1278,6 +1454,9 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
               }`}
             >
               <span>📋 Todas</span>
+              <span className="text-[10px] px-1.5 py-0.2 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded-full font-bold">
+                {counts.all}
+              </span>
             </button>
           </div>
         </div>
@@ -1338,7 +1517,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
           style={{ width: window.innerWidth > 768 ? `${splitRatio}%` : '100%' }}
           className="flex flex-col bg-red-50/30 dark:bg-red-950/5 overflow-hidden border-r border-gray-200 dark:border-gray-800"
         >
-          {/* Header com Botão (+) e Contador */}
+          {/* Header com Botão (+), Contador e Ações */}
           <div className="p-2.5 bg-red-100/80 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800/40 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
               <span className="material-symbols-outlined text-red-600 text-sm">arrow_downward</span>
@@ -1365,15 +1544,22 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             </div>
           </div>
 
-          {/* Tabela de Despesas com Simulação e Edição Inline */}
+          {/* Tabela de Despesas com Edição Inline e Multi-Select */}
           <div className="flex-1 overflow-auto">
             <table className="w-full text-left text-[11px] border-collapse">
               <thead className="bg-white/90 dark:bg-[#162f27] uppercase text-[10px] text-gray-500 dark:text-gray-400 sticky top-0 z-10 border-b border-gray-200 dark:border-gray-800 shadow-sm">
                 <tr>
                   <th className="p-2 text-center w-8">
-                    <span className="material-symbols-outlined text-xs" title="Simular Pagamento">
-                      tune
-                    </span>
+                    <input
+                      type="checkbox"
+                      checked={
+                        payablesList.length > 0 &&
+                        payablesList.every((p) => selectedTableItemIds.has(p.id))
+                      }
+                      onChange={() => handleSelectAllTable(payablesList)}
+                      className="rounded border-gray-300 text-red-600 focus:ring-red-500 accent-red-600 cursor-pointer"
+                      title="Selecionar todas as despesas exibidas"
+                    />
                   </th>
                   <th className="p-2">{renderHeaderWithFilter('payable', 'company', 'EMPRESA')}</th>
                   <th className="p-2">{renderHeaderWithFilter('payable', 'bank', 'BANCO')}</th>
@@ -1383,13 +1569,14 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                   <th className="p-2">{renderHeaderWithFilter('payable', 'description', 'DESCRIÇÃO/OBS')}</th>
                   <th className="p-2 text-right">VALOR</th>
                   <th className="p-2">{renderHeaderWithFilter('payable', 'unit', 'UNIDADE')}</th>
+                  <th className="p-2">{renderHeaderWithFilter('payable', 'category', 'CLASSIFICAÇÃO')}</th>
                   <th className="p-2 text-center w-6"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {payablesList.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="text-center py-12 text-gray-400 italic text-xs">
+                    <td colSpan={11} className="text-center py-12 text-gray-400 italic text-xs">
                       Nenhuma transação encontrada com os filtros atuais.
                     </td>
                   </tr>
@@ -1397,34 +1584,29 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                   payablesList.map((tx) => {
                     const isSimulated = tx.status === 'simulated_paid';
                     const isReopen = tx.status === 'marked_reopen';
+                    const isSelected = selectedTableItemIds.has(tx.id);
 
                     return (
                       <tr
                         key={tx.id}
                         className={`transition-colors ${
-                          isSimulated
+                          isSelected
+                            ? 'bg-red-100/80 dark:bg-red-950/60 font-medium'
+                            : isSimulated
                             ? 'bg-amber-100/60 dark:bg-amber-950/40 font-bold'
                             : isReopen
                             ? 'bg-blue-100/60 dark:bg-blue-950/40 font-bold'
                             : 'hover:bg-red-100/40 dark:hover:bg-red-900/10'
                         }`}
                       >
-                        {/* Checkbox de Simulação */}
+                        {/* Checkbox de Seleção em Lote */}
                         <td className="p-2 text-center">
                           <input
                             type="checkbox"
-                            checked={tx.status === 'paid' || isSimulated}
-                            onChange={() => toggleSimulation(tx.id)}
-                            className={`rounded cursor-pointer ${
-                              isSimulated
-                                ? 'text-amber-500 focus:ring-amber-400'
-                                : 'text-red-600 focus:ring-red-500'
-                            }`}
-                            title={
-                              tableMode === 'realized'
-                                ? 'Simular reabertura de conta'
-                                : 'Simular baixa de pagamento imediato'
-                            }
+                            checked={isSelected}
+                            onChange={() => toggleSelectTableItem(tx.id)}
+                            className="rounded cursor-pointer text-red-600 focus:ring-red-500 accent-red-600"
+                            title="Selecionar para operações em lote"
                           />
                         </td>
 
@@ -1432,8 +1614,19 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                           {tx.companyName}
                         </td>
 
-                        <td className="p-2 text-gray-600 dark:text-gray-300 truncate max-w-[75px]">
-                          {tx.bankName}
+                        {/* Banco (Dropdown Editável Inline) */}
+                        <td className="p-1">
+                          <select
+                            value={tx.bankName}
+                            onChange={(e) => updateTransaction(tx.id, { bankName: e.target.value })}
+                            className="text-[11px] p-1 rounded border border-transparent hover:border-gray-300 dark:hover:border-gray-600 bg-transparent text-gray-700 dark:text-gray-200 truncate max-w-[85px]"
+                          >
+                            {bankOptions.map((b) => (
+                              <option key={b.id} value={b.name}>
+                                {b.name}
+                              </option>
+                            ))}
+                          </select>
                         </td>
 
                         {/* Data com Botões de Adiar */}
@@ -1471,16 +1664,56 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                           - {formatBRL(tx.amount)}
                         </td>
 
-                        <td className="p-2 text-gray-500 truncate max-w-[70px]">{tx.unit}</td>
-
-                        <td className="p-2 text-center">
-                          <button
-                            onClick={() => deleteTransaction(tx.id)}
-                            className="text-gray-400 hover:text-red-500"
-                            title="Mover para Lixeira"
+                        {/* Unidade (Dropdown Editável Inline) */}
+                        <td className="p-1">
+                          <select
+                            value={tx.unit}
+                            onChange={(e) => updateTransaction(tx.id, { unit: e.target.value })}
+                            className="text-[11px] p-1 rounded border border-transparent hover:border-gray-300 dark:hover:border-gray-600 bg-transparent text-gray-700 dark:text-gray-200 truncate max-w-[80px]"
                           >
-                            <span className="material-symbols-outlined text-[13px]">delete</span>
-                          </button>
+                            {unitOptions.map((u) => (
+                              <option key={u.id} value={u.name}>
+                                {u.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+
+                        {/* Categoria / Classificação (Dropdown Editável Inline) */}
+                        <td className="p-1">
+                          <select
+                            value={tx.category}
+                            onChange={(e) => updateTransaction(tx.id, { category: e.target.value })}
+                            className="text-[11px] p-1 rounded border border-transparent hover:border-gray-300 dark:hover:border-gray-600 bg-transparent font-medium text-purple-700 dark:text-purple-300 truncate max-w-[100px]"
+                          >
+                            {categoryOptions.map((c) => (
+                              <option key={c.id} value={c.name}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+
+                        {/* Ação: Simular / Excluir */}
+                        <td className="p-2 text-center">
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => toggleSimulation(tx.id)}
+                              className={`p-0.5 rounded transition-colors ${
+                                isSimulated ? 'text-amber-500' : 'text-gray-400 hover:text-[#11d493]'
+                              }`}
+                              title="Simular baixa/reabertura imediata"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">tune</span>
+                            </button>
+                            <button
+                              onClick={() => deleteTransaction(tx.id)}
+                              className="text-gray-400 hover:text-red-500"
+                              title="Mover para Lixeira"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">delete</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1505,7 +1738,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
           style={{ width: window.innerWidth > 768 ? `${100 - splitRatio}%` : '100%' }}
           className="flex flex-col bg-emerald-50/30 dark:bg-emerald-950/5 overflow-hidden"
         >
-          {/* Header com Botão (+) e Contador */}
+          {/* Header com Botão (+), Contador e Ações */}
           <div className="p-2.5 bg-emerald-100/80 dark:bg-emerald-900/20 border-b border-emerald-200 dark:border-emerald-800/40 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2">
               <span className="material-symbols-outlined text-emerald-600 text-sm">arrow_upward</span>
@@ -1532,15 +1765,22 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             </div>
           </div>
 
-          {/* Tabela de Receitas com Simulação e Edição Inline */}
+          {/* Tabela de Receitas com Edição Inline e Multi-Select */}
           <div className="flex-1 overflow-auto">
             <table className="w-full text-left text-[11px] border-collapse">
               <thead className="bg-white/90 dark:bg-[#162f27] uppercase text-[10px] text-gray-500 dark:text-gray-400 sticky top-0 z-10 border-b border-gray-200 dark:border-gray-800 shadow-sm">
                 <tr>
                   <th className="p-2 text-center w-8">
-                    <span className="material-symbols-outlined text-xs" title="Simular Recebimento">
-                      tune
-                    </span>
+                    <input
+                      type="checkbox"
+                      checked={
+                        receivablesList.length > 0 &&
+                        receivablesList.every((r) => selectedTableItemIds.has(r.id))
+                      }
+                      onChange={() => handleSelectAllTable(receivablesList)}
+                      className="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 accent-emerald-600 cursor-pointer"
+                      title="Selecionar todas as receitas exibidas"
+                    />
                   </th>
                   <th className="p-2">{renderHeaderWithFilter('receivable', 'company', 'EMPRESA')}</th>
                   <th className="p-2">{renderHeaderWithFilter('receivable', 'bank', 'BANCO')}</th>
@@ -1550,13 +1790,14 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                   <th className="p-2">{renderHeaderWithFilter('receivable', 'description', 'DESCRIÇÃO/OBS')}</th>
                   <th className="p-2 text-right">VALOR</th>
                   <th className="p-2">{renderHeaderWithFilter('receivable', 'unit', 'UNIDADE')}</th>
+                  <th className="p-2">{renderHeaderWithFilter('receivable', 'category', 'CLASSIFICAÇÃO')}</th>
                   <th className="p-2 text-center w-6"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
                 {receivablesList.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="text-center py-12 text-gray-400 italic text-xs">
+                    <td colSpan={11} className="text-center py-12 text-gray-400 italic text-xs">
                       Nenhuma transação encontrada com os filtros atuais.
                     </td>
                   </tr>
@@ -1564,34 +1805,29 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                   receivablesList.map((tx) => {
                     const isSimulated = tx.status === 'simulated_paid';
                     const isReopen = tx.status === 'marked_reopen';
+                    const isSelected = selectedTableItemIds.has(tx.id);
 
                     return (
                       <tr
                         key={tx.id}
                         className={`transition-colors ${
-                          isSimulated
+                          isSelected
+                            ? 'bg-emerald-100/80 dark:bg-emerald-950/60 font-medium'
+                            : isSimulated
                             ? 'bg-amber-100/60 dark:bg-amber-950/40 font-bold'
                             : isReopen
                             ? 'bg-blue-100/60 dark:bg-blue-950/40 font-bold'
                             : 'hover:bg-emerald-100/40 dark:hover:bg-emerald-900/10'
                         }`}
                       >
-                        {/* Checkbox de Simulação */}
+                        {/* Checkbox de Seleção em Lote */}
                         <td className="p-2 text-center">
                           <input
                             type="checkbox"
-                            checked={tx.status === 'paid' || isSimulated}
-                            onChange={() => toggleSimulation(tx.id)}
-                            className={`rounded cursor-pointer ${
-                              isSimulated
-                                ? 'text-amber-500 focus:ring-amber-400'
-                                : 'text-emerald-600 focus:ring-emerald-500'
-                            }`}
-                            title={
-                              tableMode === 'realized'
-                                ? 'Simular reabertura de recebimento'
-                                : 'Simular recebimento imediato'
-                            }
+                            checked={isSelected}
+                            onChange={() => toggleSelectTableItem(tx.id)}
+                            className="rounded cursor-pointer text-emerald-600 focus:ring-emerald-500 accent-emerald-600"
+                            title="Selecionar para operações em lote"
                           />
                         </td>
 
@@ -1599,8 +1835,19 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                           {tx.companyName}
                         </td>
 
-                        <td className="p-2 text-gray-600 dark:text-gray-300 truncate max-w-[75px]">
-                          {tx.bankName}
+                        {/* Banco (Dropdown Editável Inline) */}
+                        <td className="p-1">
+                          <select
+                            value={tx.bankName}
+                            onChange={(e) => updateTransaction(tx.id, { bankName: e.target.value })}
+                            className="text-[11px] p-1 rounded border border-transparent hover:border-gray-300 dark:hover:border-gray-600 bg-transparent text-gray-700 dark:text-gray-200 truncate max-w-[85px]"
+                          >
+                            {bankOptions.map((b) => (
+                              <option key={b.id} value={b.name}>
+                                {b.name}
+                              </option>
+                            ))}
+                          </select>
                         </td>
 
                         {/* Data com Botões de Adiar */}
@@ -1626,15 +1873,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
                         <td className="p-2 font-bold text-gray-900 dark:text-white truncate max-w-[110px]">
                           {tx.entity}
-                          {tx.originalBlingReceber && onViewBoletoReceber && (
-                            <button
-                              onClick={() => onViewBoletoReceber(tx.originalBlingReceber!)}
-                              className="ml-1 text-[9px] px-1 py-0.2 rounded bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 font-bold inline-flex items-center gap-0.5"
-                              title="Ver Boleto Bling"
-                            >
-                              Boleto
-                            </button>
-                          )}
                         </td>
 
                         <td className="p-2 text-gray-500 truncate max-w-[75px]">{tx.method}</td>
@@ -1643,20 +1881,60 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                           {tx.description}
                         </td>
 
-                        <td className="p-2 text-right font-mono font-bold text-[#11d493] whitespace-nowrap">
+                        <td className="p-2 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">
                           + {formatBRL(tx.amount)}
                         </td>
 
-                        <td className="p-2 text-gray-500 truncate max-w-[70px]">{tx.unit}</td>
-
-                        <td className="p-2 text-center">
-                          <button
-                            onClick={() => deleteTransaction(tx.id)}
-                            className="text-gray-400 hover:text-red-500"
-                            title="Mover para Lixeira"
+                        {/* Unidade (Dropdown Editável Inline) */}
+                        <td className="p-1">
+                          <select
+                            value={tx.unit}
+                            onChange={(e) => updateTransaction(tx.id, { unit: e.target.value })}
+                            className="text-[11px] p-1 rounded border border-transparent hover:border-gray-300 dark:hover:border-gray-600 bg-transparent text-gray-700 dark:text-gray-200 truncate max-w-[80px]"
                           >
-                            <span className="material-symbols-outlined text-[13px]">delete</span>
-                          </button>
+                            {unitOptions.map((u) => (
+                              <option key={u.id} value={u.name}>
+                                {u.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+
+                        {/* Categoria / Classificação (Dropdown Editável Inline) */}
+                        <td className="p-1">
+                          <select
+                            value={tx.category}
+                            onChange={(e) => updateTransaction(tx.id, { category: e.target.value })}
+                            className="text-[11px] p-1 rounded border border-transparent hover:border-gray-300 dark:hover:border-gray-600 bg-transparent font-medium text-purple-700 dark:text-purple-300 truncate max-w-[100px]"
+                          >
+                            {categoryOptions.map((c) => (
+                              <option key={c.id} value={c.name}>
+                                {c.name}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+
+                        {/* Ação: Simular / Excluir */}
+                        <td className="p-2 text-center">
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => toggleSimulation(tx.id)}
+                              className={`p-0.5 rounded transition-colors ${
+                                isSimulated ? 'text-amber-500' : 'text-gray-400 hover:text-[#11d493]'
+                              }`}
+                              title="Simular recebimento imediato"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">tune</span>
+                            </button>
+                            <button
+                              onClick={() => deleteTransaction(tx.id)}
+                              className="text-gray-400 hover:text-red-500"
+                              title="Mover para Lixeira"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">delete</span>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );
@@ -1668,9 +1946,60 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         </div>
       </div>
 
-      {/* 6. Barra Flutuante de Simulação de Baixa / Reabertura */}
+      {/* 6. Barra Flutuante de Ações em Lote (Quando itens estão selecionados) */}
+      {selectedTableItemIds.size > 0 && (
+        <div className="fixed bottom-16 left-1/2 -translate-x-1/2 z-50 bg-gray-900 text-white px-5 py-2.5 rounded-2xl shadow-2xl flex items-center gap-3 border border-gray-700 animate-in fade-in slide-in-from-bottom duration-200">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#11d493]" />
+            <span className="text-xs font-bold">
+              {selectedTableItemIds.size} itens selecionados
+            </span>
+          </div>
+
+          <div className="h-4 w-px bg-gray-700 mx-1"></div>
+
+          <button
+            onClick={() => handleBulkMoveDate(1)}
+            className="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs font-bold transition-all"
+            title="Adiar vencimento de todos em +1 dia"
+          >
+            Adiar +1d
+          </button>
+          <button
+            onClick={() => handleBulkMoveDate(7)}
+            className="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs font-bold transition-all"
+            title="Adiar vencimento de todos em +7 dias"
+          >
+            Adiar +7d
+          </button>
+          <button
+            onClick={() => handleBulkMoveDate(30)}
+            className="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-xs font-bold transition-all"
+            title="Adiar vencimento de todos em +30 dias"
+          >
+            Adiar +30d
+          </button>
+
+          <button
+            onClick={handleBulkDelete}
+            className="flex items-center gap-1 px-3 py-1 rounded-lg bg-red-600/90 hover:bg-red-600 text-white text-xs font-bold transition-all"
+          >
+            <span className="material-symbols-outlined text-xs">delete</span>
+            Mover para Lixeira
+          </button>
+
+          <button
+            onClick={() => setSelectedTableItemIds(new Set())}
+            className="text-[11px] text-gray-400 hover:text-white underline ml-1"
+          >
+            Desmarcar
+          </button>
+        </div>
+      )}
+
+      {/* 7. Barra Flutuante de Simulação de Baixa / Reabertura */}
       {hasSimulationChanges && (
-        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 bg-gray-950 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-4 border border-gray-700 animate-in fade-in slide-in-from-bottom duration-200">
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-gray-950 text-white px-6 py-3 rounded-2xl shadow-2xl flex items-center gap-4 border border-gray-700 animate-in fade-in slide-in-from-bottom duration-200">
           <div className="flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
             <span className="text-xs font-bold">
@@ -1696,9 +2025,9 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         </div>
       )}
 
-      {/* Modal Lixeira */}
+      {/* Modal 1: Lixeira de Contas Excluídas */}
       {showTrashModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[150] flex items-center justify-center p-4">
           <div className="bg-white dark:bg-[#162f27] border border-gray-200 dark:border-gray-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -1719,7 +2048,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                     <div>
                       <p className="font-bold text-gray-800 dark:text-white">{dt.description}</p>
                       <span className="text-[10px] text-gray-400">
-                        {dt.entity} • {formatBRL(dt.amount)} • {dt.displayDate}
+                        {dt.entity} • {formatBRL(dt.amount)} • {dt.displayDate} • {dt.bankName}
                       </span>
                     </div>
                     <button
@@ -1745,9 +2074,65 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         </div>
       )}
 
-      {/* Modal Rápido de Nova Conta a Pagar */}
+      {/* Modal 2: Upload de Extrato Bancário (Passado) */}
+      <BankUploadModal
+        isOpen={showUploadModal}
+        onClose={() => setShowUploadModal(false)}
+        companies={companyOptions.map((c) => c.name)}
+        bankAccounts={bankOptions.map((b) => b.name)}
+        onImportSuccess={(newTxs) => {
+          setAllTransactions((prev) => [...newTxs, ...prev]);
+          alert(`${newTxs.length} transações de extrato foram importadas para o Passado com sucesso!`);
+        }}
+      />
+
+      {/* Modal 3: Classificação Inteligente & Regras Automáticas */}
+      <ClassifyTransactionsModal
+        isOpen={showClassifyModal}
+        onClose={() => setShowClassifyModal(false)}
+        transactions={allTransactions}
+        categories={categoryOptions.map((c) => c.name)}
+        units={unitOptions.map((u) => u.name)}
+        onApplyClassification={(updated) => {
+          setAllTransactions(updated);
+        }}
+      />
+
+      {/* Modal 4: Robô IA de Padrões Bancários */}
+      <BankPatternChatbotModal
+        isOpen={showBotModal}
+        onClose={() => setShowBotModal(false)}
+        onAddRule={(newRule: ClassificationRule) => {
+          // Salva no localStorage e aplica nas transações
+          const saved = localStorage.getItem('bt_finance_rules');
+          let currentRules: ClassificationRule[] = [];
+          if (saved) {
+            try {
+              currentRules = JSON.parse(saved);
+            } catch {
+              // ignore
+            }
+          }
+          const updatedRules = [...currentRules, newRule];
+          localStorage.setItem('bt_finance_rules', JSON.stringify(updatedRules));
+
+          // Aplica na lista atual
+          setAllTransactions((prev) =>
+            prev.map((t) => {
+              if (
+                `${t.description} ${t.entity}`.toUpperCase().includes(newRule.keyword)
+              ) {
+                return { ...t, category: newRule.category, unit: newRule.unit };
+              }
+              return t;
+            })
+          );
+        }}
+      />
+
+      {/* Modal 5: Rápido de Nova Conta a Pagar */}
       {showAddPayable && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[150] flex items-center justify-center p-4">
           <div className="bg-white dark:bg-[#162f27] border border-gray-200 dark:border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -1770,7 +2155,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                 <input
                   required
                   placeholder="Ex: Eginox Indústria"
-                  className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700"
+                  className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -1781,7 +2166,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                     type="number"
                     step="0.01"
                     placeholder="0,00"
-                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700"
+                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700 text-gray-900 dark:text-white"
                   />
                 </div>
                 <div>
@@ -1790,16 +2175,19 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                     required
                     type="date"
                     defaultValue={todayISO}
-                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700"
+                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700 text-gray-900 dark:text-white"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-500 mb-1">Categoria / Descrição</label>
-                <input
-                  placeholder="Ex: Matéria Prima, Aluguel..."
-                  className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700"
-                />
+                <label className="block text-xs font-bold text-gray-500 mb-1">Categoria</label>
+                <select className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700 text-gray-900 dark:text-white">
+                  {categoryOptions.map((c) => (
+                    <option key={c.id} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="flex justify-end gap-2 pt-3 border-t dark:border-gray-800">
                 <button
@@ -1821,9 +2209,9 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         </div>
       )}
 
-      {/* Modal Rápido de Nova Conta a Receber */}
+      {/* Modal 6: Rápido de Nova Conta a Receber */}
       {showAddReceivable && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[150] flex items-center justify-center p-4">
           <div className="bg-white dark:bg-[#162f27] border border-gray-200 dark:border-gray-700 rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
@@ -1846,7 +2234,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                 <input
                   required
                   placeholder="Ex: Mercado Bom Preço"
-                  className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700"
+                  className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -1857,7 +2245,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                     type="number"
                     step="0.01"
                     placeholder="0,00"
-                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700"
+                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700 text-gray-900 dark:text-white"
                   />
                 </div>
                 <div>
@@ -1866,16 +2254,19 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                     required
                     type="date"
                     defaultValue={todayISO}
-                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700"
+                    className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700 text-gray-900 dark:text-white"
                   />
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-bold text-gray-500 mb-1">Categoria / Descrição</label>
-                <input
-                  placeholder="Ex: Venda Faturada, Contrato..."
-                  className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700"
-                />
+                <label className="block text-xs font-bold text-gray-500 mb-1">Categoria</label>
+                <select className="w-full text-xs p-2.5 rounded-lg border dark:bg-[#10221c] dark:border-gray-700 text-gray-900 dark:text-white">
+                  {categoryOptions.map((c) => (
+                    <option key={c.id} value={c.name}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="flex justify-end gap-2 pt-3 border-t dark:border-gray-800">
                 <button
