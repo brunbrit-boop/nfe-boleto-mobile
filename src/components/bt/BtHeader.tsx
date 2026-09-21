@@ -13,13 +13,16 @@ interface BtHeaderProps {
 }
 
 const TITULOS_MENU: Record<BtMenuOption, { titulo: string; sub: string }> = {
-  dashboard: { titulo: 'Visão Geral & Fluxo de Caixa', sub: 'Métricas e indicadores consolidados do Bling ERP' },
-  pagar: { titulo: 'Contas a Pagar', sub: 'Despesas e títulos a liquidar no Bling' },
-  receber: { titulo: 'Contas a Receber', sub: 'Cobranças, recebimentos e boletos emitidos' },
-  conciliacao: { titulo: 'Conciliação Financeira', sub: 'Conferência bancária e cruzamento com extrato' },
-  clientes: { titulo: 'Clientes & Parceiros', sub: 'Base cadastral e contatos sincronizados' },
-  robo: { titulo: 'Robô Fiscal & Comandos por Voz', sub: 'Emissão rápida de NF-e e boletos bancários' },
-  config: { titulo: 'Configurações da Empresa', sub: 'Parâmetros de conexão do Bling e dados bancários' },
+  finances: { titulo: 'Financeiro', sub: 'Gestão e conciliação de fluxo de caixa (Bling ERP)' },
+  suppliers: { titulo: 'Fornecedores', sub: 'Gerencie seus parceiros e contatos comerciais' },
+  clients: { titulo: 'Clientes', sub: 'Gerencie a origem das suas receitas (Bling ERP)' },
+  purchases: { titulo: 'Compras', sub: 'Solicite e aprove compras de produtos e serviços' },
+  tasks: { titulo: 'Tarefas', sub: 'Acompanhe rotinas operacionais, fiscais e bancárias' },
+  patrimony: { titulo: 'Patrimônio', sub: 'Controle de veículos, máquinas, estoque e imóveis' },
+  registration: { titulo: 'Cadastro', sub: 'Dados cadastrais e entidades do grupo' },
+  notifications: { titulo: 'Notificações', sub: 'Avisos e alertas operacionais do sistema' },
+  settings: { titulo: 'Configurações', sub: 'Integrações com APIs e contas bancárias' },
+  robo: { titulo: 'Robô Fiscal & Voz', sub: 'Emissão de NF-e e boletos por comando de voz' },
 };
 
 export const BtHeader: React.FC<BtHeaderProps> = ({
@@ -30,7 +33,7 @@ export const BtHeader: React.FC<BtHeaderProps> = ({
   onRefreshBling,
   carregando,
 }) => {
-  const info = TITULOS_MENU[activeMenu] || TITULOS_MENU.dashboard;
+  const info = TITULOS_MENU[activeMenu] || TITULOS_MENU.finances;
 
   return (
     <header className="h-16 px-4 md:px-6 bg-white dark:bg-[#10221c] border-b border-slate-200 dark:border-[#1a382e] flex items-center justify-between sticky top-0 z-30">

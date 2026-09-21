@@ -13,11 +13,19 @@ import type {
 import type { BtMenuOption } from './BtSidebar';
 import { BtSidebar } from './BtSidebar';
 import { BtHeader } from './BtHeader';
-import { BtDashboardView } from './BtDashboardView';
-import { BtReconciliationView } from './BtReconciliationView';
-import { ContasPagarTab } from '../ContasPagarTab';
-import { ContasReceberTab } from '../ContasReceberTab';
-import { ClientesTab } from '../ClientesTab';
+
+// 9 Menus Réplicas 1:1 do BT Business
+import { FinancesView } from './pages/FinancesView';
+import { SuppliersView } from './pages/SuppliersView';
+import { ClientsView } from './pages/ClientsView';
+import { PurchasesView } from './pages/PurchasesView';
+import { TasksView } from './pages/TasksView';
+import { PatrimonyView } from './pages/PatrimonyView';
+import { RegistrationView } from './pages/RegistrationView';
+import { NotificationsView } from './pages/NotificationsView';
+import { SettingsView } from './pages/SettingsView';
+
+// Assistente Fiscal (Chat & Voz)
 import { ChatView } from '../ChatView';
 import { VoiceMicBar } from '../VoiceMicBar';
 import { calcularIndicadoresBling } from '../../utils/blingDataAdapter';
@@ -57,6 +65,7 @@ interface BtBusinessSuiteProps {
 export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
   empresa,
   bancoAtual,
+  onSelectBanco,
   onBackToEmpresas,
   onOpenSettings,
   contasPagar,
@@ -78,21 +87,18 @@ export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
   onEmitirNFe,
   onEmitirParaCliente,
 }) => {
-  const [activeMenu, setActiveMenu] = useState<BtMenuOption>('dashboard');
+  // Padrão BT Business: Inicia na aba 'finances' (Financeiro)
+  const [activeMenu, setActiveMenu] = useState<BtMenuOption>('finances');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const indicadores = calcularIndicadoresBling(contasPagar, contasReceber);
 
   const handleSelectMenu = (menu: BtMenuOption) => {
-    if (menu === 'config') {
-      onOpenSettings();
-    } else {
-      setActiveMenu(menu);
-    }
+    setActiveMenu(menu);
   };
 
   return (
-    <div className="flex h-screen w-full bg-slate-50 dark:bg-[#0c1a15] overflow-hidden">
+    <div className="flex h-screen w-full bg-[#f6f8f7] dark:bg-[#0c1a15] overflow-hidden font-['Manrope',sans-serif]">
       {/* Barra Lateral do BT Business */}
       <BtSidebar
         empresa={empresa}
@@ -105,9 +111,9 @@ export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
         totalReceberAberto={indicadores.totalReceberAberto}
       />
 
-      {/* Conteúdo Principal com Top Header e Área Scrollável */}
+      {/* Conteúdo Principal com Top Header e Área das Telas */}
       <div className="flex-1 flex flex-col h-full overflow-hidden relative">
-        {/* Cabeçalho do BT Business */}
+        {/* Cabeçalho do BT Business com breadcrumb e ações */}
         <BtHeader
           empresa={empresa}
           activeMenu={activeMenu}
@@ -117,115 +123,107 @@ export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
           carregando={carregandoBling}
         />
 
-        {/* Área de Visualização do Módulo Selecionado */}
-        <main className="flex-1 overflow-y-auto px-4 md:px-8 py-6">
-          <div className="max-w-7xl mx-auto w-full">
-            {/* 1. Visão Geral / Dashboard Executivo */}
-            {activeMenu === 'dashboard' && (
-              <BtDashboardView
-                contasPagar={contasPagar}
-                contasReceber={contasReceber}
-                clientes={clientes}
-                onNavigateToTab={(tab) => {
-                  if (tab === 'robo') setActiveMenu('robo');
-                  else if (tab === 'pagar') setActiveMenu('pagar');
-                  else if (tab === 'receber') setActiveMenu('receber');
-                  else if (tab === 'clientes') setActiveMenu('clientes');
-                  else if (tab === 'conciliacao') setActiveMenu('conciliacao');
-                }}
-              />
-            )}
+        {/* Área de Visualização do Menu Ativo - Cópia 1:1 do BT Business */}
+        <main className="flex-1 overflow-y-auto">
+          {/* 1. Financeiro (FinancesView) */}
+          {activeMenu === 'finances' && (
+            <FinancesView
+              contasPagar={contasPagar}
+              contasReceber={contasReceber}
+              onRefreshBling={onRecarregarBling}
+              carregando={carregandoBling}
+              onViewBoletoReceber={onViewBoletoReceber}
+            />
+          )}
 
-            {/* 2. Contas a Pagar (Bling ERP) */}
-            {activeMenu === 'pagar' && (
-              <ContasPagarTab
-                contas={contasPagar}
-                resumo={{
-                  totalAberto: indicadores.totalPagarAberto,
-                  totalLiquidado: indicadores.totalPagarLiquidado,
-                  totalVencido: indicadores.totalPagarVencido,
-                  qtdRegistros: contasPagar.length,
-                }}
-                isLoading={carregandoBling}
-                isLive={empresa.isBlingConectado}
-                onRefresh={onRecarregarBling}
-              />
-            )}
+          {/* 2. Fornecedores (SuppliersView) */}
+          {activeMenu === 'suppliers' && (
+            <SuppliersView clientesBling={clientes} />
+          )}
 
-            {/* 3. Contas a Receber (Bling ERP) */}
-            {activeMenu === 'receber' && (
-              <ContasReceberTab
-                contas={contasReceber}
-                resumo={{
-                  totalAberto: indicadores.totalReceberAberto,
-                  totalLiquidado: indicadores.totalReceberLiquidado,
-                  totalVencido: indicadores.totalReceberVencido,
-                  qtdRegistros: contasReceber.length,
-                }}
-                isLoading={carregandoBling}
-                isLive={empresa.isBlingConectado}
-                onRefresh={onRecarregarBling}
-                onViewBoletoReceber={onViewBoletoReceber}
-              />
-            )}
+          {/* 3. Clientes (ClientsView) */}
+          {activeMenu === 'clients' && (
+            <ClientsView
+              clientesBling={clientes}
+              onEmitirParaCliente={(cli) => {
+                onEmitirParaCliente(cli);
+                setActiveMenu('robo');
+              }}
+            />
+          )}
 
-            {/* 4. Conciliação & Extrato Bancário */}
-            {activeMenu === 'conciliacao' && (
-              <BtReconciliationView
-                contasPagar={contasPagar}
-                contasReceber={contasReceber}
-              />
-            )}
+          {/* 4. Compras (PurchasesView) */}
+          {activeMenu === 'purchases' && (
+            <PurchasesView />
+          )}
 
-            {/* 5. Clientes & Fornecedores */}
-            {activeMenu === 'clientes' && (
-              <ClientesTab
-                clientes={clientes}
-                isLoading={carregandoBling}
-                isLive={empresa.isBlingConectado}
-                onRefresh={onRecarregarBling}
-                onEmitirParaCliente={(cli) => {
-                  onEmitirParaCliente(cli);
-                  setActiveMenu('robo');
-                }}
-              />
-            )}
+          {/* 5. Tarefas (TasksView) */}
+          {activeMenu === 'tasks' && (
+            <TasksView />
+          )}
 
-            {/* 6. Robô Fiscal & Comandos por Voz */}
-            {activeMenu === 'robo' && (
-              <div className="space-y-4 max-w-4xl mx-auto">
-                <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-900/30 to-indigo-950/30 border border-purple-500/20 text-xs text-purple-200 flex items-center justify-between">
-                  <span>
-                    🎙️ <b>Robô Fiscal Ativo:</b> Fale ou digite comandos em linguagem natural (ex: <i>"Emitir nota de 3000 em 3x para Silva Materiais"</i>).
-                  </span>
-                  <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-bold">
-                    IA SEFAZ & FEBRABAN
-                  </span>
-                </div>
+          {/* 6. Patrimônio (PatrimonyView) */}
+          {activeMenu === 'patrimony' && (
+            <PatrimonyView />
+          )}
 
-                <div className="bg-white dark:bg-[#10221c] border border-slate-200 dark:border-[#1a382e] rounded-2xl shadow-sm overflow-hidden h-[600px] flex flex-col">
-                  <div className="flex-1 overflow-y-auto p-4">
-                    <ChatView
-                      messages={messages}
-                      bancoAtual={bancoAtual}
-                      onViewDanfe={onViewDanfe}
-                      onEmitirNFe={onEmitirNFe}
-                      onViewBoleto={onViewBoleto}
-                      onViewPayloadBanco={onViewPayloadBanco}
-                      onQuickAction={onQuickAction}
-                    />
-                  </div>
-                  <VoiceMicBar
-                    isListening={isListening}
-                    onStartListening={onStartListening}
-                    onStopListening={onStopListening}
-                    onSendMessage={onSendMessage}
-                    listeningTranscript={listeningTranscript}
+          {/* 7. Cadastro (RegistrationView) */}
+          {activeMenu === 'registration' && (
+            <RegistrationView
+              empresaAtiva={empresa}
+              empresas={[empresa]}
+            />
+          )}
+
+          {/* 8. Notificações (NotificationsView) */}
+          {activeMenu === 'notifications' && (
+            <NotificationsView />
+          )}
+
+          {/* 9. Configurações (SettingsView) */}
+          {activeMenu === 'settings' && (
+            <SettingsView
+              empresa={empresa}
+              bancoAtual={bancoAtual}
+              onSelectBanco={onSelectBanco}
+              onOpenModalSettings={onOpenSettings}
+            />
+          )}
+
+          {/* 10. Robô Fiscal & Voz (ChatView & Voice) */}
+          {activeMenu === 'robo' && (
+            <div className="p-4 md:p-8 max-w-5xl mx-auto space-y-4">
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-purple-900/30 to-indigo-950/30 border border-purple-500/20 text-xs text-purple-200 flex items-center justify-between">
+                <span>
+                  🎙️ <b>Robô Fiscal Ativo:</b> Fale ou digite comandos em linguagem natural (ex: <i>"Emitir nota de 3000 em 3x para Silva Materiais"</i>).
+                </span>
+                <span className="font-mono text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-bold">
+                  IA SEFAZ & FEBRABAN
+                </span>
+              </div>
+
+              <div className="bg-white dark:bg-[#10221c] border border-slate-200 dark:border-[#1a382e] rounded-2xl shadow-sm overflow-hidden h-[620px] flex flex-col">
+                <div className="flex-1 overflow-y-auto p-4">
+                  <ChatView
+                    messages={messages}
+                    bancoAtual={bancoAtual}
+                    onViewDanfe={onViewDanfe}
+                    onEmitirNFe={onEmitirNFe}
+                    onViewBoleto={onViewBoleto}
+                    onViewPayloadBanco={onViewPayloadBanco}
+                    onQuickAction={onQuickAction}
                   />
                 </div>
+                <VoiceMicBar
+                  isListening={isListening}
+                  onStartListening={onStartListening}
+                  onStopListening={onStopListening}
+                  onSendMessage={onSendMessage}
+                  listeningTranscript={listeningTranscript}
+                />
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </main>
       </div>
     </div>
