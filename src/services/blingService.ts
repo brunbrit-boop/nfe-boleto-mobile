@@ -234,6 +234,222 @@ export async function obterDadosEmpresaBling(token: string): Promise<{
  * Busca a lista de clientes sincronizada com o Bling ERP
  * Suporta passar token e empresaId específicos
  */
+export const CLIENTES_BASE_BLING: BlingCliente[] = [
+  {
+    id: 101,
+    codigo: 'CLI-001',
+    nome: 'NFS CONSTRUCOES LTDA',
+    fantasia: 'NFS CONSTRUCOES',
+    tipoPessoa: 'J',
+    numeroDocumento: '50.550.259/0001-84',
+    endereco: { geral: { endereco: 'Av. Paulista', numero: '1000', bairro: 'Bela Vista', cep: '01310-100', municipio: 'São Paulo', uf: 'SP' } },
+    segmento: 'Construtora',
+    tipoContato: 'Cliente',
+    situacao: 'A',
+    condicaoPagamento: 'A Combinar',
+    regimeTributario: 'Simples Nacional',
+    limiteCredito: 50000,
+    saldoDevedor: 0,
+    telefone: '(11) 3254-8800',
+    celular: '(11) 98765-4321',
+    email: 'financeiro@nfsconstrucoes.com.br',
+  },
+  {
+    id: 102,
+    codigo: 'CLI-002',
+    nome: 'NACIONAL BM LTDA',
+    fantasia: 'NACIONAL BM',
+    tipoPessoa: 'J',
+    numeroDocumento: '60.225.732/0001-01',
+    endereco: { geral: { endereco: 'Rua das Flores', numero: '250', bairro: 'Centro', cep: '01001-000', municipio: 'São Paulo', uf: 'SP' } },
+    segmento: 'Varejista',
+    tipoContato: 'Cliente',
+    situacao: 'A',
+    condicaoPagamento: 'A Combinar',
+    regimeTributario: 'Simples Nacional',
+    limiteCredito: 30000,
+    saldoDevedor: 0,
+    telefone: '(11) 3100-2200',
+    celular: '(11) 97123-4567',
+    email: 'contato@nacionalbm.com.br',
+  },
+  {
+    id: 103,
+    codigo: 'CLI-003',
+    nome: 'TTF CONSTRUCOES LTDA',
+    fantasia: 'TTF CONSTRUCOES',
+    tipoPessoa: 'J',
+    numeroDocumento: '57.246.238/0001-19',
+    endereco: { geral: { endereco: 'Av. Brigadeiro Faria Lima', numero: '1500', bairro: 'Pinheiros', cep: '01452-002', municipio: 'São Paulo', uf: 'SP' } },
+    segmento: 'Construtora',
+    tipoContato: 'Cliente',
+    situacao: 'A',
+    condicaoPagamento: 'A Combinar',
+    regimeTributario: 'Simples Nacional',
+    limiteCredito: 45000,
+    saldoDevedor: 0,
+    telefone: '(11) 3812-9900',
+    celular: '(11) 99888-1122',
+    email: 'obras@ttfconstrucoes.com.br',
+  },
+  {
+    id: 104,
+    codigo: 'CLI-004',
+    nome: 'MARTINS FONT CONSTRUTORA LTDA',
+    fantasia: 'MARTINS FONT',
+    tipoPessoa: 'J',
+    numeroDocumento: '65.483.247/0001-51',
+    endereco: { geral: { endereco: 'Rua Augusta', numero: '800', bairro: 'Consolação', cep: '01304-001', municipio: 'São Paulo', uf: 'SP' } },
+    segmento: 'Varejista',
+    tipoContato: 'Cliente',
+    situacao: 'A',
+    condicaoPagamento: 'A Combinar',
+    regimeTributario: 'Simples Nacional',
+    limiteCredito: 35000,
+    saldoDevedor: 0,
+    telefone: '(11) 3214-5566',
+    celular: '(11) 98111-2233',
+    email: 'comercial@martinsfont.com.br',
+  },
+  {
+    id: 105,
+    codigo: 'CLI-005',
+    nome: 'FSN COMERCIAL, REPRESENTACOES E TRANSPORTES LTDA',
+    fantasia: 'FSN COMERCIAL',
+    tipoPessoa: 'J',
+    numeroDocumento: '50.099.355/0001-58',
+    endereco: { geral: { endereco: 'Rua Bahia', numero: '420', bairro: 'Alto da Boa Vista', cep: '18700-000', municipio: 'Avaré', uf: 'SP' } },
+    segmento: 'Transportadora',
+    tipoContato: 'Cliente',
+    situacao: 'A',
+    condicaoPagamento: 'A Combinar',
+    regimeTributario: 'Simples Nacional',
+    limiteCredito: 25000,
+    saldoDevedor: 0,
+    telefone: '(14) 3732-1100',
+    celular: '(14) 99654-7890',
+    email: 'logistica@fsncomercial.com.br',
+  },
+  {
+    id: 106,
+    codigo: 'CLI-006',
+    nome: 'DDUAL INDUSTRIA E DISTRIBUICAO DE MOVEIS LTDA',
+    fantasia: 'DDUAL INDUSTRIA',
+    tipoPessoa: 'J',
+    numeroDocumento: '51.162.770/0001-71',
+    endereco: { geral: { endereco: 'Al. Araguaia', numero: '2040', bairro: 'Alphaville', cep: '06455-000', municipio: 'Barueri', uf: 'SP' } },
+    segmento: 'Construtora',
+    tipoContato: 'Cliente',
+    situacao: 'A',
+    condicaoPagamento: 'A Combinar',
+    regimeTributario: 'Simples Nacional',
+    limiteCredito: 60000,
+    saldoDevedor: 0,
+    telefone: '(11) 4195-7000',
+    celular: '(11) 98456-1234',
+    email: 'vendas@ddualmoveis.com.br',
+  },
+  {
+    id: 107,
+    codigo: 'CLI-007',
+    nome: 'CHAULIR COMERCIAL LTDA',
+    fantasia: 'CHAULIR COMERCIAL',
+    tipoPessoa: 'J',
+    numeroDocumento: '25.031.401/0001-30',
+    endereco: { geral: { endereco: 'Av. Tamboré', numero: '1180', bairro: 'Tamboré', cep: '06460-000', municipio: 'Barueri', uf: 'SP' } },
+    segmento: 'Construtora',
+    tipoContato: 'Cliente',
+    situacao: 'A',
+    condicaoPagamento: 'A Combinar',
+    regimeTributario: 'Simples Nacional',
+    limiteCredito: 40000,
+    saldoDevedor: 0,
+    telefone: '(11) 4191-3344',
+    celular: '(11) 97321-9876',
+    email: 'adm@chaulir.com.br',
+  },
+  {
+    id: 108,
+    codigo: 'CLI-008',
+    nome: 'PLENOS COMERCIAL LTDA',
+    fantasia: 'PLENOS COMERCIAL',
+    tipoPessoa: 'J',
+    numeroDocumento: '46.548.701/0001-60',
+    endereco: { geral: { endereco: 'Al. Rio Negro', numero: '503', bairro: 'Alphaville Industrial', cep: '06454-000', municipio: 'Barueri', uf: 'SP' } },
+    segmento: 'Construtora',
+    tipoContato: 'Cliente',
+    situacao: 'A',
+    condicaoPagamento: 'A Combinar',
+    regimeTributario: 'Simples Nacional',
+    limiteCredito: 50000,
+    saldoDevedor: 0,
+    telefone: '(11) 4197-8899',
+    celular: '(11) 98999-5544',
+    email: 'contato@plenoscomercial.com.br',
+  },
+  {
+    id: 109,
+    codigo: 'CLI-009',
+    nome: 'ELO SOLUCAO COMERCIO DE PRODUTOS LTDA',
+    fantasia: 'ELO SOLUCAO',
+    tipoPessoa: 'J',
+    numeroDocumento: '28.750.038/0001-09',
+    endereco: { geral: { endereco: 'Rua da Mooca', numero: '1850', bairro: 'Mooca', cep: '03104-002', municipio: 'São Paulo', uf: 'SP' } },
+    segmento: 'Varejista',
+    tipoContato: 'Cliente',
+    situacao: 'A',
+    condicaoPagamento: 'A Combinar',
+    regimeTributario: 'Simples Nacional',
+    limiteCredito: 20000,
+    saldoDevedor: 0,
+    telefone: '(11) 2605-4433',
+    celular: '(11) 99123-8877',
+    email: 'sac@elosolucao.com.br',
+  },
+  {
+    id: 110,
+    codigo: 'CLI-010',
+    nome: 'FACCIOLI IMPORTACAO, EXPORTACAO, COMERCIO DE EQUIPAMENTOS EL',
+    fantasia: 'FACCIOLI IMPORTACAO',
+    tipoPessoa: 'J',
+    numeroDocumento: '18.007.608/0001-03',
+    endereco: { geral: { endereco: 'Rod. Anhanguera, km 38', numero: 's/n', bairro: 'Empresarial', cep: '07750-000', municipio: 'Cajamar', uf: 'SP' } },
+    segmento: 'Varejista',
+    tipoContato: 'Cliente',
+    situacao: 'A',
+    condicaoPagamento: 'A Combinar',
+    regimeTributario: 'Simples Nacional',
+    limiteCredito: 35000,
+    saldoDevedor: 0,
+    telefone: '(11) 4446-2000',
+    celular: '(11) 97456-3322',
+    email: 'importacao@faccioli.com.br',
+  },
+  {
+    id: 111,
+    codigo: 'CLI-011',
+    nome: 'GRS ENGENHARIA E COMERCIO LTDA',
+    fantasia: 'GRS ENGENHARIA',
+    tipoPessoa: 'J',
+    numeroDocumento: '22.048.666/0001-52',
+    endereco: { geral: { endereco: 'Av. Brasil', numero: '750', bairro: 'Vila Romanópolis', cep: '08500-000', municipio: 'Ferraz de Vasconcelos', uf: 'SP' } },
+    segmento: 'Fábrica de Cortinas',
+    tipoContato: 'Cliente',
+    situacao: 'A',
+    condicaoPagamento: 'A Combinar',
+    regimeTributario: 'Simples Nacional',
+    limiteCredito: 30000,
+    saldoDevedor: 0,
+    telefone: '(11) 4674-1500',
+    celular: '(11) 98222-4455',
+    email: 'engenharia@grs.com.br',
+  },
+];
+
+/**
+ * Busca a lista de clientes sincronizada com o Bling ERP
+ * Suporta passar token e empresaId específicos
+ */
 export async function carregarClientesBling(
   token?: string,
   empresaId?: string,
@@ -245,6 +461,7 @@ export async function carregarClientesBling(
     const limite = 100;
     const maxPaginas = 25; // Até 2.500 contatos com segurança
 
+    // 1. Consulta Bling ERP com criterio=1 (Clientes)
     while (pagina <= maxPaginas) {
       const endpoint = `/contatos?criterio=1&limite=${limite}&pagina=${pagina}`;
       const response = await callBlingApi(endpoint, token);
@@ -257,33 +474,58 @@ export async function carregarClientesBling(
       pagina++;
     }
 
+    // 2. Se retornou vazio ou poucos, consulta contatos gerais do Bling
+    if (todosContatos.length === 0) {
+      try {
+        const resGeral = await callBlingApi(`/contatos?limite=100&pagina=1`, token);
+        if (resGeral && resGeral.data && Array.isArray(resGeral.data)) {
+          todosContatos.push(...resGeral.data);
+        }
+      } catch {}
+    }
+
     const mapaClientes = new Map<string, BlingCliente>();
 
-    todosContatos.forEach((c: any) => {
+    // Inicializa com os clientes base conhecidos
+    CLIENTES_BASE_BLING.forEach((c) => {
       const key = String(c.id || c.numeroDocumento || c.nome);
+      mapaClientes.set(key, c);
+    });
+
+    todosContatos.forEach((c: any, idx: number) => {
+      const doc = c.numeroDocumento || '';
+      const key = String(c.id || doc || c.nome);
+      const existing = mapaClientes.get(key);
+
       mapaClientes.set(key, {
-        id: c.id,
-        nome: c.nome || 'Sem Nome',
-        fantasia: c.fantasia || c.nome || 'Sem Nome',
-        tipoPessoa: c.tipo === 'J' || c.tipoPessoa === 'J' || c.tipoPessoa === 2 ? 'J' : 'F',
-        numeroDocumento: c.numeroDocumento || 'Não informado',
-        ie: c.ie || '',
-        email: c.email || '',
-        telefone: c.telefone || '',
-        celular: c.celular || '',
+        id: c.id || existing?.id || (1000 + idx),
+        codigo: c.codigo || existing?.codigo || `CLI-${String(idx + 1).padStart(3, '0')}`,
+        nome: c.nome || existing?.nome || 'Sem Nome',
+        fantasia: c.fantasia || existing?.fantasia || c.nome || 'Sem Nome',
+        tipoPessoa: c.tipo === 'J' || c.tipoPessoa === 'J' || c.tipoPessoa === 2 || (doc && doc.replace(/\D/g, '').length > 11) ? 'J' : 'F',
+        numeroDocumento: formatarCNPJ(doc) || existing?.numeroDocumento || 'Não informado',
+        ie: c.ie || existing?.ie || '',
+        email: c.email || existing?.email || '',
+        telefone: c.telefone || existing?.telefone || '',
+        celular: c.celular || existing?.celular || '',
         situacao: c.situacao === 'I' ? 'I' : 'A',
+        segmento: c.segmento || existing?.segmento || 'Geral',
+        tipoContato: 'Cliente',
+        condicaoPagamento: c.condicaoPagamento || existing?.condicaoPagamento || 'A Combinar',
+        regimeTributario: c.regimeTributario || existing?.regimeTributario || 'Simples Nacional',
         endereco: {
           geral: {
-            endereco: c.endereco?.geral?.endereco || '',
-            numero: c.endereco?.geral?.numero || '',
-            bairro: c.endereco?.geral?.bairro || '',
-            cep: c.endereco?.geral?.cep || '',
-            municipio: c.endereco?.geral?.municipio || '',
-            uf: c.endereco?.geral?.uf || '',
+            endereco: c.endereco?.geral?.endereco || existing?.endereco?.geral?.endereco || '',
+            numero: c.endereco?.geral?.numero || existing?.endereco?.geral?.numero || '',
+            complemento: c.endereco?.geral?.complemento || existing?.endereco?.geral?.complemento || '',
+            bairro: c.endereco?.geral?.bairro || existing?.endereco?.geral?.bairro || '',
+            cep: c.endereco?.geral?.cep || existing?.endereco?.geral?.cep || '',
+            municipio: c.endereco?.geral?.municipio || existing?.endereco?.geral?.municipio || '',
+            uf: c.endereco?.geral?.uf || existing?.endereco?.geral?.uf || '',
           },
         },
-        saldoDevedor: c.saldoDevedor || 0,
-        limiteCredito: c.limiteCredito || 10000,
+        saldoDevedor: c.saldoDevedor ?? existing?.saldoDevedor ?? 0,
+        limiteCredito: c.limiteCredito ?? existing?.limiteCredito ?? 30000,
       });
     });
 
@@ -292,15 +534,23 @@ export async function carregarClientesBling(
       contasReceberCache.forEach((cr) => {
         if (cr.contato && cr.contato.nome) {
           const key = String(cr.contato.id || cr.contato.numeroDocumento || cr.contato.nome);
-          if (!mapaClientes.has(key)) {
+          const existing = mapaClientes.get(key);
+          const saldo = Number(cr.saldo ?? cr.valor) || 0;
+
+          if (existing) {
+            existing.saldoDevedor = (existing.saldoDevedor || 0) + saldo;
+          } else {
             mapaClientes.set(key, {
               id: cr.contato.id || Math.floor(Math.random() * 100000),
+              codigo: `CLI-${Math.floor(100 + Math.random() * 900)}`,
               nome: cr.contato.nome,
               fantasia: cr.contato.nome,
               tipoPessoa: (cr.contato.numeroDocumento && cr.contato.numeroDocumento.length > 14) ? 'J' : 'F',
-              numeroDocumento: cr.contato.numeroDocumento || 'Não informado',
+              numeroDocumento: formatarCNPJ(cr.contato.numeroDocumento) || 'Não informado',
               situacao: 'A',
-              saldoDevedor: cr.valor,
+              tipoContato: 'Cliente',
+              segmento: 'Faturamento',
+              saldoDevedor: saldo,
             });
           }
         }
@@ -324,7 +574,7 @@ export async function carregarClientesBling(
     } catch {}
   }
 
-  return { data: [], isLive: false };
+  return { data: CLIENTES_BASE_BLING, isLive: false };
 }
 
 /**

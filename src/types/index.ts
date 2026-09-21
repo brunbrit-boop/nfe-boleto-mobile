@@ -135,6 +135,7 @@ export interface ChatMessage {
 
 export interface BlingCliente {
   id: number;
+  codigo?: string;
   nome: string;
   fantasia?: string;
   tipoPessoa: 'F' | 'J';
@@ -144,6 +145,10 @@ export interface BlingCliente {
   telefone?: string;
   celular?: string;
   situacao: 'A' | 'I'; // A = Ativo, I = Inativo
+  segmento?: string;
+  tipoContato?: string;
+  condicaoPagamento?: string;
+  regimeTributario?: string;
   endereco?: {
     geral?: {
       endereco: string;
