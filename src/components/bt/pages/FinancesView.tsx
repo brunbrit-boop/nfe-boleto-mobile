@@ -158,6 +158,13 @@ const formatDateBr = (isoStr: string) => {
   return `${parts[2]}/${parts[1]}`;
 };
 
+const formatFullDateBr = (isoStr: string) => {
+  if (!isoStr) return '';
+  const parts = isoStr.split('-');
+  if (parts.length < 3) return isoStr;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+};
+
 const formatBRL = (val: number) => {
   return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
 };
@@ -892,15 +899,42 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     );
   };
 
+  // --- Janela Temporal Visível Atual do Gráfico [startDate, endDate] ---
+  const visibleDateRange = useMemo(() => {
+    const startD = new Date(referenceDate);
+    const startDate = startD.toISOString().split('T')[0];
+    const endD = new Date(referenceDate);
+    endD.setDate(endD.getDate() + visibleDays - 1);
+    const endDate = endD.toISOString().split('T')[0];
+    return { startDate, endDate };
+  }, [referenceDate, visibleDays]);
+
+  const handleClosePinnedTooltip = () => {
+    setPinnedTooltipData(null);
+    setPinnedTooltipPos(null);
+    setPinnedFilterDate(null);
+    setPinnedFilterCategory(null);
+    setPinnedFilterUnit(null);
+
+    if (previousFilters) {
+      setPinnedFilterCategory(previousFilters.category);
+      setPinnedFilterUnit(previousFilters.unit);
+      setPinnedFilterDate(previousFilters.date);
+      setPreviousFilters(null);
+    }
+  };
+
   // --- Zoom Contínuo pela Roda do Mouse (handleWheelZoom) ---
   const handleWheelZoom = (e: React.WheelEvent) => {
     if (Math.abs(e.deltaY) < 15) return;
+    if (pinnedTooltipData) handleClosePinnedTooltip();
     const factor = e.deltaY > 0 ? 3 : -3;
     setVisibleDays((prev) => Math.min(90, Math.max(7, prev + factor)));
   };
 
   // Chevrons temporais
   const handleScrollTime = (direction: 'left' | 'right') => {
+    if (pinnedTooltipData) handleClosePinnedTooltip();
     const shift = Math.max(3, Math.floor(visibleDays / 4));
     setReferenceDate((prev) => {
       const next = new Date(prev);
@@ -915,27 +949,26 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     const d = new Date();
     d.setDate(d.getDate() - half);
     setReferenceDate(d);
-    setPinnedFilterDate(null);
-    setPinnedFilterCategory(null);
-    setPinnedFilterUnit(null);
-    setPinnedTooltipData(null);
-    setPinnedTooltipPos(null);
+    handleClosePinnedTooltip();
   };
 
-  // Drag horizontal
+  // Drag horizontal proporcional à largura do container e visibleDays (mesmo cálculo do BT Business)
   const handleMouseDown = (e: React.MouseEvent) => {
     setIsDragging(true);
     setDragStartX(e.clientX);
     setDragStartDate(new Date(referenceDate));
+    if (pinnedTooltipData) handleClosePinnedTooltip();
   };
 
   const handleMouseMove = (e: React.MouseEvent) => {
     if (!isDragging || !dragStartDate) return;
-    const deltaX = e.clientX - dragStartX;
-    const daysShift = Math.round(deltaX / 30);
+    const containerWidth = chartContainerRef.current?.clientWidth || 800;
+    const diffX = dragStartX - e.clientX;
+    const pixelsPerDay = Math.max(8, containerWidth / visibleDays);
+    const daysShift = Math.round(diffX / pixelsPerDay);
     if (daysShift !== 0) {
       const newRef = new Date(dragStartDate);
-      newRef.setDate(newRef.getDate() - daysShift);
+      newRef.setDate(newRef.getDate() + daysShift);
       setReferenceDate(newRef);
     }
   };
@@ -1060,21 +1093,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     setPinnedFilterDate(date);
   };
 
-  const handleClosePinnedTooltip = () => {
-    setPinnedTooltipData(null);
-    setPinnedTooltipPos(null);
-    setPinnedFilterDate(null);
-    setPinnedFilterCategory(null);
-    setPinnedFilterUnit(null);
-
-    if (previousFilters) {
-      setPinnedFilterCategory(previousFilters.category);
-      setPinnedFilterUnit(previousFilters.unit);
-      setPinnedFilterDate(previousFilters.date);
-      setPreviousFilters(null);
-    }
-  };
-
   // Clique na coluna do gráfico (Fixa Tooltip, altera modo Realizado/Previsão e sincroniza data)
   const handleChartClick = (state: any) => {
     if (!state) return;
@@ -1119,12 +1137,18 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   const { payablesList, receivablesList } = useMemo(() => {
     let base = baseFilteredTransactions;
 
-    // Se houver data fixada pelo clique na barra do gráfico, filtra pelo dia
+    // 1. Filtragem Temporal:
+    // Se houver data fixada pelo clique na barra do gráfico, foca naquele dia específico (pinnedFilterDate).
+    // Senão, reflete rigorosamente o período visível atual do gráfico [startDate, endDate]!
     if (pinnedFilterDate) {
       base = base.filter((tx) => tx.date === pinnedFilterDate);
+    } else {
+      base = base.filter(
+        (tx) => tx.date >= visibleDateRange.startDate && tx.date <= visibleDateRange.endDate
+      );
     }
 
-    // Aplica o tableMode (Realizado vs Previsão vs Todas)
+    // 2. Aplica o tableMode (Realizado vs Previsão vs Todas)
     if (tableMode === 'forecast') {
       base = base.filter((tx) => tx.status !== 'paid');
     } else if (tableMode === 'realized') {
@@ -1161,6 +1185,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   }, [
     baseFilteredTransactions,
     pinnedFilterDate,
+    visibleDateRange,
     tableMode,
     pinnedFilterCategory,
     pinnedFilterUnit,
@@ -1183,6 +1208,10 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     let base = baseFilteredTransactions;
     if (pinnedFilterDate) {
       base = base.filter((tx) => tx.date === pinnedFilterDate);
+    } else {
+      base = base.filter(
+        (tx) => tx.date >= visibleDateRange.startDate && tx.date <= visibleDateRange.endDate
+      );
     }
     if (pinnedFilterCategory) {
       base = base.filter((tx) => tx.category.toLowerCase() === pinnedFilterCategory.toLowerCase());
@@ -1195,7 +1224,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
       realized: base.filter((tx) => tx.status === 'paid' || tx.status === 'marked_reopen').length,
       all: base.length,
     };
-  }, [baseFilteredTransactions, pinnedFilterDate, pinnedFilterCategory, pinnedFilterUnit]);
+  }, [baseFilteredTransactions, pinnedFilterDate, visibleDateRange, pinnedFilterCategory, pinnedFilterUnit]);
 
   // Funil de cabeçalho por coluna
   const renderHeaderWithFilter = (
@@ -1370,8 +1399,8 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
           <div className="h-5 w-px bg-gray-200 dark:bg-gray-800 mx-1 hidden sm:block"></div>
 
-          {/* Chevrons Temporais */}
-          <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5">
+          {/* Chevrons Temporais com Indicador do Período */}
+          <div className="flex items-center bg-gray-100 dark:bg-gray-800 rounded-lg p-0.5 border border-gray-200/60 dark:border-gray-700/60">
             <button
               onClick={() => handleScrollTime('left')}
               className="p-1 hover:bg-white dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-300"
@@ -1379,6 +1408,9 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             >
               <span className="material-symbols-outlined text-xs">chevron_left</span>
             </button>
+            <span className="text-[11px] font-bold px-2 text-gray-700 dark:text-gray-300 select-none whitespace-nowrap">
+              {formatDateBr(visibleDateRange.startDate)} – {formatDateBr(visibleDateRange.endDate)}
+            </span>
             <button
               onClick={() => handleScrollTime('right')}
               className="p-1 hover:bg-white dark:hover:bg-gray-700 rounded text-gray-600 dark:text-gray-300"
@@ -1394,6 +1426,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
               <button
                 key={d}
                 onClick={() => {
+                  handleClosePinnedTooltip();
                   setVisibleDays(d);
                   const half = Math.floor(d / 2);
                   const dt = new Date();
@@ -1693,10 +1726,10 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
         {/* Tags de Filtros Ativos */}
         <div className="flex items-center gap-2 flex-wrap">
-          {pinnedFilterDate && (
+          {pinnedFilterDate ? (
             <div className="flex items-center gap-1.5 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 px-2.5 py-0.5 rounded-full text-xs">
               <span className="material-symbols-outlined text-[13px]">calendar_month</span>
-              <span>Data Selecionada: <strong>{formatDateBr(pinnedFilterDate)}</strong></span>
+              <span>Data Selecionada: <strong>{formatFullDateBr(pinnedFilterDate)}</strong></span>
               <span
                 className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
                   pinnedFilterDate < todayISO
@@ -1709,10 +1742,17 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
               <button
                 onClick={handleClosePinnedTooltip}
                 className="hover:text-red-500 ml-1 flex items-center"
-                title="Limpar filtro da coluna e fechar painel"
+                title="Limpar filtro da coluna e voltar ao período visível"
               >
                 <span className="material-symbols-outlined text-[14px]">cancel</span>
               </button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 px-2.5 py-0.5 rounded-full text-xs">
+              <span className="material-symbols-outlined text-[13px] text-[#11d493]">calendar_today</span>
+              <span>
+                Período Visível: <strong>{formatDateBr(visibleDateRange.startDate)} a {formatDateBr(visibleDateRange.endDate)}</strong> ({visibleDays}d)
+              </span>
             </div>
           )}
 
