@@ -176,12 +176,22 @@ export const ContasReceberTab: React.FC<ContasReceberTabProps> = ({
 
       {/* Lista de Contas a Receber */}
       <div className="space-y-3">
-        {contasFiltradas.length === 0 ? (
+        {contas.length === 0 ? (
+          <div className="bg-white rounded-2xl p-8 text-center border border-slate-200 shadow-sm">
+            <div className="w-12 h-12 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mx-auto mb-3 border border-blue-100">
+              <CheckCircle2 className="w-6 h-6" />
+            </div>
+            <p className="text-sm font-bold text-slate-800">Nenhuma Conta a Receber no Bling</p>
+            <p className="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
+              Sua conta no Bling ERP está sem títulos ou boletos a receber em aberto (0 registros, R$ 0,00). 100% sincronizado com a base real do Bling!
+            </p>
+          </div>
+        ) : contasFiltradas.length === 0 ? (
           <div className="bg-white rounded-2xl p-8 text-center border border-slate-200 shadow-sm">
             <ArrowUpCircle className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-            <p className="text-sm font-bold text-slate-700">Nenhuma conta encontrada</p>
+            <p className="text-sm font-bold text-slate-700">Nenhuma conta encontrada neste filtro</p>
             <p className="text-xs text-slate-400 mt-1">
-              Todos os recebimentos deste filtro estão liquidados.
+              Altere o filtro de situação acima para localizar outros registros.
             </p>
           </div>
         ) : (

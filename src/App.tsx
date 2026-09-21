@@ -111,15 +111,9 @@ export const App: React.FC = () => {
   const carregarDadosBling = async () => {
     setIsLoadingBling(true);
     try {
-      // Limpa dados de demonstração antigos caso ainda estejam no localStorage
-      const cachedPagar = localStorage.getItem('bling_cache_pagar');
-      if (cachedPagar && (cachedPagar.includes('NF-10492') || cachedPagar.includes('DUP-8821'))) {
-        localStorage.removeItem('bling_cache_pagar');
-      }
-      const cachedReceber = localStorage.getItem('bling_cache_receber');
-      if (cachedReceber && (cachedReceber.includes('NF-6081/1') || cachedReceber.includes('NF-6078/1'))) {
-        localStorage.removeItem('bling_cache_receber');
-      }
+      // Limpa incondicionalmente dados de demonstração legados do localStorage
+      localStorage.removeItem('bling_cache_pagar');
+      localStorage.removeItem('bling_cache_receber');
 
       const [resClientes, resPagar, resReceber] = await Promise.all([
         carregarClientesBling(),
