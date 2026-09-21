@@ -94,7 +94,7 @@ export async function testBlingConnection(token?: string): Promise<{ success: bo
 
   try {
     // Tenta via Proxy Vercel
-    const proxyUrl = `/api/bling-proxy?endpoint=${encodeURIComponent('/contatos?limite=1')}`;
+    const proxyUrl = `/api/bling-proxy?endpoint=${encodeURIComponent('/contatos?criterio=1&limite=1')}`;
     const proxyRes = await fetch(proxyUrl, {
       headers: {
         'Authorization': `Bearer ${activeToken}`,
@@ -121,7 +121,7 @@ export async function testBlingConnection(token?: string): Promise<{ success: bo
 
   // Tentativa direta com o Bling
   try {
-    const directRes = await fetch('https://www.bling.com.br/Api/v3/contatos?limite=1', {
+    const directRes = await fetch('https://api.bling.com.br/Api/v3/contatos?criterio=1&limite=1', {
       headers: {
         'Authorization': `Bearer ${activeToken}`,
         'Accept': 'application/json',

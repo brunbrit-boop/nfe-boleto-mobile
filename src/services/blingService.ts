@@ -77,16 +77,33 @@ async function callBlingApi(endpoint: string): Promise<any> {
 
 /**
  * Busca a lista de clientes sincronizada com o Bling ERP
+ * Usa criterio=1 (Todos) conforme especificação OpenAPI do Bling v3 e paginação completa
  */
 export async function carregarClientesBling(): Promise<{ data: BlingCliente[]; isLive: boolean; error?: string }> {
   try {
-    const response = await callBlingApi('/contatos?limite=100');
-    const records = (response && response.data && Array.isArray(response.data)) ? response.data : [];
-    const clientesFormatados: BlingCliente[] = records.map((c: any) => ({
+    const todosContatos: any[] = [];
+    let pagina = 1;
+    const limite = 100;
+    const maxPaginas = 25; // Até 2.500 contatos com segurança
+
+    while (pagina <= maxPaginas) {
+      // criterio=1: Todos os contatos (default do Bling é 3: apenas últimos incluídos)
+      const endpoint = `/contatos?criterio=1&limite=${limite}&pagina=${pagina}`;
+      const response = await callBlingApi(endpoint);
+      const records = (response && response.data && Array.isArray(response.data)) ? response.data : [];
+
+      if (records.length === 0) break;
+      todosContatos.push(...records);
+
+      if (records.length < limite) break;
+      pagina++;
+    }
+
+    const clientesFormatados: BlingCliente[] = todosContatos.map((c: any) => ({
       id: c.id,
       nome: c.nome || 'Sem Nome',
       fantasia: c.fantasia || c.nome || 'Sem Nome',
-      tipoPessoa: c.tipo === 'J' || c.tipoPessoa === 'J' ? 'J' : 'F',
+      tipoPessoa: c.tipo === 'J' || c.tipoPessoa === 'J' || c.tipoPessoa === 2 ? 'J' : 'F',
       numeroDocumento: c.numeroDocumento || 'Não informado',
       ie: c.ie || '',
       email: c.email || '',
@@ -125,14 +142,38 @@ export async function carregarClientesBling(): Promise<{ data: BlingCliente[]; i
 }
 
 /**
- * Busca a lista de Contas a Pagar do Bling ERP (100% Real - Sem dados fictícios)
+ * Busca a lista de Contas a Pagar do Bling ERP (Endpoint oficial: /contas/pagar)
  */
 export async function carregarContasPagarBling(): Promise<{ data: BlingContaPagar[]; resumo: ResumoFinanceiro; isLive: boolean }> {
   try {
-    const response = await callBlingApi('/contas-a-pagar?limite=100');
-    const records = (response && response.data && Array.isArray(response.data)) ? response.data : [];
+    const todasContas: any[] = [];
+    let pagina = 1;
+    const limite = 100;
+    const maxPaginas = 15;
+
+    while (pagina <= maxPaginas) {
+      // Endpoint oficial Bling v3 OpenAPI: /contas/pagar
+      let response: any;
+      try {
+        response = await callBlingApi(`/contas/pagar?limite=${limite}&pagina=${pagina}`);
+      } catch (err: any) {
+        // Fallback para rota alternativa caso ocorra variação de gateway
+        if (err.message && err.message.includes('404')) {
+          response = await callBlingApi(`/contas-pagar?limite=${limite}&pagina=${pagina}`);
+        } else {
+          throw err;
+        }
+      }
+
+      const records = (response && response.data && Array.isArray(response.data)) ? response.data : [];
+      if (records.length === 0) break;
+      todasContas.push(...records);
+
+      if (records.length < limite) break;
+      pagina++;
+    }
     
-    const pagamentos: BlingContaPagar[] = records.map((p: any) => {
+    const pagamentos: BlingContaPagar[] = todasContas.map((p: any) => {
       const val = Number(p.valor || p.saldo || 0);
       const venc = p.vencimento || new Date().toISOString().slice(0, 10);
       const [yyyy, mm, dd] = venc.split('-');
@@ -144,7 +185,7 @@ export async function carregarContasPagarBling(): Promise<{ data: BlingContaPaga
         vencimentoFormatado: `${dd}/${mm}/${yyyy}`,
         valor: val,
         valorFormatado: formatCurrency(val),
-        saldo: Number(p.saldo || val),
+        saldo: Number(p.saldo ?? val),
         historico: p.historico || 'Despesa Bling',
         categoria: p.categoria?.descricao || 'Fornecedores',
         situacao: p.situacao || 1,
@@ -170,14 +211,36 @@ export async function carregarContasPagarBling(): Promise<{ data: BlingContaPaga
 }
 
 /**
- * Busca a lista de Contas a Receber do Bling ERP com boletos vinculados (100% Real - Sem dados fictícios)
+ * Busca a lista de Contas a Receber do Bling ERP (Endpoint oficial: /contas/receber)
  */
 export async function carregarContasReceberBling(): Promise<{ data: BlingContaReceber[]; resumo: ResumoFinanceiro; isLive: boolean }> {
   try {
-    const response = await callBlingApi('/contas-a-receber?limite=100');
-    const records = (response && response.data && Array.isArray(response.data)) ? response.data : [];
+    const todasContas: any[] = [];
+    let pagina = 1;
+    const limite = 100;
+    const maxPaginas = 15;
 
-    const receber: BlingContaReceber[] = records.map((r: any, idx: number) => {
+    while (pagina <= maxPaginas) {
+      let response: any;
+      try {
+        response = await callBlingApi(`/contas/receber?limite=${limite}&pagina=${pagina}`);
+      } catch (err: any) {
+        if (err.message && err.message.includes('404')) {
+          response = await callBlingApi(`/contas-receber?limite=${limite}&pagina=${pagina}`);
+        } else {
+          throw err;
+        }
+      }
+
+      const records = (response && response.data && Array.isArray(response.data)) ? response.data : [];
+      if (records.length === 0) break;
+      todasContas.push(...records);
+
+      if (records.length < limite) break;
+      pagina++;
+    }
+
+    const receber: BlingContaReceber[] = todasContas.map((r: any, idx: number) => {
       const val = Number(r.valor || r.saldo || 0);
       const venc = r.vencimento || new Date().toISOString().slice(0, 10);
       const [yyyy, mm, dd] = venc.split('-');
@@ -197,7 +260,7 @@ export async function carregarContasReceberBling(): Promise<{ data: BlingContaRe
         vencimentoFormatado: `${dd}/${mm}/${yyyy}`,
         valor: val,
         valorFormatado: formatCurrency(val),
-        saldo: Number(r.saldo || val),
+        saldo: Number(r.saldo ?? val),
         historico: r.historico || 'Venda de Mercadorias Bling',
         categoria: r.categoria?.descricao || 'Vendas',
         situacao: r.situacao || 1,
@@ -238,7 +301,7 @@ function calcularResumoFinanceiro(contas: (BlingContaPagar | BlingContaReceber)[
   contas.forEach(c => {
     if (c.situacao === 2) {
       totalLiquidado += c.valor;
-    } else if (c.situacao === 1) {
+    } else if (c.situacao === 1 || c.situacao === 3) {
       if (c.vencimento < hojeStr) {
         totalVencido += c.valor;
       } else {
@@ -256,12 +319,14 @@ function calcularResumoFinanceiro(contas: (BlingContaPagar | BlingContaReceber)[
 }
 
 /**
- * Função de diagnóstico para inspecionar a resposta bruta da API v3 do Bling
+ * Função de diagnóstico completo para testar contatos, contas a pagar e contas a receber
  */
 export async function obterDiagnosticoBling(): Promise<{
   ok: boolean;
   contatosCount?: number;
-  contatosRaw?: any;
+  pagarCount?: number;
+  receberCount?: number;
+  detalhes?: string;
   error?: string;
 }> {
   const token = getStoredBlingToken();
@@ -269,16 +334,27 @@ export async function obterDiagnosticoBling(): Promise<{
     return { ok: false, error: 'Token do Bling não configurado no navegador.' };
   }
   try {
-    const res = await callBlingApi('/contatos?limite=3');
+    const [resContatos, resPagar, resReceber] = await Promise.all([
+      callBlingApi('/contatos?criterio=1&limite=3'),
+      callBlingApi('/contas/pagar?limite=3').catch(() => callBlingApi('/contas-pagar?limite=3')),
+      callBlingApi('/contas/receber?limite=3').catch(() => callBlingApi('/contas-receber?limite=3')),
+    ]);
+
+    const contatosCount = Array.isArray(resContatos?.data) ? resContatos.data.length : 0;
+    const pagarCount = Array.isArray(resPagar?.data) ? resPagar.data.length : 0;
+    const receberCount = Array.isArray(resReceber?.data) ? resReceber.data.length : 0;
+
     return {
       ok: true,
-      contatosCount: Array.isArray(res?.data) ? res.data.length : 0,
-      contatosRaw: res?.data || res,
+      contatosCount,
+      pagarCount,
+      receberCount,
+      detalhes: `Contatos: ${contatosCount} amostras | Contas a Pagar: ${pagarCount} | Contas a Receber: ${receberCount}`,
     };
   } catch (err: any) {
     return {
       ok: false,
-      error: err.message || 'Erro ao consultar contatos do Bling',
+      error: err.message || 'Erro ao consultar API do Bling',
     };
   }
 }

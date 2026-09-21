@@ -18,7 +18,7 @@ export const ContasPagarTab: React.FC<ContasPagarTabProps> = ({
   isLive,
   onRefresh,
 }) => {
-  const [filterSituacao, setFilterSituacao] = useState<'todas' | 'aberto' | 'pagas' | 'vencidas'>('aberto');
+  const [filterSituacao, setFilterSituacao] = useState<'todas' | 'aberto' | 'pagas' | 'vencidas'>('todas');
   const [searchTerm, setSearchTerm] = useState('');
 
   const hojeStr = new Date().toISOString().slice(0, 10);
@@ -33,9 +33,9 @@ export const ContasPagarTab: React.FC<ContasPagarTabProps> = ({
     if (!matchSearch) return false;
 
     // Filtro de situação
-    if (filterSituacao === 'aberto') return c.situacao === 1 && c.vencimento >= hojeStr;
+    if (filterSituacao === 'aberto') return (c.situacao === 1 || c.situacao === 3) && c.vencimento >= hojeStr;
     if (filterSituacao === 'pagas') return c.situacao === 2;
-    if (filterSituacao === 'vencidas') return c.situacao === 1 && c.vencimento < hojeStr;
+    if (filterSituacao === 'vencidas') return (c.situacao === 1 || c.situacao === 3) && c.vencimento < hojeStr;
     return true;
   });
 

@@ -21,7 +21,7 @@ export const ContasReceberTab: React.FC<ContasReceberTabProps> = ({
   onRefresh,
   onViewBoletoReceber,
 }) => {
-  const [filterSituacao, setFilterSituacao] = useState<'todas' | 'aberto' | 'recebidas' | 'atrasadas'>('aberto');
+  const [filterSituacao, setFilterSituacao] = useState<'todas' | 'aberto' | 'recebidas' | 'atrasadas'>('todas');
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedLinhaId, setCopiedLinhaId] = useState<number | null>(null);
 
@@ -35,9 +35,9 @@ export const ContasReceberTab: React.FC<ContasReceberTabProps> = ({
 
     if (!matchSearch) return false;
 
-    if (filterSituacao === 'aberto') return c.situacao === 1 && c.vencimento >= hojeStr;
+    if (filterSituacao === 'aberto') return (c.situacao === 1 || c.situacao === 3) && c.vencimento >= hojeStr;
     if (filterSituacao === 'recebidas') return c.situacao === 2;
-    if (filterSituacao === 'atrasadas') return c.situacao === 1 && c.vencimento < hojeStr;
+    if (filterSituacao === 'atrasadas') return (c.situacao === 1 || c.situacao === 3) && c.vencimento < hojeStr;
     return true;
   });
 
