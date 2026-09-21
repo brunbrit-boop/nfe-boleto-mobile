@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import type {
-  ActiveTab,
   BankProvider,
   ChatMessage,
   CompanyProfile,
@@ -9,22 +8,15 @@ import type {
   BlingCliente,
   BlingContaPagar,
   BlingContaReceber,
-  ResumoFinanceiro,
   EmpresaTenant,
 } from './types';
-import { Header } from './components/Header';
-import { BottomNav } from './components/BottomNav';
-import { ChatView } from './components/ChatView';
-import { VoiceMicBar } from './components/VoiceMicBar';
-import { ClientesTab } from './components/ClientesTab';
-import { ContasPagarTab } from './components/ContasPagarTab';
-import { ContasReceberTab } from './components/ContasReceberTab';
 import { NFeModal } from './components/NFeModal';
 import { BoletoModal } from './components/BoletoModal';
 import { PayloadModal } from './components/PayloadModal';
 import { CompanySettingsModal } from './components/CompanySettingsModal';
 import { EmpresasScreen } from './components/EmpresasScreen';
 import { AddEmpresaModal } from './components/AddEmpresaModal';
+import { BtBusinessSuite } from './components/bt/BtBusinessSuite';
 import { criarNFeDeComando, interpretarComandoVoz } from './utils/aiParser';
 import { speechEngine } from './utils/speechEngine';
 import {
@@ -92,9 +84,6 @@ export const App: React.FC = () => {
   const [empresaAtivaId, setEmpresaAtivaId] = useState<string | null>(null);
   const [isAddEmpresaOpen, setIsAddEmpresaOpen] = useState(false);
 
-  // Aba Ativa dentro da empresa (Padrão: Robô)
-  const [activeTab, setActiveTab] = useState<ActiveTab>('robo');
-
   // Dados da Empresa Ativa
   const empresaAtiva = empresas.find((e) => e.id === empresaAtivaId) || null;
 
@@ -115,8 +104,9 @@ export const App: React.FC = () => {
 
   const [bancoAtual, setBancoAtual] = useState<BankProvider>('inter');
 
-  const [ttsEnabled, setTtsEnabled] = useState<boolean>(true);
+  const [ttsEnabled, _setTtsEnabled] = useState<boolean>(true);
   const [isListening, setIsListening] = useState<boolean>(false);
+  const [isSpeaking, _setIsSpeaking] = useState<boolean>(false);
   const [listeningTranscript, setListeningTranscript] = useState<string>('');
 
   // Modais
@@ -124,16 +114,12 @@ export const App: React.FC = () => {
   const [selectedParcelaForBoleto, setSelectedParcelaForBoleto] = useState<{ parcela: Installment; nfe: NFeData } | null>(null);
   const [selectedPayloadBanco, setSelectedPayloadBanco] = useState<{ payload: object; parcela: Installment } | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
-  const [blingAlert, setBlingAlert] = useState<string | null>(null);
 
   // Estados dos Módulos do Bling ERP da Empresa Ativa
   const [clientes, setClientes] = useState<BlingCliente[]>([]);
   const [contasPagar, setContasPagar] = useState<BlingContaPagar[]>([]);
-  const [resumoPagar, setResumoPagar] = useState<ResumoFinanceiro>({ totalAberto: 0, totalLiquidado: 0, totalVencido: 0, qtdRegistros: 0 });
   const [contasReceber, setContasReceber] = useState<BlingContaReceber[]>([]);
-  const [resumoReceber, setResumoReceber] = useState<ResumoFinanceiro>({ totalAberto: 0, totalLiquidado: 0, totalVencido: 0, qtdRegistros: 0 });
   const [isLoadingBling, setIsLoadingBling] = useState<boolean>(false);
-  const [isBlingLive, setIsBlingLive] = useState<boolean>(false);
 
   // Mensagens do Chat do Robô (100% limpo, sem conteúdo fake)
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -212,10 +198,7 @@ export const App: React.FC = () => {
 
       setClientes(resClientes.data);
       setContasPagar(resPagar.data);
-      setResumoPagar(resPagar.resumo);
       setContasReceber(resReceber.data);
-      setResumoReceber(resReceber.resumo);
-      setIsBlingLive(resClientes.isLive || resPagar.isLive || resReceber.isLive);
     } catch {
       // Ignora erro de rede
     } finally {
@@ -289,13 +272,13 @@ export const App: React.FC = () => {
       const clientId = localStorage.getItem('bling_client_id') || BLING_DEFAULT_CLIENT_ID;
 
       if (clientSecret) {
-        setBlingAlert('Trocando código de autorização por token de acesso no Bling...');
+        console.log('Trocando código de autorização por token de acesso no Bling...');
         exchangeBlingCodeForToken(code, clientId, clientSecret).then((res) => {
           if (res.success) {
-            setBlingAlert('Conta do Bling conectada com sucesso! Dados reais importados.');
+            console.log('Conta do Bling conectada com sucesso! Dados reais importados.');
             carregarDadosBling();
           } else {
-            setBlingAlert(`Erro ao autenticar: ${res.error}`);
+            console.error(`Erro ao autenticar: ${res.error}`);
           }
         });
       }
@@ -390,7 +373,6 @@ export const App: React.FC = () => {
       return;
     }
     if (actionText === 'go_clientes') {
-      setActiveTab('clientes');
       return;
     }
     if (actionText === 'view_demo_danfe' || actionText === 'view_danfe') {
@@ -416,7 +398,6 @@ export const App: React.FC = () => {
   };
 
   const handleEmitirParaCliente = (cliente: BlingCliente) => {
-    setActiveTab('robo');
     const sugestao = `Criar nota fiscal de venda de produtos da minha empresa para ${cliente.nome} no valor de R$ 2.500 em 2 parcelas`;
     setTimeout(() => {
       handleProcessUserCommand(sugestao, false);
@@ -551,134 +532,51 @@ export const App: React.FC = () => {
     );
   }
 
+  if (!empresaAtiva) {
+    setEmpresaAtivaId(null);
+    return null;
+  }
+
   return (
-    <div className="flex flex-col h-screen max-h-screen bg-slate-50 text-slate-900 overflow-hidden font-sans select-none">
-      {/* Top Header Executivo da Empresa */}
-      <Header
+    <div className="flex flex-col h-screen max-h-screen bg-slate-50 dark:bg-[#0c1a15] text-slate-900 dark:text-white overflow-hidden font-sans select-none">
+      {/* Suite Completa do BT Business conectada ao Bling da Empresa */}
+      <BtBusinessSuite
+        empresa={empresaAtiva}
+        company={company}
         bancoAtual={bancoAtual}
         onSelectBanco={handleSelectBanco}
-        ttsEnabled={ttsEnabled}
-        onToggleTts={() => setTtsEnabled(!ttsEnabled)}
+        onBackToEmpresas={() => setEmpresaAtivaId(null)}
         onOpenSettings={() => setIsSettingsOpen(true)}
-        empresaNome={company.nomeFantasia || company.razaoSocial}
-        isBlingConnected={isBlingLive || Boolean(empresaAtiva?.blingAccessToken)}
-        onVoltarEmpresas={() => setEmpresaAtivaId(null)}
-      />
-
-      {/* Alerta Temporário de Conexão */}
-      {blingAlert && (
-        <div className="bg-emerald-600 text-white px-4 py-2 text-xs font-semibold flex items-center justify-between shadow-sm animate-fade-in">
-          <div className="flex items-center gap-2">
-            <span>🟢</span>
-            <span>{blingAlert}</span>
-          </div>
-          <button
-            onClick={() => setBlingAlert(null)}
-            className="text-white/80 hover:text-white text-sm font-black px-1.5"
-          >
-            ✕
-          </button>
-        </div>
-      )}
-
-      {/* Banner Informativo quando Bling não estiver conectado */}
-      {!isBlingLive && !empresaAtiva?.blingAccessToken && (
-        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-xs flex items-center justify-between text-amber-900 animate-fade-in">
-          <div className="flex items-center gap-2">
-            <span className="text-base">⚠️</span>
-            <span>
-              <strong>Bling não conectado:</strong> Insira o Token de Acesso para sincronizar seus clientes e contas reais.
-            </span>
-          </div>
-          <button
-            onClick={() => setIsSettingsOpen(true)}
-            className="text-[11px] font-bold bg-amber-600 hover:bg-amber-700 text-white px-3 py-1 rounded-lg transition shrink-0 ml-2 shadow-sm active:scale-95"
-          >
-            Conectar Bling
-          </button>
-        </div>
-      )}
-
-      {/* Conteúdo Principal Alternado pelas 4 Abas */}
-      <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Aba 1: Robô */}
-        {activeTab === 'robo' && (
-          <>
-            <ChatView
-              messages={messages}
-              bancoAtual={bancoAtual}
-              onViewDanfe={(nfe) => setSelectedNFeForDanfe(nfe)}
-              onEmitirNFe={(nfe) => {
-                setMessages((prev) =>
-                  prev.map((m) =>
-                    m.nfeData?.numeroNFe === nfe.numeroNFe
-                      ? { ...m, nfeData: { ...nfe, status: 'autorizada' } }
-                      : m
-                  )
-                );
-              }}
-              onViewBoleto={(parcela, nfe) => setSelectedParcelaForBoleto({ parcela, nfe })}
-              onViewPayloadBanco={(payload, parcela) => setSelectedPayloadBanco({ payload, parcela })}
-              onQuickAction={handleQuickAction}
-            />
-
-            <VoiceMicBar
-              isListening={isListening}
-              onStartListening={handleStartListening}
-              onStopListening={handleStopListening}
-              onSendMessage={(text) => handleProcessUserCommand(text, false)}
-              listeningTranscript={listeningTranscript}
-            />
-          </>
-        )}
-
-        {/* Aba 2: Clientes */}
-        {activeTab === 'clientes' && (
-          <ClientesTab
-            clientes={clientes}
-            isLoading={isLoadingBling}
-            isLive={isBlingLive}
-            onRefresh={() => carregarDadosBling(empresaAtiva?.blingAccessToken, empresaAtiva?.id, bancoAtual)}
-            onEmitirParaCliente={handleEmitirParaCliente}
-          />
-        )}
-
-        {/* Aba 3: Contas a Pagar */}
-        {activeTab === 'pagar' && (
-          <ContasPagarTab
-            contas={contasPagar}
-            resumo={resumoPagar}
-            isLoading={isLoadingBling}
-            isLive={isBlingLive}
-            onRefresh={() => carregarDadosBling(empresaAtiva?.blingAccessToken, empresaAtiva?.id, bancoAtual)}
-          />
-        )}
-
-        {/* Aba 4: Contas a Receber */}
-        {activeTab === 'receber' && (
-          <ContasReceberTab
-            contas={contasReceber}
-            resumo={resumoReceber}
-            isLoading={isLoadingBling}
-            isLive={isBlingLive}
-            onRefresh={() => carregarDadosBling(empresaAtiva?.blingAccessToken, empresaAtiva?.id, bancoAtual)}
-            onViewBoletoReceber={handleViewBoletoReceber}
-          />
-        )}
-      </main>
-
-      {/* Barra de Navegação Inferior com as 4 Abas */}
-      <BottomNav
-        activeTab={activeTab}
-        onChangeTab={setActiveTab}
-        badgeCounts={{
-          clientes: clientes.length,
-          pagar: contasPagar.filter((c) => c.situacao === 1).length,
-          receber: contasReceber.filter((c) => c.situacao === 1).length,
+        contasPagar={contasPagar}
+        contasReceber={contasReceber}
+        clientes={clientes}
+        carregandoBling={isLoadingBling}
+        onRecarregarBling={() => carregarDadosBling(empresaAtiva?.blingAccessToken, empresaAtiva?.id, bancoAtual)}
+        messages={messages}
+        isListening={isListening}
+        isSpeaking={isSpeaking}
+        listeningTranscript={listeningTranscript}
+        onStartListening={handleStartListening}
+        onStopListening={handleStopListening}
+        onSendMessage={(text) => handleProcessUserCommand(text, false)}
+        onQuickAction={handleQuickAction}
+        onViewDanfe={(nfe) => setSelectedNFeForDanfe(nfe)}
+        onViewBoleto={(parcela, nfe) => setSelectedParcelaForBoleto({ parcela, nfe })}
+        onViewPayloadBanco={(payload, parcela) => setSelectedPayloadBanco({ payload, parcela })}
+        onViewBoletoReceber={handleViewBoletoReceber}
+        onEmitirNFe={(nfe) => {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.nfeData?.numeroNFe === nfe.numeroNFe
+                ? { ...m, nfeData: { ...nfe, status: 'autorizada' } }
+                : m
+            )
+          );
         }}
+        onEmitirParaCliente={handleEmitirParaCliente}
       />
 
-      {/* Modais */}
+      {/* Modais Globais de Apoio */}
       {selectedNFeForDanfe && (
         <NFeModal
           nfe={selectedNFeForDanfe}
