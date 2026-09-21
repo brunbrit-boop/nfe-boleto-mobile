@@ -133,6 +133,7 @@ export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
               onRefreshBling={onRecarregarBling}
               carregando={carregandoBling}
               onViewBoletoReceber={onViewBoletoReceber}
+              empresaNome={empresa.nomeFantasia || empresa.razaoSocial}
             />
           )}
 

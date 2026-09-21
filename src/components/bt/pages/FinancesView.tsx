@@ -45,6 +45,7 @@ interface FinancesViewProps {
   onRefreshBling?: () => void;
   carregando?: boolean;
   onViewBoletoReceber?: (conta: BlingContaReceber) => void;
+  empresaNome?: string;
 }
 
 type TableMode = 'forecast' | 'realized' | 'all';
@@ -154,6 +155,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   onRefreshBling,
   carregando = false,
   onViewBoletoReceber,
+  empresaNome,
 }) => {
   // Suppress unused warning if onViewBoletoReceber is not yet hooked
   void onViewBoletoReceber;
@@ -252,7 +254,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         type: 'receivable',
         status: isPaid ? 'paid' : 'open',
         originType: isPaid ? 'bank_statement' : 'bling_erp',
-        companyName: 'TechCorp Global',
+        companyName: empresaNome || 'TechCorp Global',
         bankName: 'Banco Inter',
         method: cr.pixCopiaECola ? 'PIX' : cr.linkBoleto ? 'Boleto' : 'Bolepix',
         unit: 'Matriz',
@@ -279,7 +281,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         type: 'payable',
         status: isPaid ? 'paid' : 'open',
         originType: isPaid ? 'bank_statement' : 'bling_erp',
-        companyName: 'TechCorp Global',
+        companyName: empresaNome || 'TechCorp Global',
         bankName: 'Banco Inter',
         method: cp.formaPagamento?.descricao || 'Boleto 30d',
         unit: 'Matriz',
