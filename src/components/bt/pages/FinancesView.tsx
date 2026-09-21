@@ -1120,7 +1120,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     }
   };
 
-  // Renderizador SVG personalizado da bolinha de saldo com área de clique interativa e hover isolado
+  // Renderizador SVG personalizado da bolinha de saldo com área de clique interativa e hover exato na linha/bolinha
   const renderBalanceDot = (props: any) => {
     const { cx, cy, payload } = props;
     if (cx === undefined || cy === undefined || !payload) return null;
@@ -1146,32 +1146,29 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
           setHoveredDotData((prev) => (prev?.payload?.date === payload.date ? null : prev));
         }}
       >
-        {/* Hitbox expandida transparente para toque/clique e hover fácil (somente na bolinha da linha de saldo) */}
-        <circle cx={cx} cy={cy} r={16} fill="transparent" className="cursor-pointer" />
-
-        {/* Halo animado quando fixado ou com hover */}
-        {(isPinned || isHovered) && (
+        {/* Halo animado quando fixado */}
+        {isPinned && (
           <circle
             cx={cx}
             cy={cy}
-            r={isPinned ? 10 : 8}
+            r={10}
             fill="#3b82f6"
-            fillOpacity={isPinned ? 0.25 : 0.15}
+            fillOpacity={0.25}
             stroke="#2563eb"
             strokeWidth={1.5}
-            className={isPinned ? 'animate-pulse' : ''}
+            className="animate-pulse"
           />
         )}
 
-        {/* Bolinha central de saldo */}
+        {/* Bolinha central de saldo (dimensão exata sobre a linha azul) */}
         <circle
           cx={cx}
           cy={cy}
-          r={isPinned ? 5.5 : isHovered ? 5 : 4}
+          r={isPinned ? 6 : isHovered ? 5.5 : 4.5}
           fill={isPinned ? '#1d4ed8' : isHovered ? '#3b82f6' : '#2563eb'}
           stroke="#ffffff"
           strokeWidth={2}
-          className="transition-transform duration-150"
+          className="transition-all duration-150"
         />
       </g>
     );
@@ -1642,22 +1639,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                 stroke="#2563eb"
                 strokeWidth={2.5}
                 dot={renderBalanceDot}
-                activeDot={{
-                  r: 6,
-                  fill: '#2563eb',
-                  stroke: '#ffffff',
-                  strokeWidth: 2,
-                  cursor: 'pointer',
-                  onClick: (_e: any, eventPayload: any) => {
-                    if (eventPayload?.payload) {
-                      setHoveredDotData(null);
-                      handleDotClick(eventPayload.payload, {
-                        x: eventPayload.cx,
-                        y: eventPayload.cy,
-                      });
-                    }
-                  },
-                }}
+                activeDot={false}
               />
             </ComposedChart>
           </ResponsiveContainer>
