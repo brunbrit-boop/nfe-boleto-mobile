@@ -14,6 +14,7 @@ import { CompanySettingsModal } from './components/CompanySettingsModal';
 import { criarNFeDeComando, interpretarComandoVoz } from './utils/aiParser';
 import { speechEngine } from './utils/speechEngine';
 import { carregarClientesBling, carregarContasPagarBling, carregarContasReceberBling, getStoredBlingToken } from './services/blingService';
+import { exchangeBlingCodeForToken, BLING_DEFAULT_CLIENT_ID } from './utils/blingApi';
 
 export const App: React.FC = () => {
   // Aba Ativa (Padrão: Robô)
@@ -139,10 +140,28 @@ export const App: React.FC = () => {
     const code = params.get('code');
     if (code) {
       localStorage.setItem('bling_auth_code', code);
-      setBlingAlert(`Código de autorização OAuth do Bling recebido com sucesso!`);
-      speechEngine.playBeep('success');
+      const clientSecret = localStorage.getItem('bling_client_secret');
+      const clientId = localStorage.getItem('bling_client_id') || BLING_DEFAULT_CLIENT_ID;
+
+      if (clientSecret) {
+        setBlingAlert('Trocando código de autorização por token de acesso no Bling...');
+        exchangeBlingCodeForToken(code, clientId, clientSecret).then((res) => {
+          if (res.success) {
+            setBlingAlert('Conta do Bling conectada com sucesso! Dados reais importados.');
+            speechEngine.playBeep('success');
+            carregarDadosBling();
+          } else {
+            setBlingAlert(`Código recebido! Para autenticar, confirme o Client Secret ou cole o Token de Acesso nas configurações.`);
+            speechEngine.playBeep('error');
+            setIsSettingsOpen(true);
+          }
+        });
+      } else {
+        setBlingAlert('Autorização do Bling recebida! Insira seu Client Secret ou Token de Acesso para sincronizar.');
+        speechEngine.playBeep('start');
+        setIsSettingsOpen(true);
+      }
       window.history.replaceState({}, document.title, window.location.pathname);
-      carregarDadosBling();
     }
   }, []);
 
@@ -367,6 +386,24 @@ export const App: React.FC = () => {
         </div>
       )}
 
+      {/* Banner Informativo quando Bling não estiver conectado */}
+      {!isBlingLive && !getStoredBlingToken() && (
+        <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-xs flex items-center justify-between text-amber-900 animate-fade-in">
+          <div className="flex items-center gap-2">
+            <span className="text-base">⚠️</span>
+            <span>
+              <strong>Bling não conectado:</strong> Insira o Token de Acesso ou Client Secret para sincronizar seus clientes e contas reais.
+            </span>
+          </div>
+          <button
+            onClick={() => setIsSettingsOpen(true)}
+            className="text-[11px] font-bold bg-amber-600 hover:bg-amber-700 text-white px-3 py-1 rounded-lg transition shrink-0 ml-2 shadow-sm active:scale-95"
+          >
+            Conectar Bling
+          </button>
+        </div>
+      )}
+
       {/* Conteúdo Principal Alternado pelas 4 Abas */}
       <main className="flex-1 flex flex-col overflow-hidden">
         {/* Aba 1: Robô */}
@@ -476,6 +513,7 @@ export const App: React.FC = () => {
           company={company}
           onSave={handleSaveCompany}
           onClose={() => setIsSettingsOpen(false)}
+          onBlingConnected={carregarDadosBling}
         />
       )}
     </div>

@@ -40,13 +40,18 @@ export const Header: React.FC<HeaderProps> = ({
               <h1 className="text-sm font-extrabold text-slate-900 tracking-tight leading-none">
                 Gestão & Robô Fiscal
               </h1>
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
-                isBlingConnected
-                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                  : 'bg-blue-50 text-blue-700 border-blue-200'
-              }`}>
-                {isBlingConnected ? 'Bling ERP' : 'API v3'}
-              </span>
+              <button
+                onClick={onOpenSettings}
+                className={`text-[10px] font-bold px-2 py-0.5 rounded-full border transition flex items-center gap-1 ${
+                  isBlingConnected
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                    : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100 animate-pulse'
+                }`}
+                title={isBlingConnected ? 'Bling ERP Conectado! Clique para ver configurações.' : 'Bling Desconectado! Clique para conectar.'}
+              >
+                <span>{isBlingConnected ? '🟢' : '🟡'}</span>
+                <span>{isBlingConnected ? 'Bling Ativo' : 'Conectar Bling'}</span>
+              </button>
             </div>
             <p className="text-[11px] text-slate-500 truncate max-w-[140px] sm:max-w-[200px] leading-tight mt-0.5 font-medium">
               {empresaNome || 'Sua Empresa'}
