@@ -1,9 +1,11 @@
 export type BankProvider = 'inter' | 'asaas' | 'cora' | 'itau' | 'bradesco' | 'sicoob';
 
+export type ActiveTab = 'robo' | 'clientes' | 'pagar' | 'receber';
+
 export interface BankConfig {
   id: BankProvider;
   name: string;
-  code: string; // ex: '077', '260', '403', '341', '237', '756'
+  code: string;
   color: string;
   badgeBg: string;
   badgeText: string;
@@ -50,7 +52,7 @@ export interface ProductItem {
 }
 
 export interface Installment {
-  numero: number; // 1, 2, 3
+  numero: number;
   totalParcelas: number;
   dataVencimento: string; // YYYY-MM-DD
   dataVencimentoFormatada: string; // DD/MM/YYYY
@@ -94,4 +96,88 @@ export interface ChatMessage {
     label: string;
     action: string;
   }[];
+}
+
+/* =========================================================
+   Estruturas Oficiais de Dados da API v3 do Bling ERP
+========================================================= */
+
+export interface BlingCliente {
+  id: number;
+  nome: string;
+  fantasia?: string;
+  tipoPessoa: 'F' | 'J';
+  numeroDocumento: string; // CPF ou CNPJ formatado
+  ie?: string;
+  email?: string;
+  telefone?: string;
+  celular?: string;
+  situacao: 'A' | 'I'; // A = Ativo, I = Inativo
+  endereco?: {
+    geral?: {
+      endereco: string;
+      numero: string;
+      complemento?: string;
+      bairro: string;
+      cep: string;
+      municipio: string;
+      uf: string;
+    };
+  };
+  saldoDevedor?: number;
+  limiteCredito?: number;
+}
+
+export interface BlingContaPagar {
+  id: number;
+  numeroDocumento: string;
+  dataEmissao: string; // YYYY-MM-DD
+  vencimento: string; // YYYY-MM-DD
+  vencimentoFormatado: string;
+  valor: number;
+  valorFormatado: string;
+  saldo: number;
+  historico?: string;
+  categoria?: string;
+  situacao: 1 | 2 | 3; // 1 = Em aberto, 2 = Paga, 3 = Cancelada
+  contato: {
+    id: number;
+    nome: string;
+    numeroDocumento?: string;
+  };
+  formaPagamento?: {
+    id: number;
+    descricao: string;
+  };
+}
+
+export interface BlingContaReceber {
+  id: number;
+  numeroDocumento: string;
+  dataEmissao: string; // YYYY-MM-DD
+  vencimento: string; // YYYY-MM-DD
+  vencimentoFormatado: string;
+  valor: number;
+  valorFormatado: string;
+  saldo: number;
+  historico?: string;
+  categoria?: string;
+  situacao: 1 | 2 | 3; // 1 = Em aberto, 2 = Recebida/Liquidada, 3 = Cancelada
+  contato: {
+    id: number;
+    nome: string;
+    numeroDocumento?: string;
+  };
+  nossoNumero?: string;
+  linhaDigitavel?: string;
+  codigoBarras?: string;
+  pixCopiaECola?: string;
+  linkBoleto?: string;
+}
+
+export interface ResumoFinanceiro {
+  totalAberto: number;
+  totalLiquidado: number;
+  totalVencido: number;
+  qtdRegistros: number;
 }

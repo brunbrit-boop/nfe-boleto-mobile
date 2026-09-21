@@ -26,7 +26,7 @@ export const NFeCard: React.FC<NFeCardProps> = ({ nfe, onViewDanfe, onEmitirNFe 
       setIsEmitting(false);
       nfe.status = 'autorizada';
       speechEngine.playBeep('success');
-      speechEngine.speak('Nota fiscal autorizada com sucesso na SEFAZ! Os boletos já estão registrados.');
+      speechEngine.speak('Nota fiscal autorizada com sucesso na SEFAZ e sincronizada no Bling!');
       confetti({
         particleCount: 60,
         spread: 60,
@@ -39,44 +39,44 @@ export const NFeCard: React.FC<NFeCardProps> = ({ nfe, onViewDanfe, onEmitirNFe 
   const isAutorizada = nfe.status === 'autorizada';
 
   return (
-    <div className="glass-card rounded-2xl overflow-hidden border-slate-700/80 shadow-lg mt-2 transition hover:border-slate-600">
+    <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm mt-2 transition hover:border-slate-300">
       {/* Top Banner Status */}
       <div className={`px-4 py-2.5 flex items-center justify-between text-xs font-semibold ${
         isAutorizada 
-          ? 'bg-emerald-500/15 text-emerald-400 border-b border-emerald-500/20' 
-          : 'bg-amber-500/15 text-amber-300 border-b border-amber-500/20'
+          ? 'bg-emerald-50 text-emerald-800 border-b border-emerald-100' 
+          : 'bg-amber-50 text-amber-800 border-b border-amber-100'
       }`}>
         <div className="flex items-center gap-1.5">
-          <FileText className="w-4 h-4" />
-          <span>NF-e Nº {nfe.numeroNFe} (Série {nfe.serie})</span>
+          <FileText className="w-4 h-4 text-slate-700" />
+          <span className="font-bold">NF-e Nº {nfe.numeroNFe} (Série {nfe.serie})</span>
         </div>
         <div className="flex items-center gap-1">
           {isAutorizada ? (
             <>
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Autorizada SEFAZ</span>
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+              <span className="font-bold text-emerald-700">Autorizada SEFAZ / Bling</span>
             </>
           ) : (
             <>
-              <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
-              <span>Rascunho Pronto</span>
+              <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+              <span className="font-bold text-amber-700">Rascunho Pronto</span>
             </>
           )}
         </div>
       </div>
 
-      <div className="p-4 space-y-3">
+      <div className="p-3.5 space-y-3">
         {/* Destinatário */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-700/60 pb-2.5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 border-b border-slate-100 pb-2">
           <div>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
               Cliente / Destinatário
             </span>
-            <h4 className="text-sm font-bold text-slate-100">
+            <h4 className="text-sm font-bold text-slate-900">
               {nfe.destinatario.razaoSocial}
             </h4>
           </div>
-          <div className="text-xs text-slate-300 sm:text-right font-mono">
+          <div className="text-xs text-slate-600 sm:text-right font-mono">
             <span>CNPJ: {nfe.destinatario.cnpj}</span>
             <div className="text-[11px] text-slate-400">
               {nfe.destinatario.cidade} - {nfe.destinatario.uf}
@@ -86,20 +86,20 @@ export const NFeCard: React.FC<NFeCardProps> = ({ nfe, onViewDanfe, onEmitirNFe 
 
         {/* Itens da Venda */}
         <div>
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
             Itens da Venda (Produtos)
           </span>
-          <div className="space-y-1.5 bg-slate-900/60 rounded-xl p-2.5 border border-slate-800">
+          <div className="space-y-1.5 bg-slate-50 rounded-xl p-2.5 border border-slate-200/80">
             {nfe.itens.map((item) => (
               <div key={item.id} className="flex items-center justify-between text-xs gap-2">
                 <div className="truncate flex-1">
-                  <span className="font-semibold text-slate-200">{item.descricao}</span>
-                  <div className="text-[10px] text-slate-400">
+                  <span className="font-bold text-slate-800">{item.descricao}</span>
+                  <div className="text-[10px] text-slate-500">
                     Qtd: {item.quantidade} {item.unidade} • NCM: {item.ncm} • CFOP: {item.cfop}
                   </div>
                 </div>
                 <div className="text-right shrink-0">
-                  <span className="font-bold text-slate-100">
+                  <span className="font-bold text-slate-900">
                     {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(item.valorTotal)}
                   </span>
                 </div>
@@ -109,21 +109,21 @@ export const NFeCard: React.FC<NFeCardProps> = ({ nfe, onViewDanfe, onEmitirNFe 
         </div>
 
         {/* Chave de Acesso da NF-e */}
-        <div className="bg-slate-900/70 rounded-xl p-2.5 border border-slate-800 flex items-center justify-between gap-2">
+        <div className="bg-slate-50 rounded-xl p-2.5 border border-slate-200 flex items-center justify-between gap-2">
           <div className="truncate">
-            <span className="text-[10px] text-slate-400 block font-semibold">
-              Chave de Acesso (44 dígitos SEFAZ):
+            <span className="text-[10px] text-slate-500 block font-semibold">
+              Chave de Acesso SEFAZ (44 dígitos):
             </span>
-            <span className="text-[11px] font-mono text-slate-300 truncate block">
+            <span className="text-[11px] font-mono text-slate-700 truncate block font-medium">
               {nfe.chaveAcesso}
             </span>
           </div>
           <button
             onClick={handleCopyKey}
-            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition shrink-0"
+            className="p-1.5 rounded-lg bg-white hover:bg-slate-100 text-slate-600 border border-slate-200 transition shrink-0"
             title="Copiar Chave de Acesso"
           >
-            {copiedKey ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+            {copiedKey ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
           </button>
         </div>
 
@@ -131,7 +131,7 @@ export const NFeCard: React.FC<NFeCardProps> = ({ nfe, onViewDanfe, onEmitirNFe 
         <div className="flex items-center justify-between pt-1">
           <div>
             <span className="text-[10px] text-slate-400 block font-semibold">Valor Total da Nota</span>
-            <span className="text-lg font-black text-brand-400 tracking-tight">
+            <span className="text-lg font-black text-blue-700 tracking-tight">
               {nfe.valorTotalFormatado}
             </span>
           </div>
@@ -139,9 +139,9 @@ export const NFeCard: React.FC<NFeCardProps> = ({ nfe, onViewDanfe, onEmitirNFe 
           <div className="flex items-center gap-2">
             <button
               onClick={() => onViewDanfe(nfe)}
-              className="flex items-center gap-1 text-xs font-semibold px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
+              className="flex items-center gap-1 text-xs font-semibold px-3 py-2 rounded-xl bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 shadow-sm transition"
             >
-              <ExternalLink className="w-3.5 h-3.5" />
+              <ExternalLink className="w-3.5 h-3.5 text-blue-600" />
               <span>Ver DANFE</span>
             </button>
 
@@ -149,10 +149,10 @@ export const NFeCard: React.FC<NFeCardProps> = ({ nfe, onViewDanfe, onEmitirNFe 
               <button
                 onClick={handleEmitir}
                 disabled={isEmitting}
-                className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-xl bg-gradient-to-r from-brand-500 to-emerald-500 hover:from-brand-400 hover:to-emerald-400 text-slate-950 shadow-md shadow-brand-500/20 transition active:scale-95 disabled:opacity-50"
+                className="flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white shadow-sm transition active:scale-95 disabled:opacity-50"
               >
                 <ShieldCheck className="w-4 h-4" />
-                <span>{isEmitting ? 'Emitindo...' : 'Emitir na SEFAZ'}</span>
+                <span>{isEmitting ? 'Transmitindo...' : 'Transmitir SEFAZ'}</span>
               </button>
             )}
           </div>

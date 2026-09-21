@@ -10,6 +10,7 @@ interface HeaderProps {
   onToggleTts: () => void;
   onOpenSettings: () => void;
   empresaNome: string;
+  isBlingConnected: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -19,30 +20,35 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleTts,
   onOpenSettings,
   empresaNome,
+  isBlingConnected,
 }) => {
   const bankConfig = BANKS[bancoAtual];
 
   return (
-    <header className="sticky top-0 z-30 w-full glass-panel border-b border-slate-800/80 px-4 py-3">
+    <header className="sticky top-0 z-30 w-full bg-white/95 backdrop-blur-md border-b border-slate-200/90 px-4 py-2.5 shadow-sm">
       <div className="max-w-xl mx-auto flex items-center justify-between gap-2">
         {/* Robô Avatar & Status */}
         <div className="flex items-center gap-2.5">
           <div className="relative">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-brand-600 via-emerald-500 to-teal-400 flex items-center justify-center shadow-lg shadow-brand-500/20 ring-2 ring-brand-400/30">
-              <Sparkles className="w-5 h-5 text-slate-950 stroke-[2.5]" />
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-emerald-500 flex items-center justify-center shadow-md shadow-blue-500/20 ring-2 ring-blue-100">
+              <Sparkles className="w-5 h-5 text-white stroke-[2.5]" />
             </div>
-            <span className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-emerald-500 ring-2 ring-slate-950 animate-pulse" />
+            <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" />
           </div>
           <div>
             <div className="flex items-center gap-1.5">
-              <h1 className="text-sm font-bold text-slate-100 tracking-tight leading-none">
-                Robô Fiscal & Boletos
+              <h1 className="text-sm font-extrabold text-slate-900 tracking-tight leading-none">
+                Gestão & Robô Fiscal
               </h1>
-              <span className="text-[10px] font-semibold bg-brand-500/20 text-brand-300 px-1.5 py-0.5 rounded border border-brand-500/30">
-                IA 2.5
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                isBlingConnected
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : 'bg-blue-50 text-blue-700 border-blue-200'
+              }`}>
+                {isBlingConnected ? 'Bling ERP' : 'API v3'}
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 truncate max-w-[140px] sm:max-w-[180px] leading-tight mt-0.5">
+            <p className="text-[11px] text-slate-500 truncate max-w-[140px] sm:max-w-[200px] leading-tight mt-0.5 font-medium">
               {empresaNome || 'Sua Empresa'}
             </p>
           </div>
@@ -55,7 +61,7 @@ export const Header: React.FC<HeaderProps> = ({
             <select
               value={bancoAtual}
               onChange={(e) => onSelectBanco(e.target.value as BankProvider)}
-              className="appearance-none text-xs font-semibold pl-6 pr-5 py-1.5 rounded-lg bg-slate-800/90 text-slate-200 border border-slate-700/80 hover:border-slate-600 focus:outline-none focus:ring-1 focus:ring-brand-400 transition cursor-pointer"
+              className="appearance-none text-xs font-bold pl-6 pr-5 py-1.5 rounded-xl bg-slate-50 text-slate-700 border border-slate-200 hover:border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition cursor-pointer"
               title="Banco padrão para registro dos boletos"
             >
               {Object.values(BANKS).map((b) => (
@@ -75,10 +81,10 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Botão de Som / Voz */}
           <button
             onClick={onToggleTts}
-            className={`p-2 rounded-lg border transition ${
+            className={`p-2 rounded-xl border transition ${
               ttsEnabled
-                ? 'bg-brand-500/10 text-brand-400 border-brand-500/30 hover:bg-brand-500/20'
-                : 'bg-slate-800/80 text-slate-400 border-slate-700/60 hover:text-slate-200'
+                ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100'
+                : 'bg-slate-50 text-slate-400 border-slate-200 hover:text-slate-600'
             }`}
             title={ttsEnabled ? 'Voz ativada (o robô fala)' : 'Voz desativada (mudo)'}
           >
@@ -88,8 +94,8 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Botão Configurações */}
           <button
             onClick={onOpenSettings}
-            className="p-2 rounded-lg bg-slate-800/80 text-slate-400 border border-slate-700/60 hover:text-slate-200 hover:border-slate-600 transition"
-            title="Configurações da Empresa e Certificado A1"
+            className="p-2 rounded-xl bg-slate-50 text-slate-600 border border-slate-200 hover:text-slate-900 hover:bg-slate-100 transition"
+            title="Configurações da Empresa, Certificado A1 e Bling ERP"
           >
             <Settings className="w-4 h-4" />
           </button>
