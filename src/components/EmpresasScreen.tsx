@@ -15,8 +15,9 @@ import {
   Copy,
   Check,
   Layers,
+  CreditCard,
 } from 'lucide-react';
-import type { EmpresaTenant } from '../types';
+import type { EmpresaTenant, BankProvider } from '../types';
 import { BANKS } from '../utils/financeEngine';
 
 interface EmpresasScreenProps {
@@ -25,6 +26,7 @@ interface EmpresasScreenProps {
   onOpenAddEmpresa: () => void;
   onDeleteEmpresa: (empresaId: string) => void;
   onSyncEmpresa?: (empresa: EmpresaTenant) => Promise<void>;
+  onUpdateEmpresaBanco?: (empresaId: string, banco: BankProvider) => void;
 }
 
 export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
@@ -33,10 +35,12 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
   onOpenAddEmpresa,
   onDeleteEmpresa,
   onSyncEmpresa,
+  onUpdateEmpresaBanco,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [copiedCnpjId, setCopiedCnpjId] = useState<string | null>(null);
+  const [selectedEmpresaForBanks, setSelectedEmpresaForBanks] = useState<EmpresaTenant | null>(null);
 
   const getGradientByCor = (cor?: string) => {
     switch (cor) {
@@ -79,6 +83,18 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
     navigator.clipboard.writeText(cnpj);
     setCopiedCnpjId(empId);
     setTimeout(() => setCopiedCnpjId(null), 1800);
+  };
+
+  const handleSelectBanco = (empId: string, bancoKey: BankProvider) => {
+    if (onUpdateEmpresaBanco) {
+      onUpdateEmpresaBanco(empId, bancoKey);
+    }
+    if (selectedEmpresaForBanks && selectedEmpresaForBanks.id === empId) {
+      setSelectedEmpresaForBanks({
+        ...selectedEmpresaForBanks,
+        bancoPadrao: bancoKey,
+      });
+    }
   };
 
   // Filtragem de empresas por busca
@@ -127,7 +143,7 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
           </div>
         </div>
 
-        {/* Direita: Botão de Ação + Status Geral */}
+        {/* Direita: Botão de Ação */}
         <div className="flex items-center gap-3">
           <button
             onClick={onOpenAddEmpresa}
@@ -139,7 +155,7 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
         </div>
       </header>
 
-      {/* Conteúdo Principal em Largura Ampla (Desktop & Tablet & Mobile) */}
+      {/* Conteúdo Principal em Largura Ampla */}
       <main className="flex-1 max-w-6xl mx-auto w-full px-4 md:px-8 py-6 space-y-6">
         {/* Painel de Métricas & Boas-Vindas */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -351,7 +367,7 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                       </div>
                     </div>
 
-                    {/* Metadados: CNPJ, Localidade e Banco Emissor */}
+                    {/* Metadados: CNPJ, Localidade e Bancos */}
                     <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-[#1a382e]/80">
                       {/* CNPJ com Cópia Rápida */}
                       <div
@@ -378,7 +394,7 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                         </div>
                       </div>
 
-                      {/* Localidade e Banco Emissor */}
+                      {/* Localidade e Bancos (Clicável) */}
                       <div className="grid grid-cols-2 gap-2">
                         {/* Localidade */}
                         <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-[#162f27]/50 border border-slate-200/60 dark:border-[#214739]">
@@ -393,15 +409,27 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                           </div>
                         </div>
 
-                        {/* Banco Emissor */}
-                        <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-[#162f27]/50 border border-slate-200/60 dark:border-[#214739]">
-                          <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block mb-0.5">
-                            Banco Emissor
-                          </span>
-                          <div className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200 text-xs truncate">
-                            <span className="text-xs">{banco.logoIcon}</span>
-                            <span className="truncate">{banco.name}</span>
+                        {/* Bancos (Clickável para abrir lista de contas) */}
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedEmpresaForBanks(empresa);
+                          }}
+                          className="p-2.5 rounded-xl bg-slate-50 dark:bg-[#162f27]/50 hover:bg-emerald-500/10 dark:hover:bg-[#162f27] border border-slate-200/60 dark:border-[#214739] cursor-pointer transition group/bank flex items-center justify-between"
+                          title="Clique para ver os bancos cadastrados nesta empresa"
+                        >
+                          <div className="min-w-0">
+                            <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider block mb-0.5">
+                              Bancos
+                            </span>
+                            <div className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200 text-xs truncate">
+                              <span className="text-xs">{banco.logoIcon}</span>
+                              <span className="truncate group-hover/bank:text-[#11d493]">{banco.name}</span>
+                            </div>
                           </div>
+                          <span className="text-[9px] font-bold text-[#11d493] bg-emerald-500/10 px-1.5 py-0.5 rounded-md shrink-0 ml-1">
+                            Ver ▾
+                          </span>
                         </div>
                       </div>
 
@@ -455,6 +483,89 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
           </div>
         )}
       </main>
+
+      {/* Modal de Lista de Bancos Cadastrados da Empresa */}
+      {selectedEmpresaForBanks && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#162f27] rounded-2xl max-w-md w-full p-6 shadow-2xl border border-gray-200 dark:border-[#214739] space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <div className="flex items-center gap-2">
+                  <CreditCard className="w-5 h-5 text-[#11d493]" />
+                  <h3 className="text-base font-black text-gray-900 dark:text-white">
+                    Bancos Cadastrados
+                  </h3>
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  {selectedEmpresaForBanks.nomeFantasia || selectedEmpresaForBanks.razaoSocial}
+                </p>
+              </div>
+              <button
+                onClick={() => setSelectedEmpresaForBanks(null)}
+                className="p-1 rounded-lg text-gray-400 hover:text-white"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-2 pt-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                Selecione o Banco Emissor Padrão
+              </span>
+
+              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                {Object.values(BANKS).map((b) => {
+                  const isSelected = selectedEmpresaForBanks.bancoPadrao === b.id;
+
+                  return (
+                    <div
+                      key={b.id}
+                      onClick={() => handleSelectBanco(selectedEmpresaForBanks.id, b.id as BankProvider)}
+                      className={`p-3.5 rounded-xl border transition cursor-pointer flex items-center justify-between ${
+                        isSelected
+                          ? 'bg-emerald-500/10 border-[#11d493] text-gray-900 dark:text-white ring-1 ring-[#11d493]'
+                          : 'bg-gray-50 dark:bg-[#10221c] border-gray-200 dark:border-gray-800 text-gray-700 dark:text-gray-300 hover:border-gray-300 dark:hover:border-gray-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <span className="text-xl">{b.logoIcon}</span>
+                        <div>
+                          <span className="text-xs font-bold block leading-tight">
+                            {b.name}
+                          </span>
+                          <span className="text-[10px] text-gray-400">
+                            Cód: {b.code} • Boletos e Pix
+                          </span>
+                        </div>
+                      </div>
+
+                      {isSelected ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-[#11d493] text-slate-950">
+                          <Check className="w-3 h-3 stroke-[3]" />
+                          <span>Ativo</span>
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-gray-400 hover:text-white font-medium">
+                          Selecionar
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-3 border-t border-gray-100 dark:border-[#214739]">
+              <button
+                onClick={() => setSelectedEmpresaForBanks(null)}
+                className="px-4 py-2 text-xs font-bold bg-[#11d493] text-slate-950 rounded-xl hover:bg-[#0eb880]"
+              >
+                Concluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Rodapé Executivo */}
       <footer className="text-center py-4 text-xs text-slate-400 dark:text-slate-500 border-t border-slate-200 dark:border-[#1a382e] bg-white dark:bg-[#10221c]">

@@ -526,6 +526,15 @@ export const App: React.FC = () => {
           onSyncEmpresa={async (emp) => {
             await sincronizarEmpresaDoBling(emp.id, emp.blingAccessToken);
           }}
+          onUpdateEmpresaBanco={(empId, banco) => {
+            setEmpresas((prev) => {
+              const atualizadas = prev.map((e) =>
+                e.id === empId ? { ...e, bancoPadrao: banco } : e
+              );
+              localStorage.setItem('nfe_empresas_list', JSON.stringify(atualizadas));
+              return atualizadas;
+            });
+          }}
         />
 
         {isAddEmpresaOpen && (
