@@ -159,20 +159,36 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
                 </label>
               </div>
               <span className="text-[10px] bg-emerald-500/10 text-emerald-400 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/30">
-                Pronto para Homologação
+                {localStorage.getItem('bling_access_token') ? 'Conectado' : 'Pronto para Autorizar'}
               </span>
             </div>
 
             <div className="bg-slate-900/90 rounded-xl p-3 border border-slate-800 space-y-2.5">
+              {/* Botão Oficial de Autorização do Bling */}
+              <div className="bg-gradient-to-r from-emerald-950/60 to-slate-900 p-2.5 rounded-xl border border-emerald-500/30 flex items-center justify-between gap-2">
+                <div className="text-[11px]">
+                  <span className="font-bold text-emerald-300 block">Link de Autorização Gerado:</span>
+                  <span className="text-slate-400 text-[10px]">Client ID: d07e3441...dd0</span>
+                </div>
+                <a
+                  href="https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=d07e344178ec5f63e8045571930efcf047083dd0&state=cb9768157cff9aef9675a82bdd68c5e4"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] transition shadow-md shadow-emerald-600/20 shrink-0"
+                >
+                  Abrir no Bling ↗
+                </a>
+              </div>
+
               <div>
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                  URL de Callback (Para cadastrar no Bling):
+                  URL de Callback (Cadastrada no Bling):
                 </span>
                 <div className="flex items-center gap-2 bg-slate-950 p-2 rounded-lg border border-slate-800">
                   <input
                     type="text"
                     readOnly
-                    value={typeof window !== 'undefined' ? `${window.location.origin}/oauth/callback` : 'https://seu-app.vercel.app/oauth/callback'}
+                    value={typeof window !== 'undefined' ? `${window.location.origin}/oauth/callback` : 'https://nfe-boleto-mobile.vercel.app/oauth/callback'}
                     className="w-full bg-transparent text-[11px] font-mono text-emerald-300 focus:outline-none select-all"
                   />
                   <button
@@ -196,8 +212,8 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
                   </label>
                   <input
                     type="text"
-                    placeholder="Cole seu Client ID do Bling..."
-                    defaultValue={localStorage.getItem('bling_client_id') || ''}
+                    placeholder="d07e344178ec5f63e8045571930efcf047083dd0"
+                    defaultValue={localStorage.getItem('bling_client_id') || 'd07e344178ec5f63e8045571930efcf047083dd0'}
                     onChange={(e) => localStorage.setItem('bling_client_id', e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-brand-400"
                   />
@@ -208,7 +224,7 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
                   </label>
                   <input
                     type="password"
-                    placeholder="Cole seu Client Secret..."
+                    placeholder="Cole seu Client Secret do Bling..."
                     defaultValue={localStorage.getItem('bling_client_secret') || ''}
                     onChange={(e) => localStorage.setItem('bling_client_secret', e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-slate-200 text-xs font-mono focus:outline-none focus:ring-1 focus:ring-brand-400"
