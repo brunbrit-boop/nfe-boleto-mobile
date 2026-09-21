@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X, Building2, ShieldCheck, Key, Save, Check } from 'lucide-react';
 import type { CompanyProfile } from '../types';
 import { setBlingAccessTokenDirect, testBlingConnection, BLING_DEFAULT_CLIENT_ID } from '../utils/blingApi';
+import { obterDiagnosticoBling } from '../services/blingService';
 
 interface CompanySettingsModalProps {
   company: CompanyProfile;
@@ -32,6 +33,21 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
   );
   const [isTestingBling, setIsTestingBling] = useState(false);
   const [testBlingResult, setTestBlingResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [diagnostico, setDiagnostico] = useState<{ ok: boolean; contatosCount?: number; contatosRaw?: any; error?: string } | null>(null);
+  const [isRunningDiag, setIsRunningDiag] = useState(false);
+
+  const handleRunDiagnostico = async () => {
+    setIsRunningDiag(true);
+    setDiagnostico(null);
+    try {
+      const res = await obterDiagnosticoBling();
+      setDiagnostico(res);
+    } catch (e: any) {
+      setDiagnostico({ ok: false, error: e.message });
+    } finally {
+      setIsRunningDiag(false);
+    }
+  };
 
   const handleTestConnection = async () => {
     setIsTestingBling(true);
@@ -319,6 +335,42 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Botão de Inspecionar Estrutura de Dados Reais do Bling */}
+              <div className="pt-2 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={handleRunDiagnostico}
+                  disabled={isRunningDiag}
+                  className="w-full py-1.5 px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold border border-slate-300 transition flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <span>🔍</span>
+                  <span>{isRunningDiag ? 'Consultando Bling...' : 'Inspecionar Estrutura de Dados do Bling'}</span>
+                </button>
+
+                {diagnostico && (
+                  <div className="mt-2 p-2.5 rounded-xl bg-slate-900 text-slate-100 text-[11px] font-mono overflow-x-auto max-h-44 animate-fade-in border border-slate-800">
+                    <div className="flex items-center justify-between pb-1 border-b border-slate-700 mb-1.5">
+                      <span className="font-bold text-[10px] text-blue-400">
+                        {diagnostico.ok ? `✅ Resposta Bling API v3 (${diagnostico.contatosCount} contatos encontrados)` : '❌ Erro retornado pelo Bling'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setDiagnostico(null)}
+                        className="text-slate-400 hover:text-white text-xs px-1"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    {diagnostico.error && (
+                      <p className="text-rose-400 font-bold mb-1">{diagnostico.error}</p>
+                    )}
+                    <pre className="text-[10px] text-slate-300 leading-tight select-all">
+                      {JSON.stringify(diagnostico.contatosRaw || diagnostico, null, 2)}
+                    </pre>
+                  </div>
+                )}
+              </div>
 
               {/* Seção Opcional: URL de Callback para verificação */}
               <div className="pt-2 border-t border-slate-200 text-[10px] text-slate-500">

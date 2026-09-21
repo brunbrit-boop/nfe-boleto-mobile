@@ -27,9 +27,11 @@ export default async function handler(req: any, res: any) {
 
   try {
     const cleanEndpoint = Array.isArray(endpoint) ? endpoint[0] : endpoint;
-    const url = `https://www.bling.com.br/Api/v3${cleanEndpoint.startsWith('/') ? cleanEndpoint : '/' + cleanEndpoint}`;
-
-    const blingRes = await fetch(url, {
+    const path = cleanEndpoint.startsWith('/') ? cleanEndpoint : '/' + cleanEndpoint;
+    
+    // Tenta primeiro no host oficial da API (api.bling.com.br)
+    let url = `https://api.bling.com.br/Api/v3${path}`;
+    let blingRes = await fetch(url, {
       method: req.method,
       headers: {
         'Accept': 'application/json',
@@ -39,7 +41,31 @@ export default async function handler(req: any, res: any) {
       body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined,
     });
 
-    const data = await blingRes.json();
+    // Se falhar de conexão, tenta www.bling.com.br
+    if (!blingRes.ok && (blingRes.status === 404 || blingRes.status === 502)) {
+      const fallbackUrl = `https://www.bling.com.br/Api/v3${path}`;
+      const fallbackRes = await fetch(fallbackUrl, {
+        method: req.method,
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': authHeader,
+          'Content-Type': 'application/json',
+        },
+        body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined,
+      });
+      if (fallbackRes.ok) {
+        blingRes = fallbackRes;
+      }
+    }
+
+    const text = await blingRes.text();
+    let data: any;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { error: 'Resposta não-JSON do Bling', raw: text };
+    }
+
     return res.status(blingRes.status).json(data);
   } catch (error: any) {
     return res.status(500).json({

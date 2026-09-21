@@ -21,7 +21,7 @@ export function getStoredBlingToken(): string | null {
 async function callBlingApi(endpoint: string): Promise<any> {
   const token = getStoredBlingToken();
   if (!token) {
-    throw new Error('Token do Bling não configurado. Conecte sua conta nas configurações.');
+    throw new Error('Token do Bling não configurado.');
   }
 
   // Tenta via Proxy Vercel
@@ -33,15 +33,21 @@ async function callBlingApi(endpoint: string): Promise<any> {
         'Accept': 'application/json',
       },
     });
-    if (response.ok) {
-      return await response.json();
+    const data = await response.json().catch(() => null);
+    if (response.ok && data) {
+      return data;
+    } else if (data) {
+      const msg = data?.error?.message || data?.error || data?.mensagem || `Bling retornou HTTP ${response.status}`;
+      throw new Error(msg);
     }
-  } catch {
-    // Fallback
+  } catch (proxyErr: any) {
+    if (proxyErr.message && !proxyErr.message.includes('fetch')) {
+      throw proxyErr;
+    }
   }
 
-  // Fallback direto
-  const directUrl = `https://www.bling.com.br/Api/v3${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
+  // Fallback direto via api.bling.com.br
+  const directUrl = `https://api.bling.com.br/Api/v3${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
   const directRes = await fetch(directUrl, {
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -49,39 +55,41 @@ async function callBlingApi(endpoint: string): Promise<any> {
     },
   });
 
+  const directData = await directRes.json().catch(() => null);
   if (!directRes.ok) {
-    throw new Error(`Erro na API do Bling: HTTP ${directRes.status}`);
+    const msg = directData?.error?.message || directData?.error || `Bling HTTP ${directRes.status}`;
+    throw new Error(msg);
   }
 
-  return await directRes.json();
+  return directData;
 }
 
 /**
  * Busca a lista de clientes sincronizada com o Bling ERP
  */
-export async function carregarClientesBling(): Promise<{ data: BlingCliente[]; isLive: boolean }> {
+export async function carregarClientesBling(): Promise<{ data: BlingCliente[]; isLive: boolean; error?: string }> {
   try {
-    const response = await callBlingApi('/contatos?criterio=1&tipo=C&limite=50');
+    const response = await callBlingApi('/contatos?limite=100');
     if (response && response.data && Array.isArray(response.data)) {
       const clientesFormatados: BlingCliente[] = response.data.map((c: any) => ({
         id: c.id,
-        nome: c.nome,
-        fantasia: c.fantasia || c.nome,
-        tipoPessoa: c.tipo === 'J' ? 'J' : 'F',
-        numeroDocumento: c.numeroDocumento || '00.000.000/0001-00',
-        ie: c.ie,
-        email: c.email,
-        telefone: c.telefone,
-        celular: c.celular,
+        nome: c.nome || 'Sem Nome',
+        fantasia: c.fantasia || c.nome || 'Sem Nome',
+        tipoPessoa: c.tipo === 'J' || c.tipoPessoa === 'J' ? 'J' : 'F',
+        numeroDocumento: c.numeroDocumento || 'Não informado',
+        ie: c.ie || '',
+        email: c.email || '',
+        telefone: c.telefone || '',
+        celular: c.celular || '',
         situacao: c.situacao === 'I' ? 'I' : 'A',
         endereco: {
           geral: {
-            endereco: c.endereco?.geral?.endereco || 'Rua Comercial',
-            numero: c.endereco?.geral?.numero || 'S/N',
-            bairro: c.endereco?.geral?.bairro || 'Centro',
-            cep: c.endereco?.geral?.cep || '01001-000',
-            municipio: c.endereco?.geral?.municipio || 'São Paulo',
-            uf: c.endereco?.geral?.uf || 'SP',
+            endereco: c.endereco?.geral?.endereco || '',
+            numero: c.endereco?.geral?.numero || '',
+            bairro: c.endereco?.geral?.bairro || '',
+            cep: c.endereco?.geral?.cep || '',
+            municipio: c.endereco?.geral?.municipio || '',
+            uf: c.endereco?.geral?.uf || '',
           }
         },
         saldoDevedor: c.saldoDevedor || 0,
@@ -89,10 +97,12 @@ export async function carregarClientesBling(): Promise<{ data: BlingCliente[]; i
       }));
 
       localStorage.setItem(STORAGE_KEYS.CLIENTES, JSON.stringify(clientesFormatados));
+      localStorage.removeItem('bling_sync_error_clientes');
       return { data: clientesFormatados, isLive: true };
     }
-  } catch {
-    // Continua para cache
+  } catch (err: any) {
+    console.error('Erro ao buscar clientes no Bling:', err);
+    localStorage.setItem('bling_sync_error_clientes', err.message || 'Falha');
   }
 
   // Verifica se há cache salvo
@@ -235,7 +245,7 @@ export async function carregarClientesBling(): Promise<{ data: BlingCliente[]; i
  */
 export async function carregarContasPagarBling(): Promise<{ data: BlingContaPagar[]; resumo: ResumoFinanceiro; isLive: boolean }> {
   try {
-    const response = await callBlingApi('/contas/pagar?situacao=1&limite=50');
+    const response = await callBlingApi('/contas-a-pagar?limite=100');
     if (response && response.data && Array.isArray(response.data)) {
       const pagamentos: BlingContaPagar[] = response.data.map((p: any) => {
         const val = Number(p.valor || p.saldo || 0);
@@ -393,7 +403,7 @@ export async function carregarContasPagarBling(): Promise<{ data: BlingContaPaga
  */
 export async function carregarContasReceberBling(): Promise<{ data: BlingContaReceber[]; resumo: ResumoFinanceiro; isLive: boolean }> {
   try {
-    const response = await callBlingApi('/contas/receber?limite=50');
+    const response = await callBlingApi('/contas-a-receber?limite=100');
     if (response && response.data && Array.isArray(response.data)) {
       const receber: BlingContaReceber[] = response.data.map((r: any, idx: number) => {
         const val = Number(r.valor || r.saldo || 0);
@@ -611,3 +621,32 @@ function calcularResumoFinanceiro(contas: (BlingContaPagar | BlingContaReceber)[
     qtdRegistros: contas.length,
   };
 }
+
+/**
+ * Função de diagnóstico para inspecionar a resposta bruta da API v3 do Bling
+ */
+export async function obterDiagnosticoBling(): Promise<{
+  ok: boolean;
+  contatosCount?: number;
+  contatosRaw?: any;
+  error?: string;
+}> {
+  const token = getStoredBlingToken();
+  if (!token) {
+    return { ok: false, error: 'Token do Bling não configurado no navegador.' };
+  }
+  try {
+    const res = await callBlingApi('/contatos?limite=3');
+    return {
+      ok: true,
+      contatosCount: Array.isArray(res?.data) ? res.data.length : 0,
+      contatosRaw: res?.data || res,
+    };
+  } catch (err: any) {
+    return {
+      ok: false,
+      error: err.message || 'Erro ao consultar contatos do Bling',
+    };
+  }
+}
+
