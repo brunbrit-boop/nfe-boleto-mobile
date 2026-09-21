@@ -6,6 +6,7 @@ import type {
   Installment,
   NFeData,
   BlingCliente,
+  BlingFornecedor,
   BlingContaPagar,
   BlingContaReceber,
   EmpresaTenant,
@@ -21,6 +22,7 @@ import { criarNFeDeComando, interpretarComandoVoz } from './utils/aiParser';
 import { speechEngine } from './utils/speechEngine';
 import {
   carregarClientesBling,
+  carregarFornecedoresBling,
   carregarContasPagarBling,
   carregarContasReceberBling,
   getStoredBlingToken,
@@ -117,6 +119,7 @@ export const App: React.FC = () => {
 
   // Estados dos Módulos do Bling ERP da Empresa Ativa
   const [clientes, setClientes] = useState<BlingCliente[]>([]);
+  const [fornecedores, setFornecedores] = useState<BlingFornecedor[]>([]);
   const [contasPagar, setContasPagar] = useState<BlingContaPagar[]>([]);
   const [contasReceber, setContasReceber] = useState<BlingContaReceber[]>([]);
   const [isLoadingBling, setIsLoadingBling] = useState<boolean>(false);
@@ -199,6 +202,9 @@ export const App: React.FC = () => {
       setClientes(resClientes.data);
       setContasPagar(resPagar.data);
       setContasReceber(resReceber.data);
+
+      const resFornec = await carregarFornecedoresBling(token, empId, resPagar.data);
+      setFornecedores(resFornec.data);
     } catch {
       // Ignora erro de rede
     } finally {
@@ -550,6 +556,7 @@ export const App: React.FC = () => {
         contasPagar={contasPagar}
         contasReceber={contasReceber}
         clientes={clientes}
+        fornecedores={fornecedores}
         carregandoBling={isLoadingBling}
         onRecarregarBling={() => carregarDadosBling(empresaAtiva?.blingAccessToken, empresaAtiva?.id, bancoAtual)}
         messages={messages}

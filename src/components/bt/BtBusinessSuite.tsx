@@ -5,6 +5,7 @@ import type {
   BlingContaPagar,
   BlingContaReceber,
   BlingCliente,
+  BlingFornecedor,
   ChatMessage,
   NFeData,
   BankProvider,
@@ -42,6 +43,7 @@ interface BtBusinessSuiteProps {
   contasPagar: BlingContaPagar[];
   contasReceber: BlingContaReceber[];
   clientes: BlingCliente[];
+  fornecedores?: BlingFornecedor[];
   carregandoBling: boolean;
   onRecarregarBling: () => void;
 
@@ -71,6 +73,7 @@ export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
   contasPagar,
   contasReceber,
   clientes,
+  fornecedores = [],
   carregandoBling,
   onRecarregarBling,
   messages,
@@ -139,13 +142,21 @@ export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
 
           {/* 2. Fornecedores (SuppliersView) */}
           {activeMenu === 'suppliers' && (
-            <SuppliersView clientesBling={clientes} />
+            <SuppliersView
+              fornecedores={fornecedores}
+              contasPagar={contasPagar}
+              carregando={carregandoBling}
+              onRefreshBling={onRecarregarBling}
+            />
           )}
 
           {/* 3. Clientes (ClientsView) */}
           {activeMenu === 'clients' && (
             <ClientsView
               clientesBling={clientes}
+              contasReceber={contasReceber}
+              carregando={carregandoBling}
+              onRefreshBling={onRecarregarBling}
               onEmitirParaCliente={(cli) => {
                 onEmitirParaCliente(cli);
                 setActiveMenu('robo');

@@ -159,6 +159,31 @@ export interface BlingCliente {
   limiteCredito?: number;
 }
 
+export interface BlingFornecedor {
+  id: number;
+  nome: string;
+  fantasia?: string;
+  tipoPessoa?: 'F' | 'J';
+  numeroDocumento?: string; // CNPJ ou CPF formatado
+  ie?: string;
+  email?: string;
+  telefone?: string;
+  celular?: string;
+  situacao?: 'A' | 'I'; // A = Ativo, I = Inativo
+  categoria?: string;
+  endereco?: {
+    geral?: {
+      endereco: string;
+      numero: string;
+      complemento?: string;
+      bairro: string;
+      cep: string;
+      municipio: string;
+      uf: string;
+    };
+  };
+}
+
 export interface BlingContaPagar {
   id: number;
   numeroDocumento: string;

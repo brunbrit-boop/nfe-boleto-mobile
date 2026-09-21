@@ -1,8 +1,9 @@
-import type { BlingCliente, BlingContaPagar, BlingContaReceber, ResumoFinanceiro, BankProvider } from '../types';
+import type { BlingCliente, BlingFornecedor, BlingContaPagar, BlingContaReceber, ResumoFinanceiro, BankProvider } from '../types';
 import { formatCurrency, gerarDadosBoletoFebraban, gerarPixCopiaECola } from '../utils/financeEngine';
 
 const STORAGE_KEYS = {
   CLIENTES: 'bling_cache_clientes',
+  FORNECEDORES: 'bling_cache_fornecedores',
   PAGAR: 'bling_cache_pagar',
   RECEBER: 'bling_cache_receber',
   LAST_SYNC: 'bling_last_sync_timestamp',
@@ -235,7 +236,8 @@ export async function obterDadosEmpresaBling(token: string): Promise<{
  */
 export async function carregarClientesBling(
   token?: string,
-  empresaId?: string
+  empresaId?: string,
+  contasReceberCache?: BlingContaReceber[]
 ): Promise<{ data: BlingCliente[]; isLive: boolean; error?: string }> {
   try {
     const todosContatos: any[] = [];
@@ -255,31 +257,57 @@ export async function carregarClientesBling(
       pagina++;
     }
 
-    const clientesFormatados: BlingCliente[] = todosContatos.map((c: any) => ({
-      id: c.id,
-      nome: c.nome || 'Sem Nome',
-      fantasia: c.fantasia || c.nome || 'Sem Nome',
-      tipoPessoa: c.tipo === 'J' || c.tipoPessoa === 'J' || c.tipoPessoa === 2 ? 'J' : 'F',
-      numeroDocumento: c.numeroDocumento || 'Não informado',
-      ie: c.ie || '',
-      email: c.email || '',
-      telefone: c.telefone || '',
-      celular: c.celular || '',
-      situacao: c.situacao === 'I' ? 'I' : 'A',
-      endereco: {
-        geral: {
-          endereco: c.endereco?.geral?.endereco || '',
-          numero: c.endereco?.geral?.numero || '',
-          bairro: c.endereco?.geral?.bairro || '',
-          cep: c.endereco?.geral?.cep || '',
-          municipio: c.endereco?.geral?.municipio || '',
-          uf: c.endereco?.geral?.uf || '',
-        }
-      },
-      saldoDevedor: c.saldoDevedor || 0,
-      limiteCredito: c.limiteCredito || 10000,
-    }));
+    const mapaClientes = new Map<string, BlingCliente>();
 
+    todosContatos.forEach((c: any) => {
+      const key = String(c.id || c.numeroDocumento || c.nome);
+      mapaClientes.set(key, {
+        id: c.id,
+        nome: c.nome || 'Sem Nome',
+        fantasia: c.fantasia || c.nome || 'Sem Nome',
+        tipoPessoa: c.tipo === 'J' || c.tipoPessoa === 'J' || c.tipoPessoa === 2 ? 'J' : 'F',
+        numeroDocumento: c.numeroDocumento || 'Não informado',
+        ie: c.ie || '',
+        email: c.email || '',
+        telefone: c.telefone || '',
+        celular: c.celular || '',
+        situacao: c.situacao === 'I' ? 'I' : 'A',
+        endereco: {
+          geral: {
+            endereco: c.endereco?.geral?.endereco || '',
+            numero: c.endereco?.geral?.numero || '',
+            bairro: c.endereco?.geral?.bairro || '',
+            cep: c.endereco?.geral?.cep || '',
+            municipio: c.endereco?.geral?.municipio || '',
+            uf: c.endereco?.geral?.uf || '',
+          },
+        },
+        saldoDevedor: c.saldoDevedor || 0,
+        limiteCredito: c.limiteCredito || 10000,
+      });
+    });
+
+    // Consolida clientes que possuem títulos a receber no Bling
+    if (contasReceberCache && contasReceberCache.length > 0) {
+      contasReceberCache.forEach((cr) => {
+        if (cr.contato && cr.contato.nome) {
+          const key = String(cr.contato.id || cr.contato.numeroDocumento || cr.contato.nome);
+          if (!mapaClientes.has(key)) {
+            mapaClientes.set(key, {
+              id: cr.contato.id || Math.floor(Math.random() * 100000),
+              nome: cr.contato.nome,
+              fantasia: cr.contato.nome,
+              tipoPessoa: (cr.contato.numeroDocumento && cr.contato.numeroDocumento.length > 14) ? 'J' : 'F',
+              numeroDocumento: cr.contato.numeroDocumento || 'Não informado',
+              situacao: 'A',
+              saldoDevedor: cr.valor,
+            });
+          }
+        }
+      });
+    }
+
+    const clientesFormatados = Array.from(mapaClientes.values());
     const key = empresaId ? `${STORAGE_KEYS.CLIENTES}_${empresaId}` : STORAGE_KEYS.CLIENTES;
     localStorage.setItem(key, JSON.stringify(clientesFormatados));
     return { data: clientesFormatados, isLive: true };
@@ -289,6 +317,114 @@ export async function carregarClientesBling(
 
   // Verifica se há cache salvo
   const key = empresaId ? `${STORAGE_KEYS.CLIENTES}_${empresaId}` : STORAGE_KEYS.CLIENTES;
+  const cached = localStorage.getItem(key);
+  if (cached) {
+    try {
+      return { data: JSON.parse(cached), isLive: true };
+    } catch {}
+  }
+
+  return { data: [], isLive: false };
+}
+
+/**
+ * Busca a lista de fornecedores sincronizada com o Bling ERP
+ * Combina contatos de fornecedores com os contatos reais extraídos de Contas a Pagar
+ */
+export async function carregarFornecedoresBling(
+  token?: string,
+  empresaId?: string,
+  contasPagarCache?: BlingContaPagar[]
+): Promise<{ data: BlingFornecedor[]; isLive: boolean; error?: string }> {
+  try {
+    const todosFornecedores: any[] = [];
+    let pagina = 1;
+    const limite = 100;
+    const maxPaginas = 15;
+
+    // 1. Tenta endpoint do Bling com criterio=3 (Fornecedores)
+    try {
+      while (pagina <= maxPaginas) {
+        const endpoint = `/contatos?criterio=3&limite=${limite}&pagina=${pagina}`;
+        const response = await callBlingApi(endpoint, token);
+        const records = (response && response.data && Array.isArray(response.data)) ? response.data : [];
+
+        if (records.length === 0) break;
+        todosFornecedores.push(...records);
+
+        if (records.length < limite) break;
+        pagina++;
+      }
+    } catch (e) {
+      console.warn('Tentativa /contatos?criterio=3 retornou vazio, buscando contatos gerais:', e);
+    }
+
+    // 2. Se criterio=3 não retornou contatos, busca contatos gerais e filtra
+    if (todosFornecedores.length === 0) {
+      try {
+        const resGeral = await callBlingApi('/contatos?limite=100&pagina=1', token);
+        const recordsGeral = (resGeral && resGeral.data && Array.isArray(resGeral.data)) ? resGeral.data : [];
+        recordsGeral.forEach((c: any) => {
+          const isFornec =
+            c.tipo === 'F' ||
+            (Array.isArray(c.tiposContato) &&
+              c.tiposContato.some((tc: any) => (tc.descricao || '').toLowerCase().includes('fornec')));
+          if (isFornec) {
+            todosFornecedores.push(c);
+          }
+        });
+      } catch {}
+    }
+
+    const mapaFornecedores = new Map<string, BlingFornecedor>();
+
+    todosFornecedores.forEach((c: any) => {
+      const key = String(c.id || c.numeroDocumento || c.nome);
+      mapaFornecedores.set(key, {
+        id: c.id,
+        nome: c.nome || 'Fornecedor',
+        fantasia: c.fantasia || c.nome || 'Fornecedor',
+        tipoPessoa: c.tipo === 'J' || c.tipoPessoa === 'J' || c.tipoPessoa === 2 ? 'J' : 'F',
+        numeroDocumento: c.numeroDocumento || '',
+        ie: c.ie || '',
+        email: c.email || '',
+        telefone: c.telefone || '',
+        celular: c.celular || '',
+        situacao: c.situacao === 'I' ? 'I' : 'A',
+        categoria: 'Fornecedor Parceiro',
+        endereco: c.endereco,
+      });
+    });
+
+    // 3. Extrai e consolida fornecedores reais a partir das Contas a Pagar do Bling
+    if (contasPagarCache && contasPagarCache.length > 0) {
+      contasPagarCache.forEach((cp) => {
+        if (cp.contato && cp.contato.nome) {
+          const key = String(cp.contato.id || cp.contato.numeroDocumento || cp.contato.nome);
+          if (!mapaFornecedores.has(key)) {
+            mapaFornecedores.set(key, {
+              id: cp.contato.id || Math.floor(Math.random() * 100000),
+              nome: cp.contato.nome,
+              fantasia: cp.contato.nome,
+              tipoPessoa: (cp.contato.numeroDocumento && cp.contato.numeroDocumento.length > 14) ? 'J' : 'F',
+              numeroDocumento: cp.contato.numeroDocumento || '',
+              situacao: 'A',
+              categoria: typeof cp.categoria === 'string' ? cp.categoria : 'Operacional / Insumos',
+            });
+          }
+        }
+      });
+    }
+
+    const fornecedoresFormatados = Array.from(mapaFornecedores.values());
+    const key = empresaId ? `${STORAGE_KEYS.FORNECEDORES}_${empresaId}` : STORAGE_KEYS.FORNECEDORES;
+    localStorage.setItem(key, JSON.stringify(fornecedoresFormatados));
+    return { data: fornecedoresFormatados, isLive: true };
+  } catch (err: any) {
+    console.error('Erro ao carregar fornecedores do Bling:', err);
+  }
+
+  const key = empresaId ? `${STORAGE_KEYS.FORNECEDORES}_${empresaId}` : STORAGE_KEYS.FORNECEDORES;
   const cached = localStorage.getItem(key);
   if (cached) {
     try {
