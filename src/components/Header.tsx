@@ -1,5 +1,5 @@
 import React from 'react';
-import { Volume2, VolumeX, Settings, Sparkles } from 'lucide-react';
+import { Volume2, VolumeX, Settings, Sparkles, ArrowLeft } from 'lucide-react';
 import type { BankProvider } from '../types';
 import { BANKS } from '../utils/financeEngine';
 
@@ -11,6 +11,7 @@ interface HeaderProps {
   onOpenSettings: () => void;
   empresaNome: string;
   isBlingConnected: boolean;
+  onVoltarEmpresas?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,6 +22,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSettings,
   empresaNome,
   isBlingConnected,
+  onVoltarEmpresas,
 }) => {
   const bankConfig = BANKS[bancoAtual];
 
@@ -28,12 +30,23 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="sticky top-0 z-30 w-full bg-white/95 backdrop-blur-md border-b border-slate-200/90 px-4 py-2.5 shadow-sm">
       <div className="max-w-xl mx-auto flex items-center justify-between gap-2">
         {/* Robô Avatar & Status */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
+          {onVoltarEmpresas && (
+            <button
+              onClick={onVoltarEmpresas}
+              className="p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition active:scale-95 flex items-center gap-1 font-bold text-xs"
+              title="Voltar para a lista de empresas (Hub)"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span className="hidden sm:inline text-[11px]">Empresas</span>
+            </button>
+          )}
+
           <div className="relative">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-600 to-emerald-500 flex items-center justify-center shadow-md shadow-blue-500/20 ring-2 ring-blue-100">
-              <Sparkles className="w-5 h-5 text-white stroke-[2.5]" />
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-emerald-500 flex items-center justify-center shadow-md shadow-blue-500/20 ring-2 ring-blue-100">
+              <Sparkles className="w-4 h-4 text-white stroke-[2.5]" />
             </div>
-            <span className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" />
+            <span className="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-emerald-500 ring-2 ring-white animate-pulse" />
           </div>
           <div>
             <div className="flex items-center gap-1.5">

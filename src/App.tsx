@@ -1,5 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import type { ActiveTab, BankProvider, ChatMessage, CompanyProfile, Installment, NFeData, BlingCliente, BlingContaPagar, BlingContaReceber, ResumoFinanceiro } from './types';
+import type {
+  ActiveTab,
+  BankProvider,
+  ChatMessage,
+  CompanyProfile,
+  Installment,
+  NFeData,
+  BlingCliente,
+  BlingContaPagar,
+  BlingContaReceber,
+  ResumoFinanceiro,
+  EmpresaTenant,
+} from './types';
 import { Header } from './components/Header';
 import { BottomNav } from './components/BottomNav';
 import { ChatView } from './components/ChatView';
@@ -11,24 +23,32 @@ import { NFeModal } from './components/NFeModal';
 import { BoletoModal } from './components/BoletoModal';
 import { PayloadModal } from './components/PayloadModal';
 import { CompanySettingsModal } from './components/CompanySettingsModal';
+import { EmpresasScreen } from './components/EmpresasScreen';
+import { AddEmpresaModal } from './components/AddEmpresaModal';
 import { criarNFeDeComando, interpretarComandoVoz } from './utils/aiParser';
 import { speechEngine } from './utils/speechEngine';
-import { carregarClientesBling, carregarContasPagarBling, carregarContasReceberBling, getStoredBlingToken } from './services/blingService';
+import {
+  carregarClientesBling,
+  carregarContasPagarBling,
+  carregarContasReceberBling,
+  getStoredBlingToken,
+} from './services/blingService';
 import { exchangeBlingCodeForToken, BLING_DEFAULT_CLIENT_ID } from './utils/blingApi';
 
 export const App: React.FC = () => {
-  // Aba Ativa (Padrão: Robô)
-  const [activeTab, setActiveTab] = useState<ActiveTab>('robo');
-
-  // Dados da Empresa Emitente
-  const [company, setCompany] = useState<CompanyProfile>(() => {
-    const saved = localStorage.getItem('nfe_company_profile');
+  // Lista de Empresas (Multi-Empresas Bling)
+  const [empresas, setEmpresas] = useState<EmpresaTenant[]>(() => {
+    const saved = localStorage.getItem('nfe_empresas_list');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       } catch {}
     }
-    return {
+
+    const tokenAtual = localStorage.getItem('bling_access_token') || '';
+    const initialEmpresa: EmpresaTenant = {
+      id: 'emp_default_brasil_tech',
       razaoSocial: 'BRASIL TECH & COMERCIO LTDA',
       nomeFantasia: 'Brasil Tech Distribuidora',
       cnpj: '24.912.830/0001-52',
@@ -41,12 +61,44 @@ export const App: React.FC = () => {
       cep: '01310-200',
       regimeTributario: 'Simples Nacional',
       certificadoA1Valido: true,
+      blingClientId: localStorage.getItem('bling_client_id') || BLING_DEFAULT_CLIENT_ID,
+      blingClientSecret: localStorage.getItem('bling_client_secret') || '',
+      blingAccessToken: tokenAtual,
+      isBlingConectado: Boolean(tokenAtual),
+      bancoPadrao: (localStorage.getItem('nfe_banco_padrao') as BankProvider) || 'inter',
+      corAvatar: 'blue',
+      criadoEm: new Date().toISOString(),
     };
+
+    return [initialEmpresa];
   });
 
-  const [bancoAtual, setBancoAtual] = useState<BankProvider>(() => {
-    return (localStorage.getItem('nfe_banco_padrao') as BankProvider) || 'inter';
-  });
+  // O app SEMPRE abre exibindo os cards das empresas cadastradas (empresaAtivaId: null)
+  const [empresaAtivaId, setEmpresaAtivaId] = useState<string | null>(null);
+  const [isAddEmpresaOpen, setIsAddEmpresaOpen] = useState(false);
+
+  // Aba Ativa dentro da empresa (Padrão: Robô)
+  const [activeTab, setActiveTab] = useState<ActiveTab>('robo');
+
+  // Dados da Empresa Ativa
+  const empresaAtiva = empresas.find((e) => e.id === empresaAtivaId) || null;
+
+  const [company, setCompany] = useState<CompanyProfile>(() => ({
+    razaoSocial: 'BRASIL TECH & COMERCIO LTDA',
+    nomeFantasia: 'Brasil Tech Distribuidora',
+    cnpj: '24.912.830/0001-52',
+    inscricaoEstadual: '114.920.381.119',
+    logradouro: 'Avenida Paulista',
+    numero: '1578',
+    bairro: 'Bela Vista',
+    cidade: 'São Paulo',
+    uf: 'SP',
+    cep: '01310-200',
+    regimeTributario: 'Simples Nacional',
+    certificadoA1Valido: true,
+  }));
+
+  const [bancoAtual, setBancoAtual] = useState<BankProvider>('inter');
 
   const [ttsEnabled, setTtsEnabled] = useState<boolean>(true);
   const [isListening, setIsListening] = useState<boolean>(false);
@@ -59,7 +111,7 @@ export const App: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [blingAlert, setBlingAlert] = useState<string | null>(null);
 
-  // Estados dos Módulos do Bling ERP
+  // Estados dos Módulos do Bling ERP da Empresa Ativa
   const [clientes, setClientes] = useState<BlingCliente[]>([]);
   const [contasPagar, setContasPagar] = useState<BlingContaPagar[]>([]);
   const [resumoPagar, setResumoPagar] = useState<ResumoFinanceiro>({ totalAberto: 0, totalLiquidado: 0, totalVencido: 0, qtdRegistros: 0 });
@@ -107,18 +159,18 @@ export const App: React.FC = () => {
     ];
   });
 
-  // Carrega dados iniciais do Bling
-  const carregarDadosBling = async () => {
+  // Carrega dados do Bling para a empresa ativa
+  const carregarDadosBling = async (customToken?: string, empIdParam?: string, customBanco?: BankProvider) => {
     setIsLoadingBling(true);
-    try {
-      // Limpa incondicionalmente dados de demonstração legados do localStorage
-      localStorage.removeItem('bling_cache_pagar');
-      localStorage.removeItem('bling_cache_receber');
+    const token = customToken || empresaAtiva?.blingAccessToken || getStoredBlingToken() || '';
+    const empId = empIdParam || empresaAtiva?.id;
+    const banco = customBanco || empresaAtiva?.bancoPadrao || bancoAtual;
 
+    try {
       const [resClientes, resPagar, resReceber] = await Promise.all([
-        carregarClientesBling(),
-        carregarContasPagarBling(),
-        carregarContasReceberBling(),
+        carregarClientesBling(token, empId),
+        carregarContasPagarBling(token, empId),
+        carregarContasReceberBling(token, empId, banco),
       ]);
 
       setClientes(resClientes.data);
@@ -134,9 +186,58 @@ export const App: React.FC = () => {
     }
   };
 
-  useEffect(() => {
-    carregarDadosBling();
-  }, []);
+  // Ao selecionar uma empresa nos cards
+  const handleSelectEmpresa = (empresa: EmpresaTenant) => {
+    setEmpresaAtivaId(empresa.id);
+    const novoPerfil: CompanyProfile = {
+      razaoSocial: empresa.razaoSocial,
+      nomeFantasia: empresa.nomeFantasia,
+      cnpj: empresa.cnpj,
+      inscricaoEstadual: empresa.inscricaoEstadual || '',
+      logradouro: empresa.logradouro || '',
+      numero: empresa.numero || '',
+      bairro: empresa.bairro || '',
+      cidade: empresa.cidade || 'São Paulo',
+      uf: empresa.uf || 'SP',
+      cep: empresa.cep || '',
+      regimeTributario: empresa.regimeTributario || 'Simples Nacional',
+      certificadoA1Valido: empresa.certificadoA1Valido ?? true,
+    };
+    setCompany(novoPerfil);
+    setBancoAtual(empresa.bancoPadrao);
+
+    if (empresa.blingAccessToken) {
+      localStorage.setItem('bling_access_token', empresa.blingAccessToken);
+    }
+    if (empresa.blingClientId) {
+      localStorage.setItem('bling_client_id', empresa.blingClientId);
+    }
+    if (empresa.blingClientSecret) {
+      localStorage.setItem('bling_client_secret', empresa.blingClientSecret);
+    }
+
+    carregarDadosBling(empresa.blingAccessToken, empresa.id, empresa.bancoPadrao);
+  };
+
+  // Adiciona nova empresa na lista
+  const handleAddEmpresa = (novaEmpresa: EmpresaTenant) => {
+    const atualizadas = [novaEmpresa, ...empresas];
+    setEmpresas(atualizadas);
+    localStorage.setItem('nfe_empresas_list', JSON.stringify(atualizadas));
+    setIsAddEmpresaOpen(false);
+    // Entra diretamente na empresa adicionada
+    handleSelectEmpresa(novaEmpresa);
+  };
+
+  // Remove uma empresa
+  const handleDeleteEmpresa = (empresaId: string) => {
+    const filtradas = empresas.filter((e) => e.id !== empresaId);
+    setEmpresas(filtradas);
+    localStorage.setItem('nfe_empresas_list', JSON.stringify(filtradas));
+    if (empresaAtivaId === empresaId) {
+      setEmpresaAtivaId(null);
+    }
+  };
 
   // Monitora retorno OAuth do Bling
   useEffect(() => {
@@ -152,105 +253,85 @@ export const App: React.FC = () => {
         exchangeBlingCodeForToken(code, clientId, clientSecret).then((res) => {
           if (res.success) {
             setBlingAlert('Conta do Bling conectada com sucesso! Dados reais importados.');
-            speechEngine.playBeep('success');
             carregarDadosBling();
           } else {
-            setBlingAlert(`Código recebido! Para autenticar, confirme o Client Secret ou cole o Token de Acesso nas configurações.`);
-            speechEngine.playBeep('error');
-            setIsSettingsOpen(true);
+            setBlingAlert(`Erro ao autenticar: ${res.error}`);
           }
         });
-      } else {
-        setBlingAlert('Autorização do Bling recebida! Insira seu Client Secret ou Token de Acesso para sincronizar.');
-        speechEngine.playBeep('start');
-        setIsSettingsOpen(true);
       }
       window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
 
-  const handleSelectBanco = (banco: BankProvider) => {
-    setBancoAtual(banco);
-    localStorage.setItem('nfe_banco_padrao', banco);
-    speechEngine.playBeep('start');
-  };
-
-  const handleToggleTts = () => {
-    const next = !ttsEnabled;
-    setTtsEnabled(next);
-    speechEngine.setTtsEnabled(next);
-    if (!next) {
-      speechEngine.stopSpeaking();
-    }
-  };
-
-  const handleSaveCompany = (updated: CompanyProfile) => {
-    setCompany(updated);
-    localStorage.setItem('nfe_company_profile', JSON.stringify(updated));
-    speechEngine.playBeep('success');
-  };
-
-  // Processamento de comando do Robô
-  const handleProcessUserCommand = (textoComando: string, isFromVoice: boolean = false) => {
+  // Processamento do comando de voz pelo Robô
+  const handleProcessUserCommand = (textoComando: string, isFromAudio: boolean = false) => {
     if (!textoComando.trim()) return;
 
-    const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    const userMsgId = `usr-${Date.now()}`;
-
+    const horaAtual = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     const userMsg: ChatMessage = {
-      id: userMsgId,
+      id: `msg-${Date.now()}`,
       sender: 'user',
       text: textoComando,
-      timestamp: agora,
-      isAudio: isFromVoice,
+      timestamp: horaAtual,
+      isAudio: isFromAudio,
     };
 
     setMessages((prev) => [...prev, userMsg]);
+    speechEngine.playBeep('start');
 
     setTimeout(() => {
-      const parsed = interpretarComandoVoz(textoComando, bancoAtual);
-      const nfe = criarNFeDeComando(parsed, company);
+      try {
+        const parsed = interpretarComandoVoz(textoComando, bancoAtual);
+        const novaNFe = criarNFeDeComando(parsed, company);
 
-      const botMsgId = `bot-${Date.now()}`;
-      const botMsg: ChatMessage = {
-        id: botMsgId,
-        sender: 'bot',
-        text: parsed.mensagemResposta,
-        timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-        nfeData: nfe,
-        quickActions: [
-          { label: '📄 Visualizar DANFE (PDF)', action: `danfe_${nfe.numeroNFe}` },
-          { label: '💳 Ver 1º Boleto', action: `boleto_1` },
-          { label: '📈 Ver no Contas a Receber', action: 'go_receber' },
-        ],
-      };
+        const respostaBot = `Perfeito! Gereei a **NF-e nº ${novaNFe.numeroNFe}** no valor total de **${novaNFe.valorTotalFormatado}** ` +
+          `dividida em **${novaNFe.quantidadeParcelas}x** de **${novaNFe.parcelas[0]?.valorFormatado}** pelo **${bancoAtual.toUpperCase()}**.\n\n` +
+          `Já realizei o cálculo dos códigos de barra e boletos bancários. Deseja visualizar a DANFE ou transmitir para a SEFAZ?`;
 
-      setMessages((prev) => [...prev, botMsg]);
-      speechEngine.playBeep('success');
-      if (ttsEnabled) {
-        speechEngine.speak(
-          `Nota fiscal para ${parsed.destinatarioNome} preparada em ${parsed.quantidadeParcelas} parcelas. Os códigos bancários estão prontos para envio!`
-        );
+        const botMsg: ChatMessage = {
+          id: `msg-${Date.now() + 1}`,
+          sender: 'bot',
+          text: respostaBot,
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+          nfeData: novaNFe,
+          quickActions: [
+            { label: '📄 Ver DANFE', action: 'view_danfe' },
+            { label: '🚀 Transmitir SEFAZ', action: 'emit_sefaz' },
+            { label: '🏦 Gerar Boletos', action: 'view_first_boleto' },
+          ],
+        };
+
+        setMessages((prev) => [...prev, botMsg]);
+
+        if (ttsEnabled) {
+          const fala = `Nota fiscal emitida para ${novaNFe.destinatario.razaoSocial} no valor de ${novaNFe.valorTotal} reais em ${novaNFe.quantidadeParcelas} parcelas. Códigos bancários gerados.`;
+          speechEngine.speak(fala);
+        }
+      } catch (err: any) {
+        const erroMsg: ChatMessage = {
+          id: `msg-${Date.now() + 1}`,
+          sender: 'bot',
+          text: `Não consegui entender todos os detalhes da nota fiscal. Por favor, tente algo como: "Criar nota fiscal de venda de produtos para Fulano no valor de R$ 1.500 em 3 parcelas".`,
+          timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+        };
+        setMessages((prev) => [...prev, erroMsg]);
       }
-    }, 450);
+    }, 600);
   };
 
   const handleStartListening = () => {
-    setListeningTranscript('');
     setIsListening(true);
-
+    setListeningTranscript('');
     speechEngine.startListening(
       (transcript, isFinal) => {
         setListeningTranscript(transcript);
-        if (isFinal && transcript.trim().length > 3) {
+        if (isFinal) {
           setIsListening(false);
           handleProcessUserCommand(transcript, true);
         }
       },
-      (err) => {
+      () => {
         setIsListening(false);
-        setListeningTranscript('');
-        alert(err);
       },
       () => {
         setIsListening(false);
@@ -259,59 +340,73 @@ export const App: React.FC = () => {
   };
 
   const handleStopListening = () => {
-    speechEngine.stopListening();
     setIsListening(false);
-    if (listeningTranscript.trim().length > 3) {
-      handleProcessUserCommand(listeningTranscript, true);
+    speechEngine.stopListening();
+  };
+
+  const handleQuickAction = (actionText: string, nfe?: NFeData) => {
+    if (actionText === 'start_voice') {
+      handleStartListening();
+      return;
+    }
+    if (actionText === 'go_clientes') {
+      setActiveTab('clientes');
+      return;
+    }
+    if (actionText === 'view_demo_danfe' || actionText === 'view_danfe') {
+      if (nfe) setSelectedNFeForDanfe(nfe);
+      return;
+    }
+    if (actionText === 'view_first_boleto' && nfe && nfe.parcelas.length > 0) {
+      setSelectedParcelaForBoleto({ parcela: nfe.parcelas[0], nfe });
+      return;
+    }
+    if (actionText === 'emit_sefaz' && nfe) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.nfeData?.numeroNFe === nfe.numeroNFe
+            ? { ...m, nfeData: { ...nfe, status: 'autorizada' } }
+            : m
+        )
+      );
+      if (ttsEnabled) {
+        speechEngine.speak('Nota fiscal autorizada com sucesso na Secretaria da Fazenda.');
+      }
     }
   };
 
-  // Ação ao clicar em "Emitir NF-e" na aba de Clientes
   const handleEmitirParaCliente = (cliente: BlingCliente) => {
     setActiveTab('robo');
-    const comando = `Quero emitir uma nota fiscal de venda para a empresa ${cliente.fantasia || cliente.nome} no valor de R$ 2.400 em 3 parcelas`;
-    handleProcessUserCommand(comando, false);
+    const sugestao = `Criar nota fiscal de venda de produtos da minha empresa para ${cliente.nome} no valor de R$ 2.500 em 2 parcelas`;
+    setTimeout(() => {
+      handleProcessUserCommand(sugestao, false);
+    }, 300);
   };
 
-  // Visualizar boleto a partir do Contas a Receber
   const handleViewBoletoReceber = (conta: BlingContaReceber) => {
-    const parcelaSimulada: Installment = {
-      numero: 1,
-      totalParcelas: 1,
-      dataVencimento: conta.vencimento,
-      dataVencimentoFormatada: conta.vencimentoFormatado,
-      valor: conta.valor,
-      valorFormatado: conta.valorFormatado,
-      nossoNumero: conta.nossoNumero || '17/00000910241',
-      linhaDigitavel: conta.linhaDigitavel || '07790.00116 70000.076987 52123.456700 6 16060000033334',
-      codigoBarras: conta.codigoBarras || '0779616060000033334001170000076985212345670',
-      pixCopiaECola: conta.pixCopiaECola || '',
-      status: conta.situacao === 2 ? 'pago' : 'emitido',
-    };
-
-    const nfeSimulada: NFeData = {
-      numeroNFe: conta.numeroDocumento.replace(/\D/g, '') || '6081',
+    const fakeNFe: NFeData = {
+      numeroNFe: conta.numeroDocumento.replace(/\D/g, '').slice(0, 6) || '102938',
       serie: '1',
       dataEmissao: conta.dataEmissao,
-      naturezaOperacao: 'VENDA DE MERCADORIAS',
-      chaveAcesso: '35260924912830000152550010000060811464053968',
-      status: 'autorizada',
+      naturezaOperacao: conta.historico || 'Venda de Mercadorias',
+      chaveAcesso: '35260924912830000152550010001029381009876543',
+      status: conta.situacao === 2 ? 'autorizada' : 'autorizada',
       emitente: company,
       destinatario: {
         razaoSocial: conta.contato.nome,
-        cnpj: conta.contato.numeroDocumento || '14.289.471/0001-35',
+        cnpj: conta.contato.numeroDocumento || '00.000.000/0000-00',
         cidade: 'São Paulo',
         uf: 'SP',
       },
       itens: [
         {
-          id: 'i1',
-          descricao: conta.historico || 'Venda de Mercadorias',
+          id: '1',
+          descricao: conta.historico || 'Produtos Faturados Bling',
           quantidade: 1,
           unidade: 'UN',
           valorUnitario: conta.valor,
           valorTotal: conta.valor,
-          ncm: '8481.80.99',
+          ncm: '8471.30.12',
           cfop: '5.102',
         }
       ],
@@ -319,64 +414,117 @@ export const App: React.FC = () => {
       valorTotal: conta.valor,
       valorTotalFormatado: conta.valorFormatado,
       quantidadeParcelas: 1,
-      parcelas: [parcelaSimulada],
+      parcelas: [
+        {
+          numero: 1,
+          totalParcelas: 1,
+          dataVencimento: conta.vencimento,
+          dataVencimentoFormatada: conta.vencimentoFormatado,
+          valor: conta.valor,
+          valorFormatado: conta.valorFormatado,
+          nossoNumero: conta.nossoNumero || '900001',
+          linhaDigitavel: conta.linhaDigitavel || '',
+          codigoBarras: conta.codigoBarras || '',
+          pixCopiaECola: conta.pixCopiaECola || '',
+          status: conta.situacao === 2 ? 'pago' : 'emitido',
+        }
+      ],
       banco: bancoAtual,
     };
 
-    setSelectedParcelaForBoleto({ parcela: parcelaSimulada, nfe: nfeSimulada });
+    setSelectedParcelaForBoleto({ parcela: fakeNFe.parcelas[0], nfe: fakeNFe });
   };
 
-  const handleQuickAction = (actionText: string) => {
-    if (actionText === 'start_voice') {
-      handleStartListening();
-      return;
+  const handleSaveCompany = (updated: CompanyProfile) => {
+    setCompany(updated);
+    localStorage.setItem('nfe_company_profile', JSON.stringify(updated));
+
+    // Atualiza também na lista de empresas
+    if (empresaAtivaId) {
+      setEmpresas((prev) => {
+        const atualizadas = prev.map((e) => {
+          if (e.id === empresaAtivaId) {
+            return {
+              ...e,
+              razaoSocial: updated.razaoSocial,
+              nomeFantasia: updated.nomeFantasia,
+              cnpj: updated.cnpj,
+              inscricaoEstadual: updated.inscricaoEstadual,
+              logradouro: updated.logradouro,
+              numero: updated.numero,
+              bairro: updated.bairro,
+              cidade: updated.cidade,
+              uf: updated.uf,
+              cep: updated.cep,
+              regimeTributario: updated.regimeTributario,
+              certificadoA1Valido: updated.certificadoA1Valido,
+            };
+          }
+          return e;
+        });
+        localStorage.setItem('nfe_empresas_list', JSON.stringify(atualizadas));
+        return atualizadas;
+      });
     }
-    if (actionText === 'view_demo_danfe') {
-      if (messages[0]?.nfeData) {
-        setSelectedNFeForDanfe(messages[0].nfeData);
-      }
-      return;
-    }
-    if (actionText === 'go_clientes') {
-      setActiveTab('clientes');
-      return;
-    }
-    if (actionText === 'go_receber') {
-      setActiveTab('receber');
-      return;
-    }
-    if (actionText.startsWith('danfe_')) {
-      const num = actionText.replace('danfe_', '');
-      const found = messages.find(m => m.nfeData?.numeroNFe === num)?.nfeData;
-      if (found) setSelectedNFeForDanfe(found);
-      return;
-    }
-    if (actionText === 'boleto_1') {
-      const lastNfe = [...messages].reverse().find(m => m.nfeData)?.nfeData;
-      if (lastNfe && lastNfe.parcelas.length > 0) {
-        setSelectedParcelaForBoleto({ parcela: lastNfe.parcelas[0], nfe: lastNfe });
-      }
-      return;
-    }
-    handleProcessUserCommand(actionText);
   };
+
+  const handleSelectBanco = (banco: BankProvider) => {
+    setBancoAtual(banco);
+    localStorage.setItem('nfe_banco_padrao', banco);
+
+    // Salva o banco padrão na empresa ativa
+    if (empresaAtivaId) {
+      setEmpresas((prev) => {
+        const atualizadas = prev.map((e) =>
+          e.id === empresaAtivaId ? { ...e, bancoPadrao: banco } : e
+        );
+        localStorage.setItem('nfe_empresas_list', JSON.stringify(atualizadas));
+        return atualizadas;
+      });
+    }
+  };
+
+  // ============================================================================
+  // RENDERIZAÇÃO: Tela Inicial (Hub de Empresas) vs Painel da Empresa Ativa
+  // ============================================================================
+
+  if (empresaAtivaId === null) {
+    return (
+      <>
+        <EmpresasScreen
+          empresas={empresas}
+          onSelectEmpresa={handleSelectEmpresa}
+          onOpenAddEmpresa={() => setIsAddEmpresaOpen(true)}
+          onDeleteEmpresa={handleDeleteEmpresa}
+        />
+
+        {isAddEmpresaOpen && (
+          <AddEmpresaModal
+            onClose={() => setIsAddEmpresaOpen(false)}
+            onAddEmpresa={handleAddEmpresa}
+          />
+        )}
+      </>
+    );
+  }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col selection:bg-blue-600 selection:text-white">
-      {/* Header Superior Claro */}
+    <div className="flex flex-col h-screen max-h-screen bg-slate-50 text-slate-900 overflow-hidden font-sans select-none">
+      {/* Top Header Executivo da Empresa */}
       <Header
         bancoAtual={bancoAtual}
         onSelectBanco={handleSelectBanco}
         ttsEnabled={ttsEnabled}
-        onToggleTts={handleToggleTts}
+        onToggleTts={() => setTtsEnabled(!ttsEnabled)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         empresaNome={company.nomeFantasia || company.razaoSocial}
-        isBlingConnected={isBlingLive || !!getStoredBlingToken()}
+        isBlingConnected={isBlingLive || Boolean(empresaAtiva?.blingAccessToken)}
+        onVoltarEmpresas={() => setEmpresaAtivaId(null)}
       />
 
-      {/* Alerta de Retorno OAuth do Bling */}
+      {/* Alerta Temporário de Conexão */}
       {blingAlert && (
-        <div className="bg-emerald-600 text-white px-4 py-2.5 text-xs font-bold flex items-center justify-between shadow-sm animate-fade-in">
+        <div className="bg-emerald-600 text-white px-4 py-2 text-xs font-semibold flex items-center justify-between shadow-sm animate-fade-in">
           <div className="flex items-center gap-2">
             <span>🟢</span>
             <span>{blingAlert}</span>
@@ -391,12 +539,12 @@ export const App: React.FC = () => {
       )}
 
       {/* Banner Informativo quando Bling não estiver conectado */}
-      {!isBlingLive && !getStoredBlingToken() && (
+      {!isBlingLive && !empresaAtiva?.blingAccessToken && (
         <div className="bg-amber-50 border-b border-amber-200 px-4 py-2 text-xs flex items-center justify-between text-amber-900 animate-fade-in">
           <div className="flex items-center gap-2">
             <span className="text-base">⚠️</span>
             <span>
-              <strong>Bling não conectado:</strong> Insira o Token de Acesso ou Client Secret para sincronizar seus clientes e contas reais.
+              <strong>Bling não conectado:</strong> Insira o Token de Acesso para sincronizar seus clientes e contas reais.
             </span>
           </div>
           <button
@@ -447,7 +595,7 @@ export const App: React.FC = () => {
             clientes={clientes}
             isLoading={isLoadingBling}
             isLive={isBlingLive}
-            onRefresh={carregarDadosBling}
+            onRefresh={() => carregarDadosBling(empresaAtiva?.blingAccessToken, empresaAtiva?.id, bancoAtual)}
             onEmitirParaCliente={handleEmitirParaCliente}
           />
         )}
@@ -459,7 +607,7 @@ export const App: React.FC = () => {
             resumo={resumoPagar}
             isLoading={isLoadingBling}
             isLive={isBlingLive}
-            onRefresh={carregarDadosBling}
+            onRefresh={() => carregarDadosBling(empresaAtiva?.blingAccessToken, empresaAtiva?.id, bancoAtual)}
           />
         )}
 
@@ -470,7 +618,7 @@ export const App: React.FC = () => {
             resumo={resumoReceber}
             isLoading={isLoadingBling}
             isLive={isBlingLive}
-            onRefresh={carregarDadosBling}
+            onRefresh={() => carregarDadosBling(empresaAtiva?.blingAccessToken, empresaAtiva?.id, bancoAtual)}
             onViewBoletoReceber={handleViewBoletoReceber}
           />
         )}
@@ -482,8 +630,8 @@ export const App: React.FC = () => {
         onChangeTab={setActiveTab}
         badgeCounts={{
           clientes: clientes.length,
-          pagar: contasPagar.filter(c => c.situacao === 1).length,
-          receber: contasReceber.filter(c => c.situacao === 1).length,
+          pagar: contasPagar.filter((c) => c.situacao === 1).length,
+          receber: contasReceber.filter((c) => c.situacao === 1).length,
         }}
       />
 
@@ -517,7 +665,14 @@ export const App: React.FC = () => {
           company={company}
           onSave={handleSaveCompany}
           onClose={() => setIsSettingsOpen(false)}
-          onBlingConnected={carregarDadosBling}
+          onBlingConnected={() => carregarDadosBling(empresaAtiva?.blingAccessToken, empresaAtiva?.id, bancoAtual)}
+        />
+      )}
+
+      {isAddEmpresaOpen && (
+        <AddEmpresaModal
+          onClose={() => setIsAddEmpresaOpen(false)}
+          onAddEmpresa={handleAddEmpresa}
         />
       )}
     </div>

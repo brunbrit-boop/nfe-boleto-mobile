@@ -30,6 +30,37 @@ export interface CompanyProfile {
   certificadoA1Valido: boolean;
 }
 
+export interface EmpresaTenant {
+  id: string;
+  razaoSocial: string;
+  nomeFantasia: string;
+  cnpj: string;
+  inscricaoEstadual?: string;
+  logradouro?: string;
+  numero?: string;
+  bairro?: string;
+  cidade?: string;
+  uf?: string;
+  cep?: string;
+  regimeTributario?: 'Simples Nacional' | 'Lucro Presumido' | 'Lucro Real';
+  certificadoA1Valido?: boolean;
+  
+  // Integração Bling
+  blingClientId?: string;
+  blingClientSecret?: string;
+  blingAccessToken: string;
+  blingRefreshToken?: string;
+  isBlingConectado: boolean;
+  ultimaSincronizacao?: string;
+
+  // Universo Bancário
+  bancoPadrao: BankProvider;
+  
+  // Customização Visual
+  corAvatar?: string;
+  criadoEm: string;
+}
+
 export interface ClientProfile {
   razaoSocial: string;
   cnpj: string;

@@ -1,4 +1,4 @@
-import type { BlingCliente, BlingContaPagar, BlingContaReceber, ResumoFinanceiro } from '../types';
+import type { BlingCliente, BlingContaPagar, BlingContaReceber, ResumoFinanceiro, BankProvider } from '../types';
 import { formatCurrency, gerarDadosBoletoFebraban, gerarPixCopiaECola } from '../utils/financeEngine';
 
 const STORAGE_KEYS = {
@@ -17,9 +17,10 @@ export function getStoredBlingToken(): string | null {
 
 /**
  * Realiza requisição para a API v3 do Bling (via Proxy Vercel ou direta)
+ * Suporta passar token específico de uma empresa ou usa o armazenado
  */
-async function callBlingApi(endpoint: string): Promise<any> {
-  const token = getStoredBlingToken();
+export async function callBlingApi(endpoint: string, customToken?: string): Promise<any> {
+  const token = customToken || getStoredBlingToken();
   if (!token) {
     throw new Error('Token do Bling não configurado.');
   }
@@ -76,10 +77,107 @@ async function callBlingApi(endpoint: string): Promise<any> {
 }
 
 /**
- * Busca a lista de clientes sincronizada com o Bling ERP
- * Usa criterio=1 (Todos) conforme especificação OpenAPI do Bling v3 e paginação completa
+ * Extrai os dados cadastrais da empresa através do token do Bling (Razão Social, Nome Fantasia, CNPJ, Cidade, UF)
  */
-export async function carregarClientesBling(): Promise<{ data: BlingCliente[]; isLive: boolean; error?: string }> {
+export async function obterDadosEmpresaBling(token: string): Promise<{
+  success: boolean;
+  razaoSocial: string;
+  nomeFantasia: string;
+  cnpj: string;
+  inscricaoEstadual?: string;
+  cidade?: string;
+  uf?: string;
+  cep?: string;
+  logradouro?: string;
+  numero?: string;
+  bairro?: string;
+  mensagem?: string;
+}> {
+  try {
+    // 1. Tenta rota oficial de dados cadastrais /empresas
+    let dataEmpresa: any = null;
+    try {
+      const res = await callBlingApi('/empresas', token);
+      if (res && res.data) {
+        dataEmpresa = Array.isArray(res.data) ? res.data[0] : res.data;
+      }
+    } catch (e: any) {
+      console.warn('Endpoint /empresas não retornou dados diretos:', e);
+    }
+
+    // 2. Se não encontrou em /empresas, tenta rota alternativa /homologacao/empresa
+    if (!dataEmpresa) {
+      try {
+        const resHome = await callBlingApi('/homologacao/empresa', token);
+        if (resHome && resHome.data) {
+          dataEmpresa = resHome.data;
+        }
+      } catch {}
+    }
+
+    if (dataEmpresa && (dataEmpresa.razaoSocial || dataEmpresa.nome || dataEmpresa.cnpj)) {
+      const razao = dataEmpresa.razaoSocial || dataEmpresa.nome || 'Empresa Bling ERP';
+      const fantasia = dataEmpresa.nomeFantasia || dataEmpresa.fantasia || razao;
+      const cnpj = dataEmpresa.cnpj || dataEmpresa.numeroDocumento || '';
+      const ie = dataEmpresa.inscricaoEstadual || dataEmpresa.ie || '';
+      const end = dataEmpresa.endereco || {};
+
+      return {
+        success: true,
+        razaoSocial: razao,
+        nomeFantasia: fantasia,
+        cnpj: cnpj,
+        inscricaoEstadual: ie,
+        cidade: end.municipio || end.cidade || '',
+        uf: end.uf || '',
+        cep: end.cep || '',
+        logradouro: end.endereco || end.logradouro || '',
+        numero: end.numero || '',
+        bairro: end.bairro || '',
+        mensagem: 'Dados da empresa obtidos com sucesso do Bling!',
+      };
+    }
+
+    // 3. Se a rota de empresas estiver restrita mas o token for válido (testando com /contatos?limite=1)
+    const resTeste = await callBlingApi('/contatos?criterio=1&limite=1', token);
+    if (resTeste) {
+      return {
+        success: true,
+        razaoSocial: 'Empresa Bling ERP',
+        nomeFantasia: 'Bling ERP Conectado',
+        cnpj: '',
+        cidade: 'São Paulo',
+        uf: 'SP',
+        mensagem: 'Token autenticado com sucesso no Bling ERP!',
+      };
+    }
+  } catch (err: any) {
+    return {
+      success: false,
+      razaoSocial: '',
+      nomeFantasia: '',
+      cnpj: '',
+      mensagem: err.message || 'Erro ao comunicar com a API do Bling.',
+    };
+  }
+
+  return {
+    success: false,
+    razaoSocial: '',
+    nomeFantasia: '',
+    cnpj: '',
+    mensagem: 'Não foi possível extrair dados cadastrais com o token informado.',
+  };
+}
+
+/**
+ * Busca a lista de clientes sincronizada com o Bling ERP
+ * Suporta passar token e empresaId específicos
+ */
+export async function carregarClientesBling(
+  token?: string,
+  empresaId?: string
+): Promise<{ data: BlingCliente[]; isLive: boolean; error?: string }> {
   try {
     const todosContatos: any[] = [];
     let pagina = 1;
@@ -87,9 +185,8 @@ export async function carregarClientesBling(): Promise<{ data: BlingCliente[]; i
     const maxPaginas = 25; // Até 2.500 contatos com segurança
 
     while (pagina <= maxPaginas) {
-      // criterio=1: Todos os contatos (default do Bling é 3: apenas últimos incluídos)
       const endpoint = `/contatos?criterio=1&limite=${limite}&pagina=${pagina}`;
-      const response = await callBlingApi(endpoint);
+      const response = await callBlingApi(endpoint, token);
       const records = (response && response.data && Array.isArray(response.data)) ? response.data : [];
 
       if (records.length === 0) break;
@@ -124,14 +221,16 @@ export async function carregarClientesBling(): Promise<{ data: BlingCliente[]; i
       limiteCredito: c.limiteCredito || 10000,
     }));
 
-    localStorage.setItem(STORAGE_KEYS.CLIENTES, JSON.stringify(clientesFormatados));
+    const key = empresaId ? `${STORAGE_KEYS.CLIENTES}_${empresaId}` : STORAGE_KEYS.CLIENTES;
+    localStorage.setItem(key, JSON.stringify(clientesFormatados));
     return { data: clientesFormatados, isLive: true };
   } catch (err: any) {
     console.error('Erro ao buscar clientes no Bling:', err);
   }
 
   // Verifica se há cache salvo
-  const cached = localStorage.getItem(STORAGE_KEYS.CLIENTES);
+  const key = empresaId ? `${STORAGE_KEYS.CLIENTES}_${empresaId}` : STORAGE_KEYS.CLIENTES;
+  const cached = localStorage.getItem(key);
   if (cached) {
     try {
       return { data: JSON.parse(cached), isLive: true };
@@ -142,9 +241,13 @@ export async function carregarClientesBling(): Promise<{ data: BlingCliente[]; i
 }
 
 /**
- * Busca a lista de Contas a Pagar do Bling ERP (Endpoint oficial: /contas/pagar)
+ * Busca a lista de Contas a Pagar do Bling ERP
+ * Suporta token e empresaId específicos
  */
-export async function carregarContasPagarBling(): Promise<{ data: BlingContaPagar[]; resumo: ResumoFinanceiro; isLive: boolean }> {
+export async function carregarContasPagarBling(
+  token?: string,
+  empresaId?: string
+): Promise<{ data: BlingContaPagar[]; resumo: ResumoFinanceiro; isLive: boolean }> {
   try {
     const todasContas: any[] = [];
     let pagina = 1;
@@ -152,14 +255,12 @@ export async function carregarContasPagarBling(): Promise<{ data: BlingContaPaga
     const maxPaginas = 15;
 
     while (pagina <= maxPaginas) {
-      // Endpoint oficial Bling v3 OpenAPI: /contas/pagar
       let response: any;
       try {
-        response = await callBlingApi(`/contas/pagar?limite=${limite}&pagina=${pagina}`);
+        response = await callBlingApi(`/contas/pagar?limite=${limite}&pagina=${pagina}`, token);
       } catch (err: any) {
-        // Fallback para rota alternativa caso ocorra variação de gateway
         if (err.message && err.message.includes('404')) {
-          response = await callBlingApi(`/contas-pagar?limite=${limite}&pagina=${pagina}`);
+          response = await callBlingApi(`/contas-pagar?limite=${limite}&pagina=${pagina}`, token);
         } else {
           throw err;
         }
@@ -198,22 +299,28 @@ export async function carregarContasPagarBling(): Promise<{ data: BlingContaPaga
     });
 
     const resumo = calcularResumoFinanceiro(pagamentos);
-    localStorage.setItem(STORAGE_KEYS.PAGAR, JSON.stringify(pagamentos));
+    const key = empresaId ? `${STORAGE_KEYS.PAGAR}_${empresaId}` : STORAGE_KEYS.PAGAR;
+    localStorage.setItem(key, JSON.stringify(pagamentos));
     return { data: pagamentos, resumo, isLive: true };
   } catch (err: any) {
     console.error('Erro ao buscar contas a pagar do Bling:', err);
   }
 
-  // Se o Bling está conectado ou retornou vazio, não exibe nenhuma conta fictícia
   const resumoVazio: ResumoFinanceiro = { totalAberto: 0, totalLiquidado: 0, totalVencido: 0, qtdRegistros: 0 };
-  localStorage.setItem(STORAGE_KEYS.PAGAR, JSON.stringify([]));
+  const key = empresaId ? `${STORAGE_KEYS.PAGAR}_${empresaId}` : STORAGE_KEYS.PAGAR;
+  localStorage.setItem(key, JSON.stringify([]));
   return { data: [], resumo: resumoVazio, isLive: true };
 }
 
 /**
- * Busca a lista de Contas a Receber do Bling ERP (Endpoint oficial: /contas/receber)
+ * Busca a lista de Contas a Receber do Bling ERP com boletos vinculados
+ * Suporta token, empresaId e bancoPadrao específicos
  */
-export async function carregarContasReceberBling(): Promise<{ data: BlingContaReceber[]; resumo: ResumoFinanceiro; isLive: boolean }> {
+export async function carregarContasReceberBling(
+  token?: string,
+  empresaId?: string,
+  bancoPadrao: BankProvider = 'inter'
+): Promise<{ data: BlingContaReceber[]; resumo: ResumoFinanceiro; isLive: boolean }> {
   try {
     const todasContas: any[] = [];
     let pagina = 1;
@@ -223,10 +330,10 @@ export async function carregarContasReceberBling(): Promise<{ data: BlingContaRe
     while (pagina <= maxPaginas) {
       let response: any;
       try {
-        response = await callBlingApi(`/contas/receber?limite=${limite}&pagina=${pagina}`);
+        response = await callBlingApi(`/contas/receber?limite=${limite}&pagina=${pagina}`, token);
       } catch (err: any) {
         if (err.message && err.message.includes('404')) {
-          response = await callBlingApi(`/contas-receber?limite=${limite}&pagina=${pagina}`);
+          response = await callBlingApi(`/contas-receber?limite=${limite}&pagina=${pagina}`, token);
         } else {
           throw err;
         }
@@ -246,7 +353,7 @@ export async function carregarContasReceberBling(): Promise<{ data: BlingContaRe
       const [yyyy, mm, dd] = venc.split('-');
 
       const { linhaDigitavel, codigoBarras, nossoNumero } = gerarDadosBoletoFebraban(
-        'inter',
+        bancoPadrao,
         val,
         new Date(Number(yyyy), Number(mm) - 1, Number(dd)),
         900000 + idx
@@ -277,15 +384,16 @@ export async function carregarContasReceberBling(): Promise<{ data: BlingContaRe
     });
 
     const resumo = calcularResumoFinanceiro(receber);
-    localStorage.setItem(STORAGE_KEYS.RECEBER, JSON.stringify(receber));
+    const key = empresaId ? `${STORAGE_KEYS.RECEBER}_${empresaId}` : STORAGE_KEYS.RECEBER;
+    localStorage.setItem(key, JSON.stringify(receber));
     return { data: receber, resumo, isLive: true };
   } catch (err: any) {
     console.error('Erro ao buscar contas a receber do Bling:', err);
   }
 
-  // Se o Bling está conectado ou retornou vazio, não exibe nenhuma conta fictícia
   const resumoVazio: ResumoFinanceiro = { totalAberto: 0, totalLiquidado: 0, totalVencido: 0, qtdRegistros: 0 };
-  localStorage.setItem(STORAGE_KEYS.RECEBER, JSON.stringify([]));
+  const key = empresaId ? `${STORAGE_KEYS.RECEBER}_${empresaId}` : STORAGE_KEYS.RECEBER;
+  localStorage.setItem(key, JSON.stringify([]));
   return { data: [], resumo: resumoVazio, isLive: true };
 }
 
@@ -321,7 +429,7 @@ function calcularResumoFinanceiro(contas: (BlingContaPagar | BlingContaReceber)[
 /**
  * Função de diagnóstico completo para testar contatos, contas a pagar e contas a receber
  */
-export async function obterDiagnosticoBling(): Promise<{
+export async function obterDiagnosticoBling(customToken?: string): Promise<{
   ok: boolean;
   contatosCount?: number;
   pagarCount?: number;
@@ -329,15 +437,15 @@ export async function obterDiagnosticoBling(): Promise<{
   detalhes?: string;
   error?: string;
 }> {
-  const token = getStoredBlingToken();
+  const token = customToken || getStoredBlingToken();
   if (!token) {
     return { ok: false, error: 'Token do Bling não configurado no navegador.' };
   }
   try {
     const [resContatos, resPagar, resReceber] = await Promise.all([
-      callBlingApi('/contatos?criterio=1&limite=3'),
-      callBlingApi('/contas/pagar?limite=3').catch(() => callBlingApi('/contas-pagar?limite=3')),
-      callBlingApi('/contas/receber?limite=3').catch(() => callBlingApi('/contas-receber?limite=3')),
+      callBlingApi('/contatos?criterio=1&limite=3', token),
+      callBlingApi('/contas/pagar?limite=3', token).catch(() => callBlingApi('/contas-pagar?limite=3', token)),
+      callBlingApi('/contas/receber?limite=3', token).catch(() => callBlingApi('/contas-receber?limite=3', token)),
     ]);
 
     const contatosCount = Array.isArray(resContatos?.data) ? resContatos.data.length : 0;
