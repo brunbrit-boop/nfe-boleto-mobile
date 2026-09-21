@@ -32,33 +32,48 @@ import {
   carregarContasPagarBling,
   carregarContasReceberBling,
   getStoredBlingToken,
+  obterDadosEmpresaBling,
 } from './services/blingService';
 import { exchangeBlingCodeForToken, BLING_DEFAULT_CLIENT_ID } from './utils/blingApi';
 
 export const App: React.FC = () => {
   // Lista de Empresas (Multi-Empresas Bling)
   const [empresas, setEmpresas] = useState<EmpresaTenant[]>(() => {
+    const tokenAtual = localStorage.getItem('bling_access_token') || '';
     const saved = localStorage.getItem('nfe_empresas_list');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          // Limpa dados de demonstração residuais caso ainda estejam no localStorage
+          const limpas = parsed.map((e: EmpresaTenant) => {
+            const isDemo = e.razaoSocial?.includes('BRASIL TECH') || e.cnpj === '24.912.830/0001-52';
+            return {
+              ...e,
+              razaoSocial: isDemo ? 'Empresa Bling ERP' : e.razaoSocial,
+              nomeFantasia: isDemo ? 'Minha Empresa' : (e.nomeFantasia || 'Minha Empresa'),
+              cnpj: isDemo ? '' : (e.cnpj || ''),
+              blingAccessToken: e.blingAccessToken || tokenAtual,
+              isBlingConectado: Boolean(e.blingAccessToken || tokenAtual),
+            };
+          });
+          return limpas;
+        }
       } catch {}
     }
 
-    const tokenAtual = localStorage.getItem('bling_access_token') || '';
     const initialEmpresa: EmpresaTenant = {
-      id: 'emp_default_brasil_tech',
-      razaoSocial: 'BRASIL TECH & COMERCIO LTDA',
-      nomeFantasia: 'Brasil Tech Distribuidora',
-      cnpj: '24.912.830/0001-52',
-      inscricaoEstadual: '114.920.381.119',
-      logradouro: 'Avenida Paulista',
-      numero: '1578',
-      bairro: 'Bela Vista',
-      cidade: 'São Paulo',
-      uf: 'SP',
-      cep: '01310-200',
+      id: 'emp_default_1',
+      razaoSocial: 'Empresa Bling ERP',
+      nomeFantasia: 'Minha Empresa',
+      cnpj: '',
+      inscricaoEstadual: '',
+      logradouro: '',
+      numero: '',
+      bairro: '',
+      cidade: '',
+      uf: '',
+      cep: '',
       regimeTributario: 'Simples Nacional',
       certificadoA1Valido: true,
       blingClientId: localStorage.getItem('bling_client_id') || BLING_DEFAULT_CLIENT_ID,
@@ -84,16 +99,16 @@ export const App: React.FC = () => {
   const empresaAtiva = empresas.find((e) => e.id === empresaAtivaId) || null;
 
   const [company, setCompany] = useState<CompanyProfile>(() => ({
-    razaoSocial: 'BRASIL TECH & COMERCIO LTDA',
-    nomeFantasia: 'Brasil Tech Distribuidora',
-    cnpj: '24.912.830/0001-52',
-    inscricaoEstadual: '114.920.381.119',
-    logradouro: 'Avenida Paulista',
-    numero: '1578',
-    bairro: 'Bela Vista',
+    razaoSocial: 'Minha Empresa Bling',
+    nomeFantasia: 'Minha Empresa',
+    cnpj: '',
+    inscricaoEstadual: '',
+    logradouro: '',
+    numero: '',
+    bairro: '',
     cidade: 'São Paulo',
     uf: 'SP',
-    cep: '01310-200',
+    cep: '',
     regimeTributario: 'Simples Nacional',
     certificadoA1Valido: true,
   }));
@@ -120,44 +135,66 @@ export const App: React.FC = () => {
   const [isLoadingBling, setIsLoadingBling] = useState<boolean>(false);
   const [isBlingLive, setIsBlingLive] = useState<boolean>(false);
 
-  // Mensagens do Chat do Robô
-  const [messages, setMessages] = useState<ChatMessage[]>(() => {
-    const agora = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    const cmdExemplo = 'Criar nota fiscal de venda de produtos da minha empresa para Silva Materiais no valor de R$ 3.000 em 3 parcelas';
-    const parsed = interpretarComandoVoz(cmdExemplo, 'inter');
-    const nfeDemo = criarNFeDeComando(parsed, {
-      razaoSocial: 'BRASIL TECH & COMERCIO LTDA',
-      nomeFantasia: 'Brasil Tech',
-      cnpj: '24.912.830/0001-52',
-      inscricaoEstadual: '114.920.381.119',
-      logradouro: 'Avenida Paulista',
-      numero: '1578',
-      bairro: 'Bela Vista',
-      cidade: 'São Paulo',
-      uf: 'SP',
-      cep: '01310-200',
-      regimeTributario: 'Simples Nacional',
-      certificadoA1Valido: true,
-    });
+  // Mensagens do Chat do Robô (100% limpo, sem conteúdo fake)
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
 
-    return [
-      {
-        id: 'msg-welcome',
-        sender: 'bot',
-        text: 'Olá! Sou seu **Robô Fiscal & Bancário Inteligente** 🤖.\n\n' +
-              'Todos os dados de **Clientes**, **Contas a Pagar** e **Contas a Receber** estão integrados com o seu **Bling ERP**.\n\n' +
-              'Você pode simplesmente **falar no microfone** dizendo o que vendeu e a quantidade de parcelas. O robô emite a NF-e e já gera os códigos bancários do seu banco!\n\n' +
-              'Veja uma simulação pronta abaixo:',
-        timestamp: agora,
-        nfeData: nfeDemo,
-        quickActions: [
-          { label: '🎙️ Testar comando por voz', action: 'start_voice' },
-          { label: '📄 Ver DANFE da Nota', action: 'view_demo_danfe' },
-          { label: '👥 Ver Clientes do Bling', action: 'go_clientes' },
-        ],
+  // Sincroniza dados cadastrais reais da empresa através do endpoint oficial do Bling (/empresas/me/dados-basicos)
+  const sincronizarEmpresaDoBling = async (empresaId: string, tokenParam?: string) => {
+    const token = tokenParam || localStorage.getItem('bling_access_token');
+    if (!token) return;
+
+    try {
+      const dados = await obterDadosEmpresaBling(token);
+      if (dados.success && (dados.razaoSocial || dados.cnpj || dados.nomeFantasia)) {
+        const nomeFinal = dados.nomeFantasia || dados.razaoSocial || 'Empresa Bling';
+        const razaoFinal = dados.razaoSocial || nomeFinal;
+
+        setEmpresas((prev) => {
+          const atualizadas = prev.map((e) => {
+            if (e.id === empresaId) {
+              return {
+                ...e,
+                razaoSocial: razaoFinal,
+                nomeFantasia: nomeFinal,
+                cnpj: dados.cnpj || e.cnpj,
+                inscricaoEstadual: dados.inscricaoEstadual || e.inscricaoEstadual,
+                cidade: dados.cidade || e.cidade,
+                uf: dados.uf || e.uf,
+                isBlingConectado: true,
+                ultimaSincronizacao: new Date().toISOString(),
+              };
+            }
+            return e;
+          });
+          localStorage.setItem('nfe_empresas_list', JSON.stringify(atualizadas));
+          return atualizadas;
+        });
+
+        if (empresaAtivaId === empresaId) {
+          setCompany((prev) => ({
+            ...prev,
+            razaoSocial: razaoFinal,
+            nomeFantasia: nomeFinal,
+            cnpj: dados.cnpj || prev.cnpj,
+            cidade: dados.cidade || prev.cidade,
+            uf: dados.uf || prev.uf,
+          }));
+        }
       }
-    ];
-  });
+    } catch (err) {
+      console.error('Erro ao sincronizar dados da empresa com Bling:', err);
+    }
+  };
+
+  // Efeito ao carregar: sincroniza imediatamente os dados reais da empresa ativa ou cadastradas
+  useEffect(() => {
+    empresas.forEach((emp) => {
+      const token = emp.blingAccessToken || localStorage.getItem('bling_access_token');
+      if (token) {
+        sincronizarEmpresaDoBling(emp.id, token);
+      }
+    });
+  }, []);
 
   // Carrega dados do Bling para a empresa ativa
   const carregarDadosBling = async (customToken?: string, empIdParam?: string, customBanco?: BankProvider) => {
@@ -225,6 +262,9 @@ export const App: React.FC = () => {
     setEmpresas(atualizadas);
     localStorage.setItem('nfe_empresas_list', JSON.stringify(atualizadas));
     setIsAddEmpresaOpen(false);
+    if (novaEmpresa.blingAccessToken) {
+      sincronizarEmpresaDoBling(novaEmpresa.id, novaEmpresa.blingAccessToken);
+    }
     // Entra diretamente na empresa adicionada
     handleSelectEmpresa(novaEmpresa);
   };
@@ -496,6 +536,9 @@ export const App: React.FC = () => {
           onSelectEmpresa={handleSelectEmpresa}
           onOpenAddEmpresa={() => setIsAddEmpresaOpen(true)}
           onDeleteEmpresa={handleDeleteEmpresa}
+          onSyncEmpresa={async (emp) => {
+            await sincronizarEmpresaDoBling(emp.id, emp.blingAccessToken);
+          }}
         />
 
         {isAddEmpresaOpen && (

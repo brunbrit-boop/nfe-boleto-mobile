@@ -16,18 +16,33 @@ export function getStoredBlingToken(): string | null {
 }
 
 /**
+ * Formata CNPJ para o padrão XX.XXX.XXX/XXXX-XX
+ */
+export function formatarCNPJ(valor?: string): string {
+  if (!valor) return '';
+  const digits = valor.replace(/\D/g, '');
+  if (digits.length === 14) {
+    return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  }
+  return valor.trim();
+}
+
+/**
  * Realiza requisição para a API v3 do Bling (via Proxy Vercel ou direta)
  * Suporta passar token específico de uma empresa ou usa o armazenado
  */
 export async function callBlingApi(endpoint: string, customToken?: string): Promise<any> {
-  const token = customToken || getStoredBlingToken();
+  const rawToken = customToken || getStoredBlingToken();
+  const token = (rawToken || '').trim().replace(/^Bearer\s+/i, '');
   if (!token) {
     throw new Error('Token do Bling não configurado.');
   }
 
-  // Tenta via Proxy Vercel
+  const cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
+
+  // 1. Tenta via Proxy Local ou Vercel (/api/bling-proxy)
   try {
-    const proxyUrl = `/api/bling-proxy?endpoint=${encodeURIComponent(endpoint)}`;
+    const proxyUrl = `/api/bling-proxy?endpoint=${encodeURIComponent(cleanEndpoint)}`;
     const response = await fetch(proxyUrl, {
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -42,20 +57,40 @@ export async function callBlingApi(endpoint: string, customToken?: string): Prom
       return { data: [] };
     }
 
-    if (response.ok && data) {
+    if (response.ok && data && typeof data === 'object') {
       return data;
-    } else if (data) {
+    } else if (data && data?.error) {
       const msg = data?.error?.message || data?.error || data?.mensagem || `Bling retornou HTTP ${response.status}`;
       throw new Error(msg);
     }
   } catch (proxyErr: any) {
-    if (proxyErr.message && !proxyErr.message.includes('fetch')) {
+    if (proxyErr.message && !proxyErr.message.includes('fetch') && !proxyErr.message.includes('Failed to fetch')) {
       throw proxyErr;
     }
   }
 
-  // Fallback direto via api.bling.com.br
-  const directUrl = `https://api.bling.com.br/Api/v3${endpoint.startsWith('/') ? endpoint : '/' + endpoint}`;
+  // 2. Se em localhost e falhou o proxy relativo, tenta o proxy público de produção da Vercel
+  if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    try {
+      const vercelProxyUrl = `https://nfe-boleto-mobile.vercel.app/api/bling-proxy?endpoint=${encodeURIComponent(cleanEndpoint)}`;
+      const vRes = await fetch(vercelProxyUrl, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Accept': 'application/json',
+        },
+      });
+      const vData = await vRes.json().catch(() => null);
+      if (vRes.status === 404 || vData?.error?.type === 'RESOURCE_NOT_FOUND') {
+        return { data: [] };
+      }
+      if (vRes.ok && vData && typeof vData === 'object') {
+        return vData;
+      }
+    } catch {}
+  }
+
+  // 3. Fallback direto via api.bling.com.br
+  const directUrl = `https://api.bling.com.br/Api/v3${cleanEndpoint}`;
   const directRes = await fetch(directUrl, {
     headers: {
       'Authorization': `Bearer ${token}`,
@@ -93,53 +128,77 @@ export async function obterDadosEmpresaBling(token: string): Promise<{
   bairro?: string;
   mensagem?: string;
 }> {
+  const cleanToken = (token || '').trim().replace(/^Bearer\s+/i, '');
+  if (!cleanToken) {
+    return {
+      success: false,
+      razaoSocial: '',
+      nomeFantasia: '',
+      cnpj: '',
+      mensagem: 'Token de acesso do Bling não fornecido.',
+    };
+  }
+
   try {
-    // 1. Tenta rota oficial de dados cadastrais /empresas
+    // 1. Rota oficial da API v3 do Bling: GET /empresas/me/dados-basicos
+    // Retorna: { data: { id, nome, cnpj, email, dataContrato } }
     let dataEmpresa: any = null;
     try {
-      const res = await callBlingApi('/empresas', token);
+      const res = await callBlingApi('/empresas/me/dados-basicos', cleanToken);
       if (res && res.data) {
-        dataEmpresa = Array.isArray(res.data) ? res.data[0] : res.data;
+        dataEmpresa = res.data;
+      } else if (res && (res.nome || res.cnpj)) {
+        dataEmpresa = res;
       }
     } catch (e: any) {
-      console.warn('Endpoint /empresas não retornou dados diretos:', e);
+      console.warn('Tentativa /empresas/me/dados-basicos falhou, tentando fallback:', e);
     }
 
-    // 2. Se não encontrou em /empresas, tenta rota alternativa /homologacao/empresa
+    // 2. Se não encontrou, tenta rota alternativa /empresas
     if (!dataEmpresa) {
       try {
-        const resHome = await callBlingApi('/homologacao/empresa', token);
+        const resEmp = await callBlingApi('/empresas', cleanToken);
+        if (resEmp && resEmp.data) {
+          dataEmpresa = Array.isArray(resEmp.data) ? resEmp.data[0] : resEmp.data;
+        }
+      } catch {}
+    }
+
+    // 3. Fallback adicional /homologacao/empresa
+    if (!dataEmpresa) {
+      try {
+        const resHome = await callBlingApi('/homologacao/empresa', cleanToken);
         if (resHome && resHome.data) {
           dataEmpresa = resHome.data;
         }
       } catch {}
     }
 
-    if (dataEmpresa && (dataEmpresa.razaoSocial || dataEmpresa.nome || dataEmpresa.cnpj)) {
-      const razao = dataEmpresa.razaoSocial || dataEmpresa.nome || 'Empresa Bling ERP';
-      const fantasia = dataEmpresa.nomeFantasia || dataEmpresa.fantasia || razao;
-      const cnpj = dataEmpresa.cnpj || dataEmpresa.numeroDocumento || '';
-      const ie = dataEmpresa.inscricaoEstadual || dataEmpresa.ie || '';
+    if (dataEmpresa && (dataEmpresa.nome || dataEmpresa.razaoSocial || dataEmpresa.cnpj)) {
+      const nomeFinal = (dataEmpresa.nome || dataEmpresa.nomeFantasia || dataEmpresa.razaoSocial || '').trim();
+      const razaoFinal = (dataEmpresa.razaoSocial || dataEmpresa.nome || nomeFinal).trim();
+      const cnpjFinal = formatarCNPJ(dataEmpresa.cnpj || dataEmpresa.numeroDocumento || '');
+      const ieFinal = (dataEmpresa.inscricaoEstadual || dataEmpresa.ie || '').trim();
       const end = dataEmpresa.endereco || {};
 
       return {
         success: true,
-        razaoSocial: razao,
-        nomeFantasia: fantasia,
-        cnpj: cnpj,
-        inscricaoEstadual: ie,
+        razaoSocial: razaoFinal || 'Empresa Bling ERP',
+        nomeFantasia: nomeFinal || razaoFinal || 'Minha Empresa',
+        cnpj: cnpjFinal,
+        inscricaoEstadual: ieFinal,
         cidade: end.municipio || end.cidade || '',
         uf: end.uf || '',
         cep: end.cep || '',
         logradouro: end.endereco || end.logradouro || '',
         numero: end.numero || '',
         bairro: end.bairro || '',
-        mensagem: 'Dados da empresa obtidos com sucesso do Bling!',
+        mensagem: 'Dados da empresa importados com sucesso do Bling!',
       };
     }
 
-    // 3. Se a rota de empresas estiver restrita mas o token for válido (testando com /contatos?limite=1)
-    const resTeste = await callBlingApi('/contatos?criterio=1&limite=1', token);
+    // 4. Se a rota de empresas estiver com restrição mas o token for válido
+    const resTeste = await callBlingApi('/contatos?criterio=1&limite=1', cleanToken);
     if (resTeste) {
       return {
         success: true,
@@ -166,7 +225,7 @@ export async function obterDadosEmpresaBling(token: string): Promise<{
     razaoSocial: '',
     nomeFantasia: '',
     cnpj: '',
-    mensagem: 'Não foi possível extrair dados cadastrais com o token informado.',
+    mensagem: 'Não foi possível obter os dados da empresa do Bling.',
   };
 }
 

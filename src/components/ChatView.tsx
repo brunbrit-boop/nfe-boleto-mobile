@@ -69,9 +69,9 @@ export const ChatView: React.FC<ChatViewProps> = ({
           </div>
 
           <div className="bg-white rounded-2xl p-4 border border-slate-200 text-left text-xs space-y-2 max-w-md mx-auto shadow-sm">
-            <span className="font-bold text-blue-700 block">Exemplo do que você pode falar:</span>
+            <span className="font-bold text-blue-700 block">Como falar com o Robô:</span>
             <p className="text-slate-700 italic">
-              "Olha, eu quero criar uma nota fiscal de venda de produtos da minha empresa para a empresa Silva Materiais no valor de R$ 3.000 em 3 parcelas."
+              "Emitir nota fiscal de venda de produtos para [Nome do Cliente] no valor de R$ [Valor] em [N] parcelas."
             </p>
             <div className="pt-2 flex items-center gap-1.5 text-[11px] text-slate-500 border-t border-slate-100">
               <span>👉</span>

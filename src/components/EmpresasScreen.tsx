@@ -1,5 +1,5 @@
-import React from 'react';
-import { Building2, Plus, Sparkles, ArrowRight, Trash2, CheckCircle2, AlertTriangle, ShieldCheck } from 'lucide-react';
+import React, { useState } from 'react';
+import { Building2, Plus, Sparkles, ArrowRight, Trash2, CheckCircle2, AlertTriangle, ShieldCheck, RefreshCw } from 'lucide-react';
 import type { EmpresaTenant } from '../types';
 import { BANKS } from '../utils/financeEngine';
 
@@ -8,6 +8,7 @@ interface EmpresasScreenProps {
   onSelectEmpresa: (empresa: EmpresaTenant) => void;
   onOpenAddEmpresa: () => void;
   onDeleteEmpresa: (empresaId: string) => void;
+  onSyncEmpresa?: (empresa: EmpresaTenant) => Promise<void>;
 }
 
 export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
@@ -15,7 +16,10 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
   onSelectEmpresa,
   onOpenAddEmpresa,
   onDeleteEmpresa,
+  onSyncEmpresa,
 }) => {
+  const [syncingId, setSyncingId] = useState<string | null>(null);
+
   const getGradientByCor = (cor?: string) => {
     switch (cor) {
       case 'emerald':
@@ -38,6 +42,17 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
     const partes = nome.trim().split(' ');
     if (partes.length === 1) return partes[0].slice(0, 2).toUpperCase();
     return (partes[0][0] + partes[1][0]).toUpperCase();
+  };
+
+  const handleSync = async (e: React.MouseEvent, emp: EmpresaTenant) => {
+    e.stopPropagation();
+    if (!onSyncEmpresa) return;
+    setSyncingId(emp.id);
+    try {
+      await onSyncEmpresa(emp);
+    } finally {
+      setSyncingId(null);
+    }
   };
 
   return (
@@ -120,6 +135,7 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
               const banco = BANKS[empresa.bancoPadrao] || BANKS.inter;
               const gradiente = getGradientByCor(empresa.corAvatar);
               const iniciais = getIniciais(empresa.nomeFantasia || empresa.razaoSocial);
+              const isSyncing = syncingId === empresa.id;
 
               return (
                 <div
@@ -140,7 +156,7 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
 
                         {/* Títulos */}
                         <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <h3 className="text-sm sm:text-base font-black text-slate-900 leading-tight">
                               {empresa.nomeFantasia || empresa.razaoSocial}
                             </h3>
@@ -154,6 +170,19 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                                 <AlertTriangle className="w-3 h-3 text-amber-500" />
                                 <span>Configurar</span>
                               </span>
+                            )}
+
+                            {/* Botão de Puxar/Atualizar Dados do Bling */}
+                            {empresa.blingAccessToken && onSyncEmpresa && (
+                              <button
+                                onClick={(e) => handleSync(e, empresa)}
+                                disabled={isSyncing}
+                                className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 transition shrink-0 active:scale-95"
+                                title="Importar Nome e CNPJ reais diretamente da API do Bling"
+                              >
+                                <RefreshCw className={`w-3 h-3 text-blue-600 ${isSyncing ? 'animate-spin' : ''}`} />
+                                <span>{isSyncing ? 'Buscando...' : 'Importar do Bling'}</span>
+                              </button>
                             )}
                           </div>
 
@@ -187,7 +216,7 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                           CNPJ
                         </span>
                         <span className="font-semibold text-slate-700 font-mono">
-                          {empresa.cnpj || 'Não informado'}
+                          {empresa.cnpj || 'Importando do Bling...'}
                         </span>
                       </div>
 
