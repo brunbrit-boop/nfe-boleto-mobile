@@ -37,7 +37,7 @@ export default async function handler(req: any, res: any) {
       params.append('redirect_uri', redirectUri);
     }
 
-    const response = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
+    let response = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -47,11 +47,35 @@ export default async function handler(req: any, res: any) {
       body: params.toString(),
     });
 
-    const data = await response.json();
+    let data = await response.json().catch(() => null);
+
+    // Se falhar e tínhamos enviado redirect_uri, tenta novamente sem redirect_uri
+    if (!response.ok && redirectUri) {
+      const fallbackParams = new URLSearchParams();
+      fallbackParams.append('grant_type', 'authorization_code');
+      fallbackParams.append('code', code);
+
+      const fallbackRes = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': `Basic ${basicAuth}`,
+          'Accept': '1.0',
+        },
+        body: fallbackParams.toString(),
+      });
+
+      const fallbackData = await fallbackRes.json().catch(() => null);
+      if (fallbackRes.ok && fallbackData) {
+        response = fallbackRes;
+        data = fallbackData;
+      }
+    }
 
     if (!response.ok) {
+      const errorMsg = data?.error_description || data?.error || data?.mensagem || 'Erro retornado pelo Bling ao trocar código';
       return res.status(response.status).json({
-        error: 'Erro retornado pela API do Bling',
+        error: errorMsg,
         details: data,
       });
     }
