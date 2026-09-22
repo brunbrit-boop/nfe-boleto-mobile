@@ -28,7 +28,7 @@ export function formatarCNPJ(valor?: string): string {
   return valor.trim();
 }
 
-import type { PedidoItemVenda } from '../utils/salesOptimizer';
+import type { PedidoItemVenda, CatalogoProduto } from '../utils/salesOptimizer';
 
 export interface BlingApiOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -1096,3 +1096,50 @@ export async function obterDiagnosticoBling(customToken?: string): Promise<{
     };
   }
 }
+
+/**
+ * Busca a lista de produtos reais cadastrados na conta da empresa no Bling (API v3)
+ */
+export async function carregarProdutosBling(
+  customToken?: string,
+  _empresaId?: string
+): Promise<{ success: boolean; data: CatalogoProduto[]; error?: string }> {
+  const token = customToken || getStoredBlingToken() || '';
+  if (!token) {
+    return { success: false, data: [], error: 'Token do Bling não configurado.' };
+  }
+
+  try {
+    const resposta = await callBlingApi('/produtos?criterio=1&limite=100', {
+      method: 'GET',
+      customToken: token,
+    });
+
+    const lista = resposta?.data || [];
+    if (!Array.isArray(lista) || lista.length === 0) {
+      return { success: true, data: [] };
+    }
+
+    const produtosConvertidos: CatalogoProduto[] = lista
+      .filter((p: any) => p && (p.nome || p.descricao))
+      .map((p: any) => {
+        const preco = Number(p.preco || p.precoCusto || 0);
+        return {
+          id: String(p.id || p.codigo || Math.random()),
+          codigo: String(p.codigo || `PROD-${p.id || ''}`),
+          descricao: String(p.nome || p.descricao || 'Produto Bling'),
+          precoUnitario: preco > 0 ? preco : 10.0,
+          unidade: String(p.unidade || 'UN').slice(0, 6),
+          ncm: String(p.tributacao?.ncm || p.ncm || '25232910').replace(/\D/g, '') || '25232910',
+          cfop: '5102',
+          categoria: String(p.categoria?.descricao || 'Geral'),
+        };
+      });
+
+    return { success: true, data: produtosConvertidos };
+  } catch (err: any) {
+    console.error('Erro ao carregar produtos do Bling:', err);
+    return { success: false, data: [], error: err.message };
+  }
+}
+

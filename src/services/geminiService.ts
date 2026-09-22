@@ -1,7 +1,7 @@
 import type { CatalogoProduto, OfertaGeradaResult, PedidoItemVenda } from '../utils/salesOptimizer';
 import { CATALOGO_PRODUTOS_PADRAO, gerarOfertaComIA } from '../utils/salesOptimizer';
 
-const GEMINI_MODELS = ['gemini-1.5-flash', 'gemini-2.5-flash', 'gemini-2.0-flash'];
+const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-1.5-flash'];
 
 /**
  * Retorna a chave de API do Gemini salva

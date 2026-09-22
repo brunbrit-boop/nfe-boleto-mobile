@@ -30,6 +30,7 @@ import { BANKS } from '../../../utils/financeEngine';
 import {
   gravarEsbocoNFeNoBling,
   getStoredBlingToken,
+  carregarProdutosBling,
   type ResultadoEsbocoBling,
 } from '../../../services/blingService';
 
@@ -66,9 +67,34 @@ export const SalesView: React.FC<SalesViewProps> = ({
   const [isSavingBling, setIsSavingBling] = useState(false);
   const [resultadoBling, setResultadoBling] = useState<ResultadoEsbocoBling | null>(null);
 
+  const [catalogoProdutos, setCatalogoProdutos] = useState<CatalogoProduto[]>(CATALOGO_PRODUTOS_PADRAO);
+  const [isProdutosDoBling, setIsProdutosDoBling] = useState<boolean>(false);
+  const [isLoadingProdutosBling, setIsLoadingProdutosBling] = useState<boolean>(false);
+
   useEffect(() => {
     setHasGeminiKey(Boolean(getStoredGeminiApiKey()));
   }, []);
+
+  // Carrega produtos reais do Bling
+  useEffect(() => {
+    const carregar = async () => {
+      const token = empresa.blingAccessToken || getStoredBlingToken();
+      if (!token) return;
+      setIsLoadingProdutosBling(true);
+      try {
+        const res = await carregarProdutosBling(token, empresa.id);
+        if (res.success && res.data.length > 0) {
+          setCatalogoProdutos(res.data);
+          setIsProdutosDoBling(true);
+        }
+      } catch (e) {
+        console.error('Erro ao buscar produtos do Bling:', e);
+      } finally {
+        setIsLoadingProdutosBling(false);
+      }
+    };
+    carregar();
+  }, [empresa.id, empresa.blingAccessToken]);
 
   const clienteSelecionado = clientes.find((c) => c.id === Number(selectedClienteId)) || clientes[0] || null;
 
@@ -84,7 +110,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
     setNfeGeradaSucesso(null);
 
     try {
-      const res = await gerarOfertaComGeminiOuLocal(valorAlvo, 0.05, CATALOGO_PRODUTOS_PADRAO);
+      const res = await gerarOfertaComGeminiOuLocal(valorAlvo, 0.05, catalogoProdutos);
       setResultadoOferta(res);
       setItensPedido(res.itens);
     } catch {
@@ -495,7 +521,10 @@ export const SalesView: React.FC<SalesViewProps> = ({
             <div className="p-4 rounded-2xl bg-white dark:bg-[#162f27] border border-gray-200 dark:border-[#214739] shadow-sm flex items-center justify-between text-xs">
               <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
                 <Layers className="w-4 h-4 text-[#11d493]" />
-                <span>Catálogo de Produtos: <strong>{CATALOGO_PRODUTOS_PADRAO.length} itens</strong></span>
+                <span>
+                  Catálogo de Produtos: <strong>{catalogoProdutos.length} itens {isProdutosDoBling ? '(Bling ERP)' : ''}</strong>
+                  {isLoadingProdutosBling && <span className="ml-1 text-[10px] text-gray-400 animate-pulse">(Sincronizando Bling...)</span>}
+                </span>
               </div>
               <button
                 onClick={() => setShowAddProductModal(true)}
@@ -730,7 +759,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
             </div>
 
             <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-              {CATALOGO_PRODUTOS_PADRAO.map((prod) => (
+              {catalogoProdutos.map((prod) => (
                 <div
                   key={prod.id}
                   onClick={() => handleAddProdutoCatalogo(prod)}
