@@ -29,6 +29,7 @@ import {
 import { BANKS } from '../../../utils/financeEngine';
 import {
   gravarEsbocoNFeNoBling,
+  getStoredBlingToken,
   type ResultadoEsbocoBling,
 } from '../../../services/blingService';
 
@@ -214,7 +215,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
     // 2. Envia para a API v3 do Bling (POST /nfe)
     try {
       const res = await gravarEsbocoNFeNoBling({
-        empresaToken: empresa.blingAccessToken,
+        empresaToken: empresa.blingAccessToken || getStoredBlingToken() || undefined,
         cliente: clienteSelecionado,
         itens: itensPedido,
         parcelasCount,

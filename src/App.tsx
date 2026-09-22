@@ -462,7 +462,10 @@ export const App: React.FC = () => {
     setSelectedParcelaForBoleto({ parcela: fakeNFe.parcelas[0], nfe: fakeNFe });
   };
 
-  const handleSaveCompany = (updated: CompanyProfile) => {
+  const handleSaveCompany = (
+    updated: CompanyProfile,
+    blingTokens?: { token: string; clientId: string; clientSecret: string }
+  ) => {
     setCompany(updated);
     localStorage.setItem('nfe_company_profile', JSON.stringify(updated));
 
@@ -471,6 +474,16 @@ export const App: React.FC = () => {
       setEmpresas((prev) => {
         const atualizadas = prev.map((e) => {
           if (e.id === empresaAtivaId) {
+            const tokenFinal = blingTokens?.token !== undefined
+              ? blingTokens.token
+              : (e.blingAccessToken || localStorage.getItem('bling_access_token') || '');
+            const cId = blingTokens?.clientId !== undefined
+              ? blingTokens.clientId
+              : (e.blingClientId || localStorage.getItem('bling_client_id') || '');
+            const cSec = blingTokens?.clientSecret !== undefined
+              ? blingTokens.clientSecret
+              : (e.blingClientSecret || localStorage.getItem('bling_client_secret') || '');
+
             return {
               ...e,
               razaoSocial: updated.razaoSocial,
@@ -485,6 +498,10 @@ export const App: React.FC = () => {
               cep: updated.cep,
               regimeTributario: updated.regimeTributario,
               certificadoA1Valido: updated.certificadoA1Valido,
+              blingAccessToken: tokenFinal,
+              blingClientId: cId,
+              blingClientSecret: cSec,
+              isBlingConectado: Boolean(tokenFinal),
             };
           }
           return e;

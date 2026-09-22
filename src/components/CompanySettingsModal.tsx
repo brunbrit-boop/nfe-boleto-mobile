@@ -6,7 +6,7 @@ import { obterDiagnosticoBling } from '../services/blingService';
 
 interface CompanySettingsModalProps {
   company: CompanyProfile;
-  onSave: (updated: CompanyProfile) => void;
+  onSave: (updated: CompanyProfile, blingTokens?: { token: string; clientId: string; clientSecret: string }) => void;
   onClose: () => void;
   onBlingConnected?: () => void;
 }
@@ -53,6 +53,7 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
     setIsTestingBling(true);
     setTestBlingResult(null);
     try {
+      setBlingAccessTokenDirect(blingAccessToken);
       const res = await testBlingConnection(blingAccessToken);
       setTestBlingResult(res);
       if (res.success) {
@@ -91,7 +92,11 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
     if (blingClientId) localStorage.setItem('bling_client_id', blingClientId);
     if (blingClientSecret) localStorage.setItem('bling_client_secret', blingClientSecret);
 
-    onSave(formData);
+    onSave(formData, {
+      token: blingAccessToken.trim(),
+      clientId: blingClientId.trim(),
+      clientSecret: blingClientSecret.trim(),
+    });
     setSavedAlert(true);
     if (onBlingConnected && blingAccessToken) {
       onBlingConnected();
@@ -237,10 +242,46 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
             </div>
 
             <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 space-y-3">
+              {/* Campo Direto de Token de Acesso (Bearer Token) */}
+              <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-xl p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-emerald-950 flex items-center gap-1.5">
+                    <span>🔑</span> Token de Acesso do Bling (Access / Bearer Token)
+                  </label>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                    Direto & Mais Rápido
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={blingAccessToken}
+                    onChange={(e) => {
+                      setBlingAccessToken(e.target.value);
+                      setBlingAccessTokenDirect(e.target.value);
+                    }}
+                    placeholder="Cole seu Token de Acesso (Access Token) aqui..."
+                    className="flex-1 bg-white border border-emerald-300 rounded-lg px-3 py-2 text-slate-900 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500 font-semibold"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleTestConnection}
+                    disabled={isTestingBling || !blingAccessToken}
+                    className="px-3.5 py-2 rounded-lg text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer shrink-0"
+                  >
+                    <span>⚡</span>
+                    <span>{isTestingBling ? 'Testando...' : 'Testar Token'}</span>
+                  </button>
+                </div>
+                <p className="text-[10px] text-emerald-800/80 leading-relaxed">
+                  Cole o Token de Acesso gerado na tela do Bling e clique em <strong>Testar Token</strong> para conectar na mesma hora!
+                </p>
+              </div>
+
               {/* Informação sobre Client ID e Secret */}
               <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-2.5 text-slate-700 text-[11px] leading-relaxed">
-                <span className="font-bold text-blue-900 block mb-0.5">ℹ️ Como funciona a conexão:</span>
-                Você não precisa gerar token manualmente! Com o <strong>Client ID</strong> e <strong>Client Secret</strong> preenchidos abaixo, basta clicar no botão <strong>Conectar com o Bling</strong>. O robô faz a autorização e gera o token de acesso sozinho!
+                <span className="font-bold text-blue-900 block mb-0.5">ℹ️ Ou conecte via Aplicativo (OAuth 2.0):</span>
+                Se preferir autorização automática, informe o <strong>Client ID</strong> e <strong>Client Secret</strong> abaixo e clique no botão de autorizar:
               </div>
 
               {/* Campos de Client ID e Client Secret */}
