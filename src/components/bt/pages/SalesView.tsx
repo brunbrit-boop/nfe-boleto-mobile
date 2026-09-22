@@ -23,8 +23,14 @@ import {
   ArrowRight,
   X,
   Key,
+  CloudUpload,
+  AlertTriangle,
 } from 'lucide-react';
 import { BANKS } from '../../../utils/financeEngine';
+import {
+  gravarEsbocoNFeNoBling,
+  type ResultadoEsbocoBling,
+} from '../../../services/blingService';
 
 interface SalesViewProps {
   empresa: EmpresaTenant;
@@ -56,6 +62,8 @@ export const SalesView: React.FC<SalesViewProps> = ({
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [nfeGeradaSucesso, setNfeGeradaSucesso] = useState<NFeData | null>(null);
   const [hasGeminiKey, setHasGeminiKey] = useState<boolean>(() => Boolean(getStoredGeminiApiKey()));
+  const [isSavingBling, setIsSavingBling] = useState(false);
+  const [resultadoBling, setResultadoBling] = useState<ResultadoEsbocoBling | null>(null);
 
   useEffect(() => {
     setHasGeminiKey(Boolean(getStoredGeminiApiKey()));
@@ -149,7 +157,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
   const valorAlvoNum = parseFloat(valorAlvoInput.replace(/\D/g, '')) || 0;
   const margemAtual = valorAlvoNum > 0 ? Number((((totalPedidoAtual - valorAlvoNum) / valorAlvoNum) * 100).toFixed(1)) : 0;
 
-  // Aprovar Pedido e Preparar NF-e em Rascunho
+  // Aprovar Pedido e Preparar NF-e em Rascunho Local
   const handleAprovarEPrepararNFe = () => {
     if (!clienteSelecionado) {
       alert('Selecione um cliente para aprovar o pedido de venda.');
@@ -175,6 +183,60 @@ export const SalesView: React.FC<SalesViewProps> = ({
     }
   };
 
+  // Gravar Esboço de Nota no Bling (Vendas > Notas Fiscais / Notas de Saída)
+  const handleGravarEsbocoNoBling = async () => {
+    if (!clienteSelecionado) {
+      alert('Selecione um cliente para gravar o esboço de nota.');
+      return;
+    }
+    if (itensPedido.length === 0) {
+      alert('Adicione pelo menos um produto ao pedido antes de gravar no Bling.');
+      return;
+    }
+
+    setIsSavingBling(true);
+    setResultadoBling(null);
+
+    // 1. Gera rascunho oficial local para habilitar DANFE imediatamente
+    const nfeRascunho = converterPedidoParaNFeRascunho(
+      clienteSelecionado,
+      itensPedido,
+      empresa,
+      bancoSelecionado,
+      parcelasCount
+    );
+    setNfeGeradaSucesso(nfeRascunho);
+
+    if (onEmitirNFe) {
+      onEmitirNFe(nfeRascunho);
+    }
+
+    // 2. Envia para a API v3 do Bling (POST /nfe)
+    try {
+      const res = await gravarEsbocoNFeNoBling({
+        empresaToken: empresa.blingAccessToken,
+        cliente: clienteSelecionado,
+        itens: itensPedido,
+        parcelasCount,
+        banco: bancoSelecionado,
+      });
+
+      setResultadoBling(res);
+
+      if (res.sucesso && res.idNotaBling) {
+        nfeRascunho.numeroNFe = String(res.numeroNota || res.idNotaBling);
+        setNfeGeradaSucesso({ ...nfeRascunho });
+      }
+    } catch (e: any) {
+      setResultadoBling({
+        sucesso: false,
+        mensagem: e?.message || 'Falha ao conectar com o Bling ERP.',
+      });
+    } finally {
+      setIsSavingBling(false);
+    }
+  };
+
   return (
     <div className="flex flex-col h-full bg-[#f6f8f7] dark:bg-[#10221c] overflow-y-auto font-['Manrope',sans-serif] transition-colors pb-16">
       {/* Header da Página */}
@@ -197,8 +259,59 @@ export const SalesView: React.FC<SalesViewProps> = ({
           </div>
         </div>
 
-        {/* Notificação de NF-e Preparada */}
-        {nfeGeradaSucesso && (
+        {/* 1. Sucesso ao Gravar no Bling */}
+        {resultadoBling?.sucesso && (
+          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#11d493] text-slate-950 flex items-center justify-center font-bold shrink-0">
+                <CheckCircle2 className="w-5 h-5 stroke-[2.5]" />
+              </div>
+              <div>
+                <h4 className="text-sm font-black text-gray-900 dark:text-white flex items-center gap-2 flex-wrap">
+                  <span>Esboço Gravado com Sucesso no Bling!</span>
+                  {resultadoBling.idNotaBling && (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-[#11d493] border border-emerald-500/30">
+                      ID Bling #{resultadoBling.idNotaBling}
+                    </span>
+                  )}
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                    Vendas &gt; Notas de Saída
+                  </span>
+                </h4>
+                <p className="text-xs text-gray-600 dark:text-gray-300 mt-0.5">
+                  A nota já está no seu painel do Bling com status <strong>Pendente / Em digitação</strong>.
+                </p>
+              </div>
+            </div>
+
+            {nfeGeradaSucesso && onViewDanfe && (
+              <button
+                onClick={() => onViewDanfe(nfeGeradaSucesso)}
+                className="px-4 py-2 bg-[#11d493] text-slate-950 font-bold rounded-xl text-xs hover:bg-[#0eb880] shadow-md shadow-emerald-500/20 flex items-center gap-1.5 cursor-pointer shrink-0 self-start sm:self-auto"
+              >
+                <span>Visualizar DANFE</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* 2. Alerta ou Erro do Bling */}
+        {resultadoBling && !resultadoBling.sucesso && (
+          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-start gap-3 animate-fade-in text-xs text-amber-900 dark:text-amber-200">
+            <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <span className="font-bold block text-sm">Aviso da Integração com o Bling</span>
+              <p className="leading-relaxed">{resultadoBling.mensagem}</p>
+              <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                O rascunho oficial da NF-e foi gerado no app e você pode conferir o DANFE normalmente.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* 3. Notificação de NF-e Preparada Localmente */}
+        {!resultadoBling && nfeGeradaSucesso && (
           <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-3 animate-fade-in">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-[#11d493] text-slate-950 flex items-center justify-center font-bold shrink-0">
@@ -527,14 +640,35 @@ export const SalesView: React.FC<SalesViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Botão de Aprovar Pedido e Preparar Nota Fiscal */}
-                  <button
-                    onClick={handleAprovarEPrepararNFe}
-                    className="w-full py-3.5 px-4 bg-[#11d493] hover:bg-[#0eb880] text-slate-950 font-black text-sm rounded-xl shadow-lg shadow-emerald-500/20 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <CheckCircle2 className="w-5 h-5 stroke-[2.5]" />
-                    <span>Aprovar Pedido & Preparar NF-e (Rascunho Oficial)</span>
-                  </button>
+                  {/* Botões de Ação para Aprovação e Gravação no Bling */}
+                  <div className="space-y-2">
+                    <button
+                      onClick={handleGravarEsbocoNoBling}
+                      disabled={isSavingBling}
+                      className="w-full py-3.5 px-4 bg-[#11d493] hover:bg-[#0eb880] text-slate-950 font-black text-sm rounded-xl shadow-lg shadow-emerald-500/20 active:scale-95 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-60"
+                    >
+                      {isSavingBling ? (
+                        <>
+                          <Sparkles className="w-5 h-5 animate-spin" />
+                          <span>Gravando no Bling (Vendas &gt; Notas de Saída)...</span>
+                        </>
+                      ) : (
+                        <>
+                          <CloudUpload className="w-5 h-5 stroke-[2.5]" />
+                          <span>Gravar Esboço no Bling (Vendas &gt; Notas de Saída)</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleAprovarEPrepararNFe}
+                      className="w-full py-2 px-3 text-xs font-bold text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <FileText className="w-3.5 h-3.5" />
+                      <span>Apenas gerar rascunho local para DANFE (sem enviar ao Bling)</span>
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

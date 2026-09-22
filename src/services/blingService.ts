@@ -28,11 +28,34 @@ export function formatarCNPJ(valor?: string): string {
   return valor.trim();
 }
 
+import type { PedidoItemVenda } from '../utils/salesOptimizer';
+
+export interface BlingApiOptions {
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  body?: any;
+  customToken?: string;
+}
+
 /**
  * Realiza requisição para a API v3 do Bling (via Proxy Vercel ou direta)
- * Suporta passar token específico de uma empresa ou usa o armazenado
+ * Suporta passar token específico de uma empresa ou objeto de opções completo
  */
-export async function callBlingApi(endpoint: string, customToken?: string): Promise<any> {
+export async function callBlingApi(
+  endpoint: string,
+  optionsOrToken?: string | BlingApiOptions
+): Promise<any> {
+  let customToken: string | undefined;
+  let method: string = 'GET';
+  let body: any = undefined;
+
+  if (typeof optionsOrToken === 'string') {
+    customToken = optionsOrToken;
+  } else if (optionsOrToken && typeof optionsOrToken === 'object') {
+    customToken = optionsOrToken.customToken;
+    method = optionsOrToken.method || 'GET';
+    body = optionsOrToken.body;
+  }
+
   const rawToken = customToken || getStoredBlingToken();
   const token = (rawToken || '').trim().replace(/^Bearer\s+/i, '');
   if (!token) {
@@ -40,15 +63,23 @@ export async function callBlingApi(endpoint: string, customToken?: string): Prom
   }
 
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
+  const serializedBody = body ? (typeof body === 'string' ? body : JSON.stringify(body)) : undefined;
+
+  const requestHeaders: Record<string, string> = {
+    'Authorization': `Bearer ${token}`,
+    'Accept': 'application/json',
+  };
+  if (serializedBody) {
+    requestHeaders['Content-Type'] = 'application/json';
+  }
 
   // 1. Tenta via Proxy Local ou Vercel (/api/bling-proxy)
   try {
     const proxyUrl = `/api/bling-proxy?endpoint=${encodeURIComponent(cleanEndpoint)}`;
     const response = await fetch(proxyUrl, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Accept': 'application/json',
-      },
+      method,
+      headers: requestHeaders,
+      body: serializedBody,
     });
 
     const data = await response.json().catch(() => null);
@@ -61,7 +92,7 @@ export async function callBlingApi(endpoint: string, customToken?: string): Prom
     if (response.ok && data && typeof data === 'object') {
       return data;
     } else if (data && data?.error) {
-      const msg = data?.error?.message || data?.error || data?.mensagem || `Bling retornou HTTP ${response.status}`;
+      const msg = data?.error?.description || data?.error?.message || data?.error || data?.mensagem || `Bling retornou HTTP ${response.status}`;
       throw new Error(msg);
     }
   } catch (proxyErr: any) {
@@ -75,10 +106,9 @@ export async function callBlingApi(endpoint: string, customToken?: string): Prom
     try {
       const vercelProxyUrl = `https://nfe-boleto-mobile.vercel.app/api/bling-proxy?endpoint=${encodeURIComponent(cleanEndpoint)}`;
       const vRes = await fetch(vercelProxyUrl, {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/json',
-        },
+        method,
+        headers: requestHeaders,
+        body: serializedBody,
       });
       const vData = await vRes.json().catch(() => null);
       if (vRes.status === 404 || vData?.error?.type === 'RESOURCE_NOT_FOUND') {
@@ -86,17 +116,23 @@ export async function callBlingApi(endpoint: string, customToken?: string): Prom
       }
       if (vRes.ok && vData && typeof vData === 'object') {
         return vData;
+      } else if (vData && vData?.error) {
+        const msg = vData?.error?.description || vData?.error?.message || `Bling retornou HTTP ${vRes.status}`;
+        throw new Error(msg);
       }
-    } catch {}
+    } catch (vErr: any) {
+      if (vErr.message && !vErr.message.includes('fetch') && !vErr.message.includes('Failed to fetch')) {
+        throw vErr;
+      }
+    }
   }
 
   // 3. Fallback direto via api.bling.com.br
   const directUrl = `https://api.bling.com.br/Api/v3${cleanEndpoint}`;
   const directRes = await fetch(directUrl, {
-    headers: {
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/json',
-    },
+    method,
+    headers: requestHeaders,
+    body: serializedBody,
   });
 
   const directData = await directRes.json().catch(() => null);
@@ -105,11 +141,148 @@ export async function callBlingApi(endpoint: string, customToken?: string): Prom
   }
 
   if (!directRes.ok) {
-    const msg = directData?.error?.message || directData?.error || `Bling HTTP ${directRes.status}`;
+    const msg = directData?.error?.description || directData?.error?.message || directData?.error || `Bling HTTP ${directRes.status}`;
     throw new Error(msg);
   }
 
   return directData;
+}
+
+export interface GravarEsbocoBlingParams {
+  empresaToken?: string;
+  cliente: BlingCliente;
+  itens: PedidoItemVenda[];
+  parcelasCount?: number;
+  banco?: BankProvider;
+}
+
+export interface ResultadoEsbocoBling {
+  sucesso: boolean;
+  idNotaBling?: number;
+  numeroNota?: string;
+  serie?: string;
+  mensagem: string;
+  raw?: any;
+}
+
+/**
+ * Grava um Esboço de Nota Fiscal no Bling (Vendas > Notas Fiscais / Notas de Saída)
+ * Cria o rascunho com status 'Pendente / Em digitação', sem transmissão imediata à SEFAZ.
+ */
+export async function gravarEsbocoNFeNoBling(
+  params: GravarEsbocoBlingParams
+): Promise<ResultadoEsbocoBling> {
+  const { empresaToken, cliente, itens, parcelasCount = 1 } = params;
+
+  if (!itens || itens.length === 0) {
+    return {
+      sucesso: false,
+      mensagem: 'O pedido não contém produtos para compor a nota fiscal.',
+    };
+  }
+
+  const dataHoje = new Date().toISOString().split('T')[0];
+
+  // Identificação do Destinatário
+  const docLimpo = (cliente.numeroDocumento || '').replace(/\D/g, '');
+  const tipoPessoa = docLimpo.length === 11 ? 'F' : 'J';
+
+  const contatoPayload: any = {
+    nome: cliente.nome || cliente.fantasia || 'Cliente Destinatário',
+    tipoPessoa,
+    numeroDocumento: docLimpo,
+  };
+  if (cliente.id && cliente.id > 0) {
+    contatoPayload.id = cliente.id;
+  }
+  if (cliente.ie) {
+    contatoPayload.ie = cliente.ie;
+  }
+  if (cliente.endereco?.geral) {
+    const end = cliente.endereco.geral;
+    contatoPayload.endereco = {
+      endereco: end.endereco || '',
+      numero: end.numero || 'S/N',
+      bairro: end.bairro || '',
+      municipio: end.municipio || '',
+      uf: end.uf || '',
+      cep: (end.cep || '').replace(/\D/g, ''),
+    };
+  }
+
+  // Itens formatados de acordo com a API v3 do Bling (POST /nfe)
+  const itensPayload = itens.map((it, idx) => ({
+    codigo: (it as any).codigo || `ITEM-${idx + 1}`,
+    descricao: it.descricao,
+    unidade: (it.unidade || 'UN').slice(0, 6),
+    quantidade: it.quantidade,
+    valor: it.valorUnitario,
+    tipo: 'P', // P = Produto
+    tributacao: {
+      ncm: (it.ncm || '').replace(/\D/g, '') || '25232910',
+      cfop: (it.cfop || '5102').replace(/\D/g, '') || '5102',
+    },
+  }));
+
+  // Parcelas financeiras
+  const valorTotal = Number(itens.reduce((acc, it) => acc + it.valorTotal, 0).toFixed(2));
+  const parcelasPayload = [];
+  const valorParcelaBase = Number((valorTotal / parcelasCount).toFixed(2));
+  let acumulado = 0;
+
+  for (let i = 1; i <= parcelasCount; i++) {
+    const d = new Date();
+    d.setDate(d.getDate() + i * 30);
+    const dataVenc = d.toISOString().split('T')[0];
+
+    // Ajuste de centavos na última parcela
+    const valorParcela = i === parcelasCount ? Number((valorTotal - acumulado).toFixed(2)) : valorParcelaBase;
+    acumulado += valorParcela;
+
+    parcelasPayload.push({
+      data: dataVenc,
+      valor: valorParcela,
+      observacoes: `Parcela ${i}/${parcelasCount}`,
+    });
+  }
+
+  const payload: any = {
+    tipo: 1, // 1 = Nota Fiscal de Saída (Vendas > Notas Fiscais)
+    dataOperacao: dataHoje,
+    contato: contatoPayload,
+    itens: itensPayload,
+  };
+
+  if (parcelasPayload.length > 0) {
+    payload.parcelas = parcelasPayload;
+  }
+
+  try {
+    const resposta = await callBlingApi('/nfe', {
+      method: 'POST',
+      body: payload,
+      customToken: empresaToken,
+    });
+
+    const data = resposta?.data;
+    const idGerado = data?.id || resposta?.id;
+    const numeroGerado = data?.numero ? String(data.numero) : undefined;
+    const serieGerada = data?.serie ? String(data.serie) : undefined;
+
+    return {
+      sucesso: true,
+      idNotaBling: idGerado,
+      numeroNota: numeroGerado,
+      serie: serieGerada,
+      mensagem: `Esboço de NF-e gravado com sucesso no Bling (ID: ${idGerado || 'Criada com Sucesso'}). Localize em Vendas > Notas Fiscais.`,
+      raw: data || resposta,
+    };
+  } catch (error: any) {
+    return {
+      sucesso: false,
+      mensagem: error.message || 'Erro ao gravar esboço de nota fiscal no Bling.',
+    };
+  }
 }
 
 /**

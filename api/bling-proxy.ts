@@ -29,6 +29,10 @@ export default async function handler(req: any, res: any) {
     const cleanEndpoint = Array.isArray(endpoint) ? endpoint[0] : endpoint;
     const path = cleanEndpoint.startsWith('/') ? cleanEndpoint : '/' + cleanEndpoint;
     
+    const requestBody = req.method !== 'GET' && req.method !== 'HEAD'
+      ? (typeof req.body === 'string' ? req.body : JSON.stringify(req.body))
+      : undefined;
+
     // Tenta primeiro no host oficial da API (api.bling.com.br)
     let url = `https://api.bling.com.br/Api/v3${path}`;
     let blingRes = await fetch(url, {
@@ -38,7 +42,7 @@ export default async function handler(req: any, res: any) {
         'Authorization': authHeader,
         'Content-Type': 'application/json',
       },
-      body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined,
+      body: requestBody,
     });
 
     // Se falhar de conexão, tenta www.bling.com.br
@@ -51,7 +55,7 @@ export default async function handler(req: any, res: any) {
           'Authorization': authHeader,
           'Content-Type': 'application/json',
         },
-        body: req.method !== 'GET' && req.method !== 'HEAD' ? JSON.stringify(req.body) : undefined,
+        body: requestBody,
       });
       if (fallbackRes.ok) {
         blingRes = fallbackRes;
