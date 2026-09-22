@@ -2,7 +2,8 @@
  * Módulo de Integração com a API v3 do Bling ERP (OAuth 2.0)
  */
 
-export const BLING_DEFAULT_CLIENT_ID = 'd07e344178ec5f63e8045571930efcf047083dd0';
+export const BLING_DEFAULT_CLIENT_ID = '5142f9c38e36e69d55278681ac2864a053be067c';
+export const BLING_DEFAULT_CLIENT_SECRET = 'c34055bd8ec510dec764af628816b2c5da6ee1a69d2011e25628e1c71860';
 export const BLING_DEFAULT_STATE = 'cb9768157cff9aef9675a82bdd68c5e4';
 
 export interface BlingConfig {
@@ -159,7 +160,7 @@ export async function exchangeBlingCodeForToken(
   clientSecret: string = ''
 ): Promise<{ success: boolean; accessToken?: string; error?: string }> {
   try {
-    const cSec = clientSecret || localStorage.getItem('bling_client_secret') || '';
+    const cSec = clientSecret || localStorage.getItem('bling_client_secret') || BLING_DEFAULT_CLIENT_SECRET;
     if (!cSec) {
       return {
         success: false,

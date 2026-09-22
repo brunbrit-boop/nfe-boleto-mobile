@@ -28,7 +28,11 @@ import {
   getStoredBlingToken,
   obterDadosEmpresaBling,
 } from './services/blingService';
-import { exchangeBlingCodeForToken, BLING_DEFAULT_CLIENT_ID } from './utils/blingApi';
+import {
+  exchangeBlingCodeForToken,
+  BLING_DEFAULT_CLIENT_ID,
+  BLING_DEFAULT_CLIENT_SECRET,
+} from './utils/blingApi';
 
 export const App: React.FC = () => {
   // Lista de Empresas (Multi-Empresas Bling)
@@ -274,23 +278,40 @@ export const App: React.FC = () => {
     const code = params.get('code');
     if (code) {
       localStorage.setItem('bling_auth_code', code);
-      const clientSecret = localStorage.getItem('bling_client_secret');
+      const clientSecret = localStorage.getItem('bling_client_secret') || BLING_DEFAULT_CLIENT_SECRET;
       const clientId = localStorage.getItem('bling_client_id') || BLING_DEFAULT_CLIENT_ID;
 
-      if (clientSecret) {
-        console.log('Trocando código de autorização por token de acesso no Bling...');
-        exchangeBlingCodeForToken(code, clientId, clientSecret).then((res) => {
-          if (res.success) {
-            console.log('Conta do Bling conectada com sucesso! Dados reais importados.');
-            carregarDadosBling();
-          } else {
-            console.error(`Erro ao autenticar: ${res.error}`);
-          }
-        });
-      }
+      console.log('Trocando código de autorização por token de acesso no Bling...');
+      exchangeBlingCodeForToken(code, clientId, clientSecret).then((res) => {
+        if (res.success && res.accessToken) {
+          console.log('Conta do Bling conectada com sucesso! Token gerado:', res.accessToken.slice(0, 10));
+          // Atualiza as empresas e a empresa ativa
+          setEmpresas((prev) => {
+            const atualizadas = prev.map((e, idx) => {
+              if (e.id === empresaAtivaId || idx === 0) {
+                return {
+                  ...e,
+                  blingAccessToken: res.accessToken || '',
+                  blingClientId: clientId,
+                  blingClientSecret: clientSecret,
+                  isBlingConectado: true,
+                };
+              }
+              return e;
+            });
+            localStorage.setItem('nfe_empresas_list', JSON.stringify(atualizadas));
+            return atualizadas;
+          });
+          carregarDadosBling(res.accessToken);
+          alert('🎉 Sucesso! Sua conta do Bling foi autorizada e conectada com sucesso!');
+        } else {
+          console.error(`Erro ao autenticar: ${res.error}`);
+          alert(`Aviso ao autenticar no Bling: ${res.error}`);
+        }
+      });
       window.history.replaceState({}, document.title, window.location.pathname);
     }
-  }, []);
+  }, [empresaAtivaId]);
 
   // Processamento do comando de voz pelo Robô
   const handleProcessUserCommand = (textoComando: string, isFromAudio: boolean = false) => {

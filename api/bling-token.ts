@@ -25,8 +25,8 @@ export default async function handler(req: any, res: any) {
       return res.status(400).json({ error: 'Parâmetro "code" obrigatório.' });
     }
 
-    const cId = clientId || 'd07e344178ec5f63e8045571930efcf047083dd0';
-    const cSec = clientSecret || process.env.BLING_CLIENT_SECRET || '';
+    const cId = clientId || '5142f9c38e36e69d55278681ac2864a053be067c';
+    const cSec = clientSecret || process.env.BLING_CLIENT_SECRET || 'c34055bd8ec510dec764af628816b2c5da6ee1a69d2011e25628e1c71860';
 
     const basicAuth = Buffer.from(`${cId}:${cSec}`).toString('base64');
 
