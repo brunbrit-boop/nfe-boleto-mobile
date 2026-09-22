@@ -600,7 +600,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
                       >
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+                            <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300">
                               {item.unidade}
                             </span>
                             <span className="text-xs font-bold text-gray-900 dark:text-white truncate block">
@@ -608,44 +608,52 @@ export const SalesView: React.FC<SalesViewProps> = ({
                             </span>
                           </div>
                           <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">
-                            Unitário: R$ {item.valorUnitario.toFixed(2)} • NCM: {item.ncm} • CFOP: {item.cfop}
+                            NCM: {item.ncm} • CFOP: {item.cfop}
                           </div>
                         </div>
 
-                        {/* Controles de Quantidade & Subtotal */}
-                        <div className="flex items-center gap-3 shrink-0">
-                          <div className="flex items-center gap-1 bg-white dark:bg-[#162f27] border border-gray-300 dark:border-gray-700 rounded-lg p-0.5">
-                            <button
-                              onClick={() => handleUpdateQuantidade(item.id, -1)}
-                              className="w-6 h-6 rounded flex items-center justify-center font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-                            >
-                              -
-                            </button>
-                            <span className="w-8 text-center text-xs font-bold text-gray-900 dark:text-white">
-                              {item.quantidade}
-                            </span>
-                            <button
-                              onClick={() => handleUpdateQuantidade(item.id, 1)}
-                              className="w-6 h-6 rounded flex items-center justify-center font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
-                            >
-                              +
-                            </button>
-                          </div>
+                        {/* Valor Unitário Destacado */}
+                        <div className="text-right shrink-0 px-2.5 py-1 rounded-lg bg-white dark:bg-[#162f27] border border-gray-200/80 dark:border-gray-700">
+                          <span className="text-[9px] text-gray-400 block uppercase font-bold tracking-wider">Unitário</span>
+                          <span className="text-xs font-bold text-gray-800 dark:text-gray-200">
+                            R$ {item.valorUnitario.toFixed(2)}
+                          </span>
+                        </div>
 
-                          <div className="text-right w-24">
-                            <span className="text-xs font-black text-gray-900 dark:text-white block">
-                              R$ {item.valorTotal.toFixed(2)}
-                            </span>
-                          </div>
-
+                        {/* Controles de Quantidade */}
+                        <div className="flex items-center gap-1 bg-white dark:bg-[#162f27] border border-gray-300 dark:border-gray-700 rounded-lg p-0.5 shrink-0">
                           <button
-                            onClick={() => handleRemoveItem(item.id)}
-                            className="p-1 rounded-lg text-gray-300 hover:text-rose-500 hover:bg-rose-500/10 transition"
-                            title="Remover item"
+                            onClick={() => handleUpdateQuantidade(item.id, -1)}
+                            className="w-6 h-6 rounded flex items-center justify-center font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            -
+                          </button>
+                          <span className="w-8 text-center text-xs font-bold text-gray-900 dark:text-white">
+                            {item.quantidade}
+                          </span>
+                          <button
+                            onClick={() => handleUpdateQuantidade(item.id, 1)}
+                            className="w-6 h-6 rounded flex items-center justify-center font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 cursor-pointer"
+                          >
+                            +
                           </button>
                         </div>
+
+                        {/* Subtotal */}
+                        <div className="text-right w-24 shrink-0">
+                          <span className="text-[9px] text-gray-400 block uppercase font-bold tracking-wider">Subtotal</span>
+                          <span className="text-xs font-black text-emerald-600 dark:text-[#11d493] block">
+                            R$ {item.valorTotal.toFixed(2)}
+                          </span>
+                        </div>
+
+                        <button
+                          onClick={() => handleRemoveItem(item.id)}
+                          className="p-1.5 rounded-lg text-gray-300 hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer shrink-0"
+                          title="Remover item"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     ))}
                   </div>
