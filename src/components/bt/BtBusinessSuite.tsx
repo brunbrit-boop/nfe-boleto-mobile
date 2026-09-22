@@ -17,6 +17,7 @@ import { BtHeader } from './BtHeader';
 
 // 9 Menus Réplicas 1:1 do BT Business
 import { FinancesView } from './pages/FinancesView';
+import { SalesView } from './pages/SalesView';
 import { SuppliersView } from './pages/SuppliersView';
 import { ClientsView } from './pages/ClientsView';
 import { PurchasesView } from './pages/PurchasesView';
@@ -140,7 +141,18 @@ export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
             />
           )}
 
-          {/* 2. Fornecedores (SuppliersView) */}
+          {/* 2. Vendas & Ofertas IA (SalesView) */}
+          {activeMenu === 'sales' && (
+            <SalesView
+              empresa={empresa}
+              clientes={clientes}
+              bancoAtual={bancoAtual}
+              onViewDanfe={onViewDanfe}
+              onEmitirNFe={onEmitirNFe}
+            />
+          )}
+
+          {/* 3. Fornecedores (SuppliersView) */}
           {activeMenu === 'suppliers' && (
             <SuppliersView
               fornecedores={fornecedores}

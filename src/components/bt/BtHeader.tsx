@@ -14,6 +14,7 @@ interface BtHeaderProps {
 
 const TITULOS_MENU: Record<BtMenuOption, { titulo: string; sub: string }> = {
   finances: { titulo: 'Financeiro', sub: 'Gestão e conciliação de fluxo de caixa (Bling ERP)' },
+  sales: { titulo: 'Vendas & Ofertas IA', sub: 'Composição de pedidos com catálogo e preparação de NF-e' },
   suppliers: { titulo: 'Fornecedores', sub: 'Gerencie seus parceiros e contatos comerciais' },
   clients: { titulo: 'Clientes', sub: 'Gerencie a origem das suas receitas (Bling ERP)' },
   purchases: { titulo: 'Compras', sub: 'Solicite e aprove compras de produtos e serviços' },
