@@ -99,13 +99,14 @@ export async function testarChaveGemini(
 export async function gerarOfertaComGeminiOuLocal(
   valorAlvo: number,
   margemMax: number = 0.05,
-  catalogo: CatalogoProduto[] = CATALOGO_PRODUTOS_PADRAO
+  catalogo: CatalogoProduto[] = CATALOGO_PRODUTOS_PADRAO,
+  diretrizComercial?: string
 ): Promise<OfertaGeradaResult & { motor: 'gemini' | 'local' }> {
   const apiKey = getStoredGeminiApiKey();
 
   // Sem chave configurada: usa motor algorítmico local
   if (!apiKey) {
-    const localRes = gerarOfertaComIA(valorAlvo, margemMax, catalogo);
+    const localRes = gerarOfertaComIA(valorAlvo, margemMax, catalogo, diretrizComercial);
     return {
       ...localRes,
       motor: 'local',
@@ -126,25 +127,39 @@ export async function gerarOfertaComGeminiOuLocal(
     categoria: p.categoria,
   }));
 
-  const prompt = `Você é um analista sênior de vendas B2B e orçamentos comerciais de materiais de construção.
-Sua missão é selecionar uma combinação ideal e inteligente de produtos do catálogo para compor um pedido de venda.
+  const prompt = `Você é um diretor comercial sênior e especialista em orçamentos B2B e vendas de materiais de construção.
+Sua missão é selecionar uma combinação técnica e comercialmente IMPECÁVEL de produtos do catálogo para compor um pedido de venda no valor pretendido.
 
 DADOS DA SOLICITAÇÃO:
 - Valor Alvo Pretendido: R$ ${valorAlvo.toFixed(2)}
-- Valor Máximo Permitido (com margem de até ${margemMax * 100}% a mais): R$ ${limiteMaximo.toFixed(2)}
-- Regra de Valor: O valor total do pedido (soma de qtd * precoUnitario) DEVE ficar entre R$ ${valorAlvo.toFixed(2)} e R$ ${limiteMaximo.toFixed(2)}.
-- Regra de Mix: Escolha itens complementares que façam sentido comercial juntos (ex: tubos com conexões, cimento com argamassa, cabos com disjuntores).
-- Regra de Catálogo: Use APENAS produtos existentes no catálogo fornecido. As quantidades devem ser números inteiros maiores que zero.
+- Valor Máximo Permitido (com margem de até ${margemMax * 100}%): R$ ${limiteMaximo.toFixed(2)}
+- Margem Aceitável: O valor total do pedido (soma de qtd * precoUnitario) DEVE ficar estritamente entre R$ ${valorAlvo.toFixed(2)} e R$ ${limiteMaximo.toFixed(2)}.
+${diretrizComercial ? `- FOCO / DIRETRIZ COMERCIAL SOLICITADA: "${diretrizComercial}". Priorize fortemente itens e complementos desta linha!` : '- DIRETRIZ COMERCIAL: Monte um mix balanceado e coerente para obra/reforma.'}
+
+⚠️ 4 LEIS COMERCIAIS OBRIGATÓRIAS (VIOLAÇÃO GERA PROPOSTA INVÁLIDA):
+1. LEI DO MIX LÓGICO E PROPORÇÃO REAL DE CONSUMO:
+   - Produtos estruturais e miudezas devem ter relação técnica realista.
+   - Exemplo: Se cotar Tubos de PVC (6m), inclua no máximo 2 a 4 conexões/joelhos por barra de tubo. NUNCA crie pedidos com dezenas de tubos e milhares de joelhos!
+   - Se cotar cimento, inclua argamassa/areia em proporções de canteiro de obras real.
+2. LEI DA TRAVA DE QUANTIDADE PARA ACESSÓRIOS E ITENS BARATOS (< R$ 18,00):
+   - Itens de baixo ticket (joelhos, luvas, curvas, buchas, fita veda-rosca) NUNCA podem ter quantidades absurdas. O teto máximo normal é entre 5 e 30 unidades por item.
+   - É ABSOLUTAMENTE PROIBIDO usar um produto barato com centenas ou milhares de unidades apenas para "fechar" o valor financeiro do pedido!
+3. LEI DE PARETO (80/20 DO VALOR DA VENDA):
+   - Pelo menos 75% a 85% do valor total do pedido DEVE ser construído pelos itens estruturais ou de maior valor unitário (ex: tubulações em barras, rolos de cabos, sacos de cimento, disjuntores).
+   - Os itens baratos servem exclusivamente como complementos funcionais do kit.
+4. LEI DOS LOTES COMERCIAIS REAIS:
+   - Use quantidades comerciais usuais em depósitos e construtoras (ex: 5, 10, 20, 25, 50, 100).
+   - Use APENAS produtos existentes no catálogo fornecido. As quantidades devem ser inteiros > 0.
 
 CATÁLOGO DISPONÍVEL (JSON):
 ${JSON.stringify(catalogoResumido, null, 2)}
 
-Retorne ESTRITAMENTE um objeto JSON válido (sem tags markdown nem texto extra) com a seguinte estrutura:
+Retorne ESTRITAMENTE um objeto JSON válido (sem blocos markdown) com a seguinte estrutura:
 {
   "itens": [
     { "id": "prod_1", "quantidade": 10 }
   ],
-  "razaoExplicativa": "Explicação concisa do mix de produtos escolhido e como o valor foi atingido com até 5% de margem."
+  "razaoExplicativa": "Explicação comercial concisa de como o mix foi estruturado (itens principais + complementos) e como o valor foi atingido com até 5% de margem."
 }`;
 
   for (const model of GEMINI_MODELS) {
@@ -156,7 +171,7 @@ Retorne ESTRITAMENTE um objeto JSON válido (sem tags markdown nem texto extra) 
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: 0.3,
+            temperature: 0.2,
             responseMimeType: 'application/json',
           },
         }),
@@ -168,16 +183,24 @@ Retorne ESTRITAMENTE um objeto JSON válido (sem tags markdown nem texto extra) 
       const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (!rawText) continue;
 
-      const parsed = JSON.parse(rawText);
+      // Limpa eventuais marcações markdown se o modelo tiver retornado
+      const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleanJson);
       if (!parsed?.itens || !Array.isArray(parsed.itens)) continue;
 
-      // Mapeia os itens devolvidos pelo Gemini de volta para os produtos do catálogo
+      // Mapeia e sanitiza os itens devolvidos pelo Gemini
       const itensCompostos: PedidoItemVenda[] = [];
       let totalCalculado = 0;
 
       for (const itemGemini of parsed.itens) {
         const prod = catalogo.find((p) => p.id === itemGemini.id);
-        const qtd = Math.max(1, Math.floor(Number(itemGemini.quantidade) || 1));
+        let qtd = Math.max(1, Math.floor(Number(itemGemini.quantidade) || 1));
+
+        // Trava de segurança anti-alucinação: se o produto for < R$ 18 e o modelo mandou > 35, trava em 30
+        if (prod && prod.precoUnitario < 18 && qtd > 35) {
+          qtd = 30;
+        }
+
         if (prod) {
           const itemTotal = Number((qtd * prod.precoUnitario).toFixed(2));
           itensCompostos.push({
@@ -214,7 +237,7 @@ Retorne ESTRITAMENTE um objeto JSON válido (sem tags markdown nem texto extra) 
   }
 
   // Fallback seguro caso a chamada falhe
-  const fallback = gerarOfertaComIA(valorAlvo, margemMax, catalogo);
+  const fallback = gerarOfertaComIA(valorAlvo, margemMax, catalogo, diretrizComercial);
   return {
     ...fallback,
     motor: 'local',

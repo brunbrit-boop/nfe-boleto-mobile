@@ -49,7 +49,8 @@ export interface OfertaGeradaResult {
 export function gerarOfertaComIA(
   valorAlvo: number,
   margemMax: number = 0.05,
-  catalogo: CatalogoProduto[] = CATALOGO_PRODUTOS_PADRAO
+  catalogo: CatalogoProduto[] = CATALOGO_PRODUTOS_PADRAO,
+  diretrizComercial?: string
 ): OfertaGeradaResult {
   if (valorAlvo <= 0) {
     return {
@@ -65,32 +66,56 @@ export function gerarOfertaComIA(
   const itensCompostos: Map<string, PedidoItemVenda> = new Map();
   let totalAcumulado = 0;
 
-  // Embaralha levemente o catálogo para gerar combinações dinâmicas e inteligentes
-  const catalogoOrdenado = [...catalogo].sort(() => 0.5 - Math.random());
+  // Filtra ou prioriza por diretriz comercial se especificada
+  const diretrizLower = (diretrizComercial || '').toLowerCase();
+  const catalogoFiltrado = [...catalogo].sort((a, b) => {
+    if (diretrizLower) {
+      const aMatch =
+        a.categoria.toLowerCase().includes(diretrizLower) ||
+        a.descricao.toLowerCase().includes(diretrizLower);
+      const bMatch =
+        b.categoria.toLowerCase().includes(diretrizLower) ||
+        b.descricao.toLowerCase().includes(diretrizLower);
+      if (aMatch && !bMatch) return -1;
+      if (!aMatch && bMatch) return 1;
+    }
+    return 0.5 - Math.random();
+  });
 
-  // 1. Fase de Mix Principal: Adiciona itens estratégicos
-  for (const prod of catalogoOrdenado) {
-    if (totalAcumulado >= valorAlvo) break;
+  // Separa produtos em Estruturais / Principais (ticket >= R$ 18) e Acessórios / Miudezas (< R$ 18)
+  const itensPrincipais = catalogoFiltrado.filter((p) => p.precoUnitario >= 18);
+  const itensAcessorios = catalogoFiltrado.filter((p) => p.precoUnitario < 18);
 
+  // Pool de produtos selecionáveis: se não houver itens principais suficientes, usa o catálogo inteiro
+  const poolPrincipais = itensPrincipais.length > 0 ? itensPrincipais : catalogoFiltrado;
+
+  // LEI 3: Alocação de Base (75% a 85% do valor alvo deve vir de itens principais/estruturais)
+  const metaBase = valorAlvo * 0.8;
+
+  for (const prod of poolPrincipais) {
+    if (totalAcumulado >= metaBase) break;
     const saldoRestante = limiteMaximo - totalAcumulado;
     if (prod.precoUnitario > saldoRestante && totalAcumulado > 0) continue;
 
-    // Calcula quantidade ideal para este item
+    // Calcula lote comercial natural (múltiplos de 5 ou 10 para valores altos)
     const maxPossivel = Math.floor(saldoRestante / prod.precoUnitario);
     if (maxPossivel <= 0) continue;
 
-    // Distribui em quantidades proporcionais
-    const qtdDesejada = Math.min(
-      Math.max(1, Math.floor(Math.random() * Math.min(maxPossivel, 8)) + 1),
-      maxPossivel
-    );
+    // Para orçamentos maiores, distribui quantidades proporcionais reais de obra
+    let qtdSugerida = Math.max(1, Math.floor(Math.random() * Math.min(maxPossivel, 25)) + 1);
 
-    const valorItem = Number((qtdDesejada * prod.precoUnitario).toFixed(2));
+    // Se o valor alvo for alto (ex: >= 5.000) e for produto estrutural, usa lotes mais expressivos
+    if (valorAlvo >= 5000 && prod.precoUnitario >= 30) {
+      const fatorLote = Math.min(maxPossivel, Math.max(5, Math.floor(maxPossivel * 0.4)));
+      qtdSugerida = Math.max(qtdSugerida, fatorLote);
+    }
+
+    const valorItem = Number((qtdSugerida * prod.precoUnitario).toFixed(2));
     if (totalAcumulado + valorItem <= limiteMaximo) {
       itensCompostos.set(prod.id, {
         id: prod.id,
         descricao: prod.descricao,
-        quantidade: qtdDesejada,
+        quantidade: qtdSugerida,
         unidade: prod.unidade,
         valorUnitario: prod.precoUnitario,
         valorTotal: valorItem,
@@ -102,40 +127,77 @@ export function gerarOfertaComIA(
     }
   }
 
-  // 2. Fase de Ajuste Fino: se ainda estiver abaixo do valor alvo, adiciona itens de menor ticket
+  // LEI 1 & 2: Adiciona Acessórios em Proporção Funcional (NUNCA milhares de unidades)
+  for (const prod of itensAcessorios) {
+    if (totalAcumulado >= valorAlvo) break;
+    const saldoRestante = limiteMaximo - totalAcumulado;
+    if (saldoRestante <= 0) break;
+
+    // Trava de Quantidade Rígida: Itens baratos têm teto máximo de 15 a 30 unidades
+    const tetoAcessorio = 20;
+    const maxPossivel = Math.min(tetoAcessorio, Math.floor(saldoRestante / prod.precoUnitario));
+    if (maxPossivel <= 0) continue;
+
+    const qtdAcessorio = Math.min(
+      Math.max(2, Math.floor(Math.random() * 8) + 2),
+      maxPossivel
+    );
+
+    const valorItem = Number((qtdAcessorio * prod.precoUnitario).toFixed(2));
+    if (totalAcumulado + valorItem <= limiteMaximo) {
+      itensCompostos.set(prod.id, {
+        id: prod.id,
+        descricao: prod.descricao,
+        quantidade: qtdAcessorio,
+        unidade: prod.unidade,
+        valorUnitario: prod.precoUnitario,
+        valorTotal: valorItem,
+        ncm: prod.ncm,
+        cfop: prod.cfop,
+        categoria: prod.categoria,
+      });
+      totalAcumulado += valorItem;
+    }
+  }
+
+  // Se ainda estiver abaixo do valor alvo, incrementa os produtos principais já presentes (ao invés de explodir os baratos)
   if (totalAcumulado < valorAlvo) {
-    const itensMenorPreco = [...catalogo].sort((a, b) => a.precoUnitario - b.precoUnitario);
+    const itensNoPedido = Array.from(itensCompostos.values()).sort(
+      (a, b) => b.valorUnitario - a.valorUnitario
+    );
 
-    for (const prod of itensMenorPreco) {
-      if (totalAcumulado >= valorAlvo && totalAcumulado <= limiteMaximo) break;
-
+    for (const item of itensNoPedido) {
+      if (totalAcumulado >= valorAlvo) break;
       const delta = valorAlvo - totalAcumulado;
       if (delta <= 0) break;
 
-      const qtdNecessaria = Math.ceil(delta / prod.precoUnitario);
-      const valorAdicional = Number((qtdNecessaria * prod.precoUnitario).toFixed(2));
+      // Incrementa produtos que custem pelo menos R$ 15 para não distorcer o mix
+      if (item.valorUnitario >= 15) {
+        const qtdIncremento = Math.min(
+          Math.ceil(delta / item.valorUnitario),
+          Math.floor((limiteMaximo - totalAcumulado) / item.valorUnitario)
+        );
 
-      if (totalAcumulado + valorAdicional <= limiteMaximo) {
-        const existente = itensCompostos.get(prod.id);
-        if (existente) {
-          existente.quantidade += qtdNecessaria;
-          existente.valorTotal = Number((existente.quantidade * existente.valorUnitario).toFixed(2));
-          totalAcumulado += valorAdicional;
-        } else {
-          itensCompostos.set(prod.id, {
-            id: prod.id,
-            descricao: prod.descricao,
-            quantidade: qtdNecessaria,
-            unidade: prod.unidade,
-            valorUnitario: prod.precoUnitario,
-            valorTotal: valorAdicional,
-            ncm: prod.ncm,
-            cfop: prod.cfop,
-            categoria: prod.categoria,
-          });
-          totalAcumulado += valorAdicional;
+        if (qtdIncremento > 0) {
+          item.quantidade += qtdIncremento;
+          item.valorTotal = Number((item.quantidade * item.valorUnitario).toFixed(2));
+          totalAcumulado += Number((qtdIncremento * item.valorUnitario).toFixed(2));
         }
-        break;
+      }
+    }
+  }
+
+  // Ajuste milimétrico final (apenas se faltar um saldo pequeno < R$ 50 para atingir o alvo)
+  if (totalAcumulado < valorAlvo) {
+    const delta = valorAlvo - totalAcumulado;
+    const acessorioAjuste = itensAcessorios[0];
+    if (acessorioAjuste && delta > 0) {
+      const qtdExtra = Math.min(10, Math.ceil(delta / acessorioAjuste.precoUnitario));
+      const existente = itensCompostos.get(acessorioAjuste.id);
+      if (existente && existente.quantidade + qtdExtra <= 30) {
+        existente.quantidade += qtdExtra;
+        existente.valorTotal = Number((existente.quantidade * existente.valorUnitario).toFixed(2));
+        totalAcumulado += Number((qtdExtra * acessorioAjuste.precoUnitario).toFixed(2));
       }
     }
   }
@@ -149,7 +211,7 @@ export function gerarOfertaComIA(
     valorTotal: valorTotalFinal,
     valorAlvoOriginal: valorAlvo,
     margemPercentual: margem,
-    razaoExplicativa: `Oferta composta com ${itensFinais.length} itens do mix de produtos. Total R$ ${valorTotalFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${margem >= 0 ? `+${margem}%` : `${margem}%`} em relação ao alvo de R$ ${valorAlvo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).`,
+    razaoExplicativa: `Oferta composta com ${itensFinais.length} itens em mix equilibrado (proporção de obra realista, sem distorção de acessórios). Total R$ ${valorTotalFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${margem >= 0 ? `+${margem}%` : `${margem}%`} em relação ao alvo de R$ ${valorAlvo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).`,
   };
 }
 

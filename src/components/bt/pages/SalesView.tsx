@@ -25,6 +25,7 @@ import {
   Key,
   CloudUpload,
   AlertTriangle,
+  Target,
 } from 'lucide-react';
 import { BANKS } from '../../../utils/financeEngine';
 import {
@@ -51,10 +52,11 @@ export const SalesView: React.FC<SalesViewProps> = ({
   onEmitirNFe,
   onOpenApiKeys,
 }) => {
-  const [selectedClienteId, setSelectedClienteId] = useState<number | ''>(
+  const [selectedClienteId, setSelectedClienteId] = useState<number | string>(
     clientes.length > 0 ? clientes[0].id : ''
   );
   const [valorAlvoInput, setValorAlvoInput] = useState<string>('5000');
+  const [diretrizComercial, setDiretrizComercial] = useState<string>('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [resultadoOferta, setResultadoOferta] = useState<OfertaGeradaResult | null>(null);
   const [itensPedido, setItensPedido] = useState<PedidoItemVenda[]>([]);
@@ -119,11 +121,21 @@ export const SalesView: React.FC<SalesViewProps> = ({
     setNfeGeradaSucesso(null);
 
     try {
-      const res = await gerarOfertaComGeminiOuLocal(valorAlvo, 0.05, catalogoProdutos);
+      const res = await gerarOfertaComGeminiOuLocal(
+        valorAlvo,
+        0.05,
+        catalogoProdutos,
+        diretrizComercial.trim() || undefined
+      );
       setResultadoOferta(res);
       setItensPedido(res.itens);
     } catch {
-      const fallback = gerarOfertaComIA(valorAlvo, 0.05, CATALOGO_PRODUTOS_PADRAO);
+      const fallback = gerarOfertaComIA(
+        valorAlvo,
+        0.05,
+        CATALOGO_PRODUTOS_PADRAO,
+        diretrizComercial.trim() || undefined
+      );
       setResultadoOferta(fallback);
       setItensPedido(fallback.itens);
     } finally {
@@ -479,7 +491,56 @@ export const SalesView: React.FC<SalesViewProps> = ({
                 </div>
               </div>
 
-              {/* 3. Condição de Pagamento e Banco */}
+              {/* 3. Foco / Diretriz Comercial (Opcional) */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-bold text-gray-600 dark:text-gray-300 flex items-center gap-1.5">
+                    <Target className="w-3.5 h-3.5 text-[#11d493]" />
+                    <span>Foco / Diretriz Comercial (Opcional)</span>
+                  </label>
+                  {diretrizComercial && (
+                    <button
+                      type="button"
+                      onClick={() => setDiretrizComercial('')}
+                      className="text-[10px] text-gray-400 hover:text-red-500 font-bold cursor-pointer"
+                    >
+                      Limpar
+                    </button>
+                  )}
+                </div>
+                <input
+                  type="text"
+                  value={diretrizComercial}
+                  onChange={(e) => setDiretrizComercial(e.target.value)}
+                  placeholder="Ex: Foco em hidráulica e tubulações / Elétrica..."
+                  className="w-full px-3 py-2 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#10221c] text-gray-900 dark:text-white text-xs font-medium focus:ring-2 focus:ring-[#11d493] focus:outline-none"
+                />
+
+                {/* Pílulas de Foco Rápido */}
+                <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                  {[
+                    { label: '💧 Hidráulica & Tubos', val: 'Hidráulica, tubos e conexões' },
+                    { label: '⚡ Elétrica & Cabos', val: 'Elétrica, cabos e disjuntores' },
+                    { label: '🧱 Alvenaria & Cimento', val: 'Alvenaria, cimento e argamassa' },
+                    { label: '🏗️ Mix Geral de Obra', val: 'Mix equilibrado de materiais de construção' },
+                  ].map((item) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      onClick={() => setDiretrizComercial(diretrizComercial === item.val ? '' : item.val)}
+                      className={`px-2 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer ${
+                        diretrizComercial === item.val
+                          ? 'bg-[#11d493] text-slate-950 shadow-sm font-black'
+                          : 'bg-gray-100 dark:bg-[#10221c] text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* 4. Condição de Pagamento e Banco */}
               <div className="grid grid-cols-2 gap-3 pt-1">
                 <div>
                   <label className="block text-[11px] font-bold text-gray-600 dark:text-gray-400 mb-1">
