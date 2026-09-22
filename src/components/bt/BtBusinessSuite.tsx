@@ -258,6 +258,9 @@ export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
       <ApiKeysModal
         isOpen={isApiKeysOpen}
         onClose={() => setIsApiKeysOpen(false)}
+        onSaved={() => {
+          window.dispatchEvent(new Event('gemini_key_updated'));
+        }}
       />
     </div>
   );

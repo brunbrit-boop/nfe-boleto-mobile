@@ -20,6 +20,9 @@ export function setStoredGeminiApiKey(key: string): void {
   } else {
     localStorage.removeItem('gemini_api_key');
   }
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event('gemini_key_updated'));
+  }
 }
 
 /**

@@ -72,7 +72,16 @@ export const SalesView: React.FC<SalesViewProps> = ({
   const [isLoadingProdutosBling, setIsLoadingProdutosBling] = useState<boolean>(false);
 
   useEffect(() => {
-    setHasGeminiKey(Boolean(getStoredGeminiApiKey()));
+    const handleKeyChange = () => {
+      setHasGeminiKey(Boolean(getStoredGeminiApiKey()));
+    };
+    handleKeyChange();
+    window.addEventListener('gemini_key_updated', handleKeyChange);
+    window.addEventListener('storage', handleKeyChange);
+    return () => {
+      window.removeEventListener('gemini_key_updated', handleKeyChange);
+      window.removeEventListener('storage', handleKeyChange);
+    };
   }, []);
 
   // Carrega produtos reais do Bling

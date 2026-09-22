@@ -57,7 +57,8 @@ export const ApiKeysModal: React.FC<ApiKeysModalProps> = ({
     if (onSaved) onSaved();
     setTimeout(() => {
       setSaveSuccess(false);
-    }, 2000);
+      onClose();
+    }, 1000);
   };
 
   const handleTest = async () => {
