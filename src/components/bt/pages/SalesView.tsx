@@ -670,6 +670,42 @@ export const SalesView: React.FC<SalesViewProps> = ({
                       <span>Apenas gerar rascunho local para DANFE (sem enviar ao Bling)</span>
                     </button>
                   </div>
+
+                  {/* Feedback Oficial do Bling ao Gravar Nota */}
+                  {resultadoBling && (
+                    <div className={`p-4 rounded-xl border text-xs leading-relaxed animate-fade-in ${
+                      resultadoBling.sucesso
+                        ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200'
+                        : 'bg-rose-50 dark:bg-rose-950/40 border-rose-300 dark:border-rose-800 text-rose-900 dark:text-rose-200'
+                    }`}>
+                      <div className="flex items-start gap-2.5">
+                        <span className="text-base shrink-0">
+                          {resultadoBling.sucesso ? '🎉' : '⚠️'}
+                        </span>
+                        <div className="space-y-1 flex-1">
+                          <span className="font-bold block text-sm">
+                            {resultadoBling.sucesso ? 'Esboço Gravado com Sucesso no Bling!' : 'O Bling não aceitou a gravação da nota:'}
+                          </span>
+                          <p className="text-xs">{resultadoBling.mensagem}</p>
+
+                          {resultadoBling.sucesso && resultadoBling.idNotaBling && (
+                            <div className="pt-2 mt-2 border-t border-emerald-200 dark:border-emerald-800 flex items-center justify-between font-mono text-[11px]">
+                              <span>ID Bling: <strong>{resultadoBling.idNotaBling}</strong></span>
+                              {resultadoBling.numeroNota && (
+                                <span>Número NF-e: <strong>{resultadoBling.numeroNota}</strong></span>
+                              )}
+                            </div>
+                          )}
+
+                          {resultadoBling.sucesso && (
+                            <p className="text-[11px] text-emerald-700 dark:text-emerald-300 pt-1">
+                              👉 Abra o Bling no menu <strong>Vendas &gt; Notas Fiscais (ou Notas de Saída)</strong> para visualizar o esboço preparado.
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>

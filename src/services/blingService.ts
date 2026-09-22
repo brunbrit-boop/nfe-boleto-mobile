@@ -36,6 +36,18 @@ export interface BlingApiOptions {
   customToken?: string;
 }
 
+export function extrairMensagemErroBling(data: any, status: number): string {
+  if (!data) return `Bling retornou HTTP ${status}`;
+  if (data.error) {
+    if (Array.isArray(data.error.fields) && data.error.fields.length > 0) {
+      const detalhes = data.error.fields.map((f: any) => f.msg || f.description || f.element).join('; ');
+      return `${data.error.message || data.error.description || 'Erro de validação'}: ${detalhes}`;
+    }
+    return data.error.description || data.error.message || (typeof data.error === 'string' ? data.error : JSON.stringify(data.error));
+  }
+  return data.mensagem || data.description || `Bling retornou HTTP ${status}`;
+}
+
 /**
  * Realiza requisição para a API v3 do Bling (via Proxy Vercel ou direta)
  * Suporta passar token específico de uma empresa ou objeto de opções completo
@@ -91,8 +103,8 @@ export async function callBlingApi(
 
     if (response.ok && data && typeof data === 'object') {
       return data;
-    } else if (data && data?.error) {
-      const msg = data?.error?.description || data?.error?.message || data?.error || data?.mensagem || `Bling retornou HTTP ${response.status}`;
+    } else if (!response.ok || (data && data?.error)) {
+      const msg = extrairMensagemErroBling(data, response.status);
       throw new Error(msg);
     }
   } catch (proxyErr: any) {
