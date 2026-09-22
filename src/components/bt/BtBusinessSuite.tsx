@@ -15,7 +15,6 @@ import type { BtMenuOption } from './BtSidebar';
 import { BtSidebar } from './BtSidebar';
 import { BtHeader } from './BtHeader';
 
-// 9 Menus Réplicas 1:1 do BT Business
 import { FinancesView } from './pages/FinancesView';
 import { SalesView } from './pages/SalesView';
 import { SuppliersView } from './pages/SuppliersView';
@@ -26,6 +25,7 @@ import { PatrimonyView } from './pages/PatrimonyView';
 import { RegistrationView } from './pages/RegistrationView';
 import { NotificationsView } from './pages/NotificationsView';
 import { SettingsView } from './pages/SettingsView';
+import { ApiKeysModal } from '../ApiKeysModal';
 
 // Assistente Fiscal (Chat & Voz)
 import { ChatView } from '../ChatView';
@@ -94,6 +94,7 @@ export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
   // Padrão BT Business: Inicia na aba 'finances' (Financeiro)
   const [activeMenu, setActiveMenu] = useState<BtMenuOption>('finances');
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [isApiKeysOpen, setIsApiKeysOpen] = useState(false);
 
   const indicadores = calcularIndicadoresBling(contasPagar, contasReceber);
 
@@ -124,6 +125,7 @@ export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
           onOpenMobile={() => setMobileSidebarOpen(true)}
           onBackToEmpresas={onBackToEmpresas}
           onRefreshBling={onRecarregarBling}
+          onOpenApiKeys={() => setIsApiKeysOpen(true)}
           carregando={carregandoBling}
         />
 
@@ -149,6 +151,7 @@ export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
               bancoAtual={bancoAtual}
               onViewDanfe={onViewDanfe}
               onEmitirNFe={onEmitirNFe}
+              onOpenApiKeys={() => setIsApiKeysOpen(true)}
             />
           )}
 
@@ -250,6 +253,12 @@ export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
           )}
         </main>
       </div>
+
+      {/* Modal Global de Chaves de API (Google Gemini) */}
+      <ApiKeysModal
+        isOpen={isApiKeysOpen}
+        onClose={() => setIsApiKeysOpen(false)}
+      />
     </div>
   );
 };

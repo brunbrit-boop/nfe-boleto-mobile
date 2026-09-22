@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { BlingCliente, EmpresaTenant, BankProvider, NFeData } from '../../../types';
 import {
   gerarOfertaComIA,
@@ -9,6 +9,10 @@ import {
   type CatalogoProduto,
 } from '../../../utils/salesOptimizer';
 import {
+  gerarOfertaComGeminiOuLocal,
+  getStoredGeminiApiKey,
+} from '../../../services/geminiService';
+import {
   Sparkles,
   ShoppingBag,
   Plus,
@@ -18,6 +22,7 @@ import {
   Layers,
   ArrowRight,
   X,
+  Key,
 } from 'lucide-react';
 import { BANKS } from '../../../utils/financeEngine';
 
@@ -27,6 +32,7 @@ interface SalesViewProps {
   bancoAtual: BankProvider;
   onViewDanfe?: (nfe: NFeData) => void;
   onEmitirNFe?: (nfe: NFeData) => void;
+  onOpenApiKeys?: () => void;
 }
 
 export const SalesView: React.FC<SalesViewProps> = ({
@@ -35,6 +41,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
   bancoAtual = 'inter',
   onViewDanfe,
   onEmitirNFe,
+  onOpenApiKeys,
 }) => {
   const [selectedClienteId, setSelectedClienteId] = useState<number | ''>(
     clientes.length > 0 ? clientes[0].id : ''
@@ -48,11 +55,16 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [nfeGeradaSucesso, setNfeGeradaSucesso] = useState<NFeData | null>(null);
+  const [hasGeminiKey, setHasGeminiKey] = useState<boolean>(() => Boolean(getStoredGeminiApiKey()));
+
+  useEffect(() => {
+    setHasGeminiKey(Boolean(getStoredGeminiApiKey()));
+  }, []);
 
   const clienteSelecionado = clientes.find((c) => c.id === Number(selectedClienteId)) || clientes[0] || null;
 
-  // Gera oferta inteligente com IA
-  const handleGerarOferta = () => {
+  // Gera oferta inteligente com IA (Google Gemini ou Motor Local com margem de até 5%)
+  const handleGerarOferta = async () => {
     const valorAlvo = parseFloat(valorAlvoInput.replace(/\D/g, '')) || 0;
     if (valorAlvo <= 0) {
       alert('Por favor, informe um valor alvo válido para a venda.');
@@ -62,12 +74,17 @@ export const SalesView: React.FC<SalesViewProps> = ({
     setIsGenerating(true);
     setNfeGeradaSucesso(null);
 
-    setTimeout(() => {
-      const res = gerarOfertaComIA(valorAlvo, 0.05, CATALOGO_PRODUTOS_PADRAO);
+    try {
+      const res = await gerarOfertaComGeminiOuLocal(valorAlvo, 0.05, CATALOGO_PRODUTOS_PADRAO);
       setResultadoOferta(res);
       setItensPedido(res.itens);
+    } catch {
+      const fallback = gerarOfertaComIA(valorAlvo, 0.05, CATALOGO_PRODUTOS_PADRAO);
+      setResultadoOferta(fallback);
+      setItensPedido(fallback.itens);
+    } finally {
       setIsGenerating(false);
-    }, 600);
+    }
   };
 
   // Ajuste de quantidade de um item
@@ -227,6 +244,26 @@ export const SalesView: React.FC<SalesViewProps> = ({
                   </h3>
                 </div>
                 <span className="text-[10px] font-bold text-gray-400">Margem até +5%</span>
+              </div>
+
+              {/* Status da Conexão IA Gemini */}
+              <div className="p-2.5 rounded-xl bg-purple-500/10 dark:bg-purple-950/20 border border-purple-500/20 text-xs flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Sparkles className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+                  <span className="text-[11px] text-purple-950 dark:text-purple-200">
+                    Cérebro: <strong>{hasGeminiKey ? 'Google Gemini Ativo' : 'Motor Local (Offline)'}</strong>
+                  </span>
+                </div>
+                {onOpenApiKeys && (
+                  <button
+                    type="button"
+                    onClick={onOpenApiKeys}
+                    className="text-[10px] font-bold text-purple-700 dark:text-purple-300 hover:underline flex items-center gap-1 cursor-pointer shrink-0"
+                  >
+                    <Key className="w-3 h-3" />
+                    <span>{hasGeminiKey ? 'Gerenciar' : 'Configurar Chave'}</span>
+                  </button>
+                )}
               </div>
 
               {/* 1. Seleção do Cliente */}

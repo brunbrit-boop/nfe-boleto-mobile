@@ -1,7 +1,7 @@
 import React from 'react';
 import type { EmpresaTenant } from '../../types';
 import type { BtMenuOption } from './BtSidebar';
-import { Menu, Building, ArrowLeft } from 'lucide-react';
+import { Menu, Building, ArrowLeft, Key } from 'lucide-react';
 
 interface BtHeaderProps {
   empresa: EmpresaTenant;
@@ -9,6 +9,7 @@ interface BtHeaderProps {
   onOpenMobile: () => void;
   onBackToEmpresas: () => void;
   onRefreshBling?: () => void;
+  onOpenApiKeys?: () => void;
   carregando?: boolean;
 }
 
@@ -31,6 +32,7 @@ export const BtHeader: React.FC<BtHeaderProps> = ({
   activeMenu,
   onOpenMobile,
   onBackToEmpresas,
+  onOpenApiKeys,
 }) => {
   const info = TITULOS_MENU[activeMenu] || TITULOS_MENU.finances;
 
@@ -64,6 +66,18 @@ export const BtHeader: React.FC<BtHeaderProps> = ({
 
       {/* Direita: Ações Rápidas */}
       <div className="flex items-center gap-2 md:gap-3">
+        {/* Botão Chaves de API */}
+        {onOpenApiKeys && (
+          <button
+            onClick={onOpenApiKeys}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-[#162f27] dark:hover:bg-[#1d3d32] text-slate-700 dark:text-slate-200 text-xs font-bold transition-all border border-slate-200 dark:border-[#214739] cursor-pointer"
+            title="Configurações & Chaves de API (Google Gemini)"
+          >
+            <Key className="w-3.5 h-3.5 text-[#11d493]" />
+            <span className="hidden sm:inline">Chaves API</span>
+          </button>
+        )}
+
         {/* Botão Voltar para Lista de Empresas */}
         <button
           onClick={onBackToEmpresas}
