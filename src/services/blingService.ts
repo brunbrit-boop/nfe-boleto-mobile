@@ -149,9 +149,11 @@ export function marcarEmpresaComoExpirada(token?: string, empresaId?: string | n
         const matches = (empresaId && e.id === empresaId) || (cleanTok && empToken && empToken === cleanTok);
         if (matches) {
           alterou = true;
+          // Se possui refresh token, a empresa permanece conectada (com renovação necessária ao interagir)
+          const mantemConectado = Boolean(e.blingRefreshToken || e.blingAccessToken);
           return {
             ...e,
-            isBlingConectado: false,
+            isBlingConectado: mantemConectado,
             isBlingExpirado: true,
           };
         }
@@ -197,14 +199,15 @@ export async function tentarAutoRenovarToken(tokenAtual?: string, empresaIdParam
       const ativaAtual = localStorage.getItem('nfe_empresa_ativa_id');
 
       const rawList = localStorage.getItem('nfe_empresas_list');
+      let empresasCadastradas: any[] = [];
       if (rawList) {
         try {
-          const empresas: any[] = JSON.parse(rawList);
-          const emp = empresas.find((e: any) => {
+          empresasCadastradas = JSON.parse(rawList);
+          const emp = empresasCadastradas.find((e: any) => {
             if (empresaIdParam && e.id === empresaIdParam) return true;
             const empToken = (e.blingAccessToken || '').trim().replace(/^Bearer\s+/i, '');
             return cleanTokenAtual && empToken === cleanTokenAtual;
-          }) || (cleanTokenAtual ? null : empresas.find((e: any) => e.id === ativaAtual));
+          }) || (cleanTokenAtual ? null : empresasCadastradas.find((e: any) => e.id === ativaAtual));
 
           if (emp) {
             empresaIdAlvo = emp.id;
@@ -217,17 +220,26 @@ export async function tentarAutoRenovarToken(tokenAtual?: string, empresaIdParam
         } catch {}
       }
 
-      // Se não encontrou a empresa específica pelo token fornecido, tenta o storage global apenas se não houver conflito
-      if (!refreshToken && (!cleanTokenAtual || cleanTokenAtual === (localStorage.getItem('bling_access_token') || '').trim())) {
-        refreshToken = localStorage.getItem('bling_refresh_token') || '';
+      // Se a empresa ainda não tem clientId/clientSecret isolados, tenta buscar nos pending creds
+      if ((!clientId || !clientSecret) && empresaIdAlvo) {
+        const rawPending = localStorage.getItem(`bling_pending_${empresaIdAlvo}`);
+        if (rawPending) {
+          try {
+            const p = JSON.parse(rawPending);
+            clientId = clientId || p.clientId || '';
+            clientSecret = clientSecret || p.clientSecret || '';
+          } catch {}
+        }
+      }
+
+      // Fallback global apenas para a empresa inicial ou quando há apenas 1 empresa cadastrada
+      if ((!refreshToken || !clientId) && (empresaIdAlvo === 'emp_default_1' || empresasCadastradas.length <= 1)) {
+        refreshToken = refreshToken || localStorage.getItem('bling_refresh_token') || '';
         clientId = clientId || localStorage.getItem('bling_client_id') || '';
         clientSecret = clientSecret || localStorage.getItem('bling_client_secret') || '';
       }
 
       if (!refreshToken) {
-        if (empresaIdAlvo) {
-          marcarEmpresaComoExpirada(cleanTokenAtual, empresaIdAlvo);
-        }
         return null;
       }
 

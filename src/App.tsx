@@ -36,7 +36,11 @@ export const App: React.FC = () => {
   // Lista de Empresas (Multi-Empresas Bling)
   const [empresas, setEmpresas] = useState<EmpresaTenant[]>(() => {
     const tokenAtual = localStorage.getItem('bling_access_token') || '';
+    const refreshTokenAtual = localStorage.getItem('bling_refresh_token') || undefined;
+    const clientIdAtual = localStorage.getItem('bling_client_id') || '';
+    const clientSecretAtual = localStorage.getItem('bling_client_secret') || '';
     const saved = localStorage.getItem('nfe_empresas_list');
+
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
@@ -44,11 +48,15 @@ export const App: React.FC = () => {
           // Limpa dados de demonstração residuais caso ainda estejam no localStorage
           const limpas = parsed.map((e: EmpresaTenant) => {
             const isDemo = e.razaoSocial?.includes('BRASIL TECH') || e.cnpj === '24.912.830/0001-52';
-            const token = e.blingAccessToken || '';
+            // Recupera credenciais isoladas da empresa ou backfill da empresa inicial caso não tenha
+            const token = e.blingAccessToken || (e.id === 'emp_default_1' ? tokenAtual : '') || '';
+            const rToken = e.blingRefreshToken || (e.id === 'emp_default_1' ? refreshTokenAtual : undefined);
+            const cId = e.blingClientId || (e.id === 'emp_default_1' ? clientIdAtual : '') || '';
+            const cSec = e.blingClientSecret || (e.id === 'emp_default_1' ? clientSecretAtual : '') || '';
+
             // Se possui token ou refresh token, a integração permanece conectada
-            const temChaveValida = Boolean(token || e.blingRefreshToken);
-            const isExpirado = Boolean(e.isBlingExpirado && !e.blingRefreshToken);
-            const isConectado = temChaveValida && !isExpirado && e.isBlingConectado !== false;
+            const temChaveValida = Boolean(token || rToken);
+            const isConectado = temChaveValida && e.isBlingConectado !== false;
 
             return {
               ...e,
@@ -56,8 +64,11 @@ export const App: React.FC = () => {
               nomeFantasia: isDemo ? 'Minha Empresa' : (e.nomeFantasia || 'Minha Empresa'),
               cnpj: isDemo ? '' : (e.cnpj || ''),
               blingAccessToken: token,
+              blingRefreshToken: rToken,
+              blingClientId: cId,
+              blingClientSecret: cSec,
               isBlingConectado: isConectado,
-              isBlingExpirado: isExpirado,
+              isBlingExpirado: false, // Reset preventivo no boot: auto-refresh tratará reativamente
             };
           });
           return limpas;
@@ -79,10 +90,12 @@ export const App: React.FC = () => {
       cep: '',
       regimeTributario: 'Simples Nacional',
       certificadoA1Valido: true,
-      blingClientId: '',
-      blingClientSecret: '',
+      blingClientId: clientIdAtual,
+      blingClientSecret: clientSecretAtual,
       blingAccessToken: tokenAtual,
-      isBlingConectado: Boolean(tokenAtual),
+      blingRefreshToken: refreshTokenAtual,
+      isBlingConectado: Boolean(tokenAtual || refreshTokenAtual),
+      isBlingExpirado: false,
       bancoPadrao: (localStorage.getItem('nfe_banco_padrao') as BankProvider) || 'inter',
       corAvatar: 'blue',
       criadoEm: new Date().toISOString(),
@@ -286,6 +299,8 @@ export const App: React.FC = () => {
   // Ao selecionar uma empresa nos cards
   const handleSelectEmpresa = (empresa: EmpresaTenant) => {
     setEmpresaAtivaId(empresa.id);
+    localStorage.setItem('nfe_empresa_ativa_id', empresa.id);
+
     const novoPerfil: CompanyProfile = {
       razaoSocial: empresa.razaoSocial,
       nomeFantasia: empresa.nomeFantasia,
@@ -426,7 +441,7 @@ export const App: React.FC = () => {
           // Busca dados cadastrais da empresa recém-conectada
           let dadosBling: any = null;
           try {
-            dadosBling = await obterDadosEmpresaBling(res.accessToken);
+            dadosBling = await obterDadosEmpresaBling(res.accessToken, targetEmpresaId || undefined);
           } catch {}
 
           const nomeDetectado = dadosBling?.nomeFantasia || dadosBling?.razaoSocial;

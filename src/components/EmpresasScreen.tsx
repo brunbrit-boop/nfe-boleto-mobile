@@ -126,15 +126,6 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
   };
 
   const handleAbrirConectarBling = (empresa: EmpresaTenant) => {
-    // Se a empresa já tem Client ID e Secret configurados, pode ir direto
-    if (empresa.blingClientId && empresa.blingClientSecret) {
-      localStorage.setItem('bling_oauth_pending_empresa_id', empresa.id);
-      localStorage.setItem('bling_client_id', empresa.blingClientId);
-      localStorage.setItem('bling_client_secret', empresa.blingClientSecret);
-      window.location.href = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${empresa.blingClientId}&state=${empresa.id}`;
-      return;
-    }
-
     setEmpresaParaAtivarBling(empresa);
     setLinkOuCidModal(empresa.blingClientId || '');
     setSecretModal(empresa.blingClientSecret || '');
@@ -441,7 +432,7 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                           </p>
 
                           <div className="mt-2.5 flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                            {empresa.isBlingExpirado || (empresa.blingTokenExpiresAt && Date.now() > empresa.blingTokenExpiresAt && !empresa.blingRefreshToken) ? (
+                            {(empresa.isBlingExpirado && !empresa.blingRefreshToken) || (empresa.blingTokenExpiresAt && Date.now() > empresa.blingTokenExpiresAt && !empresa.blingRefreshToken) ? (
                               <button
                                 type="button"
                                 onClick={() => handleAbrirConectarBling(empresa)}
@@ -457,7 +448,7 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                                   type="button"
                                   onClick={() => handleAbrirConectarBling(empresa)}
                                   className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-[#11d493] border border-emerald-500/25 hover:bg-emerald-500/20 transition cursor-pointer"
-                                  title="A integração do Bling ERP já está ativa. Clique caso queira renovar a conexão."
+                                  title="A integração do Bling ERP já está ativa. Clique para gerenciar chaves ou reconectar."
                                 >
                                   <span className="w-1.5 h-1.5 rounded-full bg-[#11d493] animate-pulse" />
                                   <span>✓ Bling Ativo</span>
