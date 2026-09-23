@@ -27,6 +27,10 @@ import {
   obterFornecedoresCacheLocal,
   obterContasPagarCacheLocal,
   obterContasReceberCacheLocal,
+  carregarContasReceberBling,
+  carregarContasPagarBling,
+  salvarContasReceberCacheLocal,
+  salvarContasPagarCacheLocal,
 } from './services/blingService';
 import {
   exchangeBlingCodeForToken,
@@ -291,6 +295,20 @@ export const App: React.FC = () => {
       if (empAlvo) {
         setIsLoadingBling(true);
         try {
+          // Atualiza as contas financeiras reais prioritariamente
+          const [resReceber, resPagar] = await Promise.all([
+            carregarContasReceberBling(token, empAlvo.id, empAlvo.bancoPadrao),
+            carregarContasPagarBling(token, empAlvo.id),
+          ]);
+          if (resReceber?.data) {
+            setContasReceber(resReceber.data);
+            salvarContasReceberCacheLocal(empAlvo.id, resReceber.data);
+          }
+          if (resPagar?.data) {
+            setContasPagar(resPagar.data);
+            salvarContasPagarCacheLocal(empAlvo.id, resPagar.data);
+          }
+
           const res = await sincronizarEmpresaBlingCompleto(empAlvo);
           if (res.sucesso) {
             setClientes(res.clientes);

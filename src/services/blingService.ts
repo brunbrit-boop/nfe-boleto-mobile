@@ -1328,16 +1328,19 @@ export async function carregarContasPagarBling(
     while (pagina <= maxPaginas) {
       let response: any;
       try {
-        response = await callBlingApi(`/contas/pagar?limite=${limite}&pagina=${pagina}`, token);
+        response = await callBlingApi(`/contas-pagar?limite=${limite}&pagina=${pagina}`, token);
       } catch (err: any) {
-        if (err.message && err.message.includes('404')) {
-          response = await callBlingApi(`/contas-pagar?limite=${limite}&pagina=${pagina}`, token);
-        } else {
-          throw err;
+        response = await callBlingApi(`/contas/pagar?limite=${limite}&pagina=${pagina}`, token).catch(() => null);
+      }
+
+      let records = (response && response.data && Array.isArray(response.data)) ? response.data : [];
+      if (records.length === 0 && pagina === 1) {
+        const alt = await callBlingApi(`/contas/pagar?limite=${limite}&pagina=${pagina}`, token).catch(() => null);
+        if (alt && alt.data && Array.isArray(alt.data) && alt.data.length > 0) {
+          records = alt.data;
         }
       }
 
-      const records = (response && response.data && Array.isArray(response.data)) ? response.data : [];
       if (records.length === 0) break;
       todasContas.push(...records);
 
@@ -1405,16 +1408,19 @@ export async function carregarContasReceberBling(
     while (pagina <= maxPaginas) {
       let response: any;
       try {
-        response = await callBlingApi(`/contas/receber?limite=${limite}&pagina=${pagina}`, token);
+        response = await callBlingApi(`/contas-receber?limite=${limite}&pagina=${pagina}`, token);
       } catch (err: any) {
-        if (err.message && err.message.includes('404')) {
-          response = await callBlingApi(`/contas-receber?limite=${limite}&pagina=${pagina}`, token);
-        } else {
-          throw err;
+        response = await callBlingApi(`/contas/receber?limite=${limite}&pagina=${pagina}`, token).catch(() => null);
+      }
+
+      let records = (response && response.data && Array.isArray(response.data)) ? response.data : [];
+      if (records.length === 0 && pagina === 1) {
+        const alt = await callBlingApi(`/contas/receber?limite=${limite}&pagina=${pagina}`, token).catch(() => null);
+        if (alt && alt.data && Array.isArray(alt.data) && alt.data.length > 0) {
+          records = alt.data;
         }
       }
 
-      const records = (response && response.data && Array.isArray(response.data)) ? response.data : [];
       if (records.length === 0) break;
       todasContas.push(...records);
 
@@ -1424,7 +1430,7 @@ export async function carregarContasReceberBling(
 
     const receber: BlingContaReceber[] = todasContas.map((r: any, idx: number) => {
       const val = Number(r.valor || r.saldo || 0);
-      const venc = r.vencimento || new Date().toISOString().slice(0, 10);
+      const venc = r.vencimento || r.dataVencimento || r.dataEmissao || new Date().toISOString().slice(0, 10);
       const [yyyy, mm, dd] = venc.split('-');
 
       const { linhaDigitavel, codigoBarras, nossoNumero } = gerarDadosBoletoFebraban(
@@ -1518,8 +1524,8 @@ export async function obterDiagnosticoBling(customToken?: string): Promise<{
   try {
     const [resContatos, resPagar, resReceber] = await Promise.all([
       callBlingApi('/contatos?criterio=1&limite=3', token),
-      callBlingApi('/contas/pagar?limite=3', token).catch(() => callBlingApi('/contas-pagar?limite=3', token)),
-      callBlingApi('/contas/receber?limite=3', token).catch(() => callBlingApi('/contas-receber?limite=3', token)),
+      callBlingApi('/contas-pagar?limite=3', token).then(r => (r?.data?.length ? r : callBlingApi('/contas/pagar?limite=3', token).catch(() => r))),
+      callBlingApi('/contas-receber?limite=3', token).then(r => (r?.data?.length ? r : callBlingApi('/contas/receber?limite=3', token).catch(() => r))),
     ]);
 
     const contatosCount = Array.isArray(resContatos?.data) ? resContatos.data.length : 0;
