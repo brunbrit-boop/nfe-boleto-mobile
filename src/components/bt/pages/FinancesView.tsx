@@ -46,8 +46,6 @@ interface FinancesViewProps {
   empresaNome?: string;
 }
 
-type TableMode = 'forecast' | 'realized' | 'all';
-
 // Paletas de cores oficiais do BT Business para o Equalizador Hierárquico
 const EXPENSE_SEGMENT_COLORS = ['#EF4444', '#F59E0B', '#FB7185', '#FACC15', '#A855F7', '#EC4899'];
 const INCOME_SEGMENT_COLORS = ['#11d493', '#10B981', '#3B82F6', '#0EA5E9', '#6366F1', '#14B8A6'];
@@ -489,7 +487,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   void _carregando;
   void onViewBoletoReceber;
   // --- Estados de Controle Visual e Temporal ---
-  const [tableMode, setTableMode] = useState<TableMode>('all');
   const [visibleDays, setVisibleDays] = useState<number>(30);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isChartMinimized, setIsChartMinimized] = useState<boolean>(false);
@@ -966,15 +963,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     );
   };
 
-  // --- Janela Temporal Visível Atual do Gráfico [startDate, endDate] ---
-  const visibleDateRange = useMemo(() => {
-    const startD = new Date(referenceDate);
-    const startDate = startD.toISOString().split('T')[0];
-    const endD = new Date(referenceDate);
-    endD.setDate(endD.getDate() + visibleDays - 1);
-    const endDate = endD.toISOString().split('T')[0];
-    return { startDate, endDate };
-  }, [referenceDate, visibleDays]);
+
 
   const handleClosePinnedTooltip = () => {
     setPinnedTooltipData(null);
@@ -1131,6 +1120,23 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     return dataPoints;
   }, [baseFilteredTransactions, referenceDate, visibleDays]);
 
+  // --- Janela Temporal Visível Atual do Gráfico [startDate, endDate] ---
+  // Vinculada 1:1 rigorosamente ao primeiro e último dia gerados nas colunas do gráfico
+  const visibleDateRange = useMemo(() => {
+    if (chartData.length > 0) {
+      return {
+        startDate: chartData[0].date,
+        endDate: chartData[chartData.length - 1].date,
+      };
+    }
+    const startD = new Date(referenceDate);
+    const startDate = startD.toISOString().split('T')[0];
+    const endD = new Date(referenceDate);
+    endD.setDate(endD.getDate() + visibleDays - 1);
+    const endDate = endD.toISOString().split('T')[0];
+    return { startDate, endDate };
+  }, [chartData, referenceDate, visibleDays]);
+
   // --- Handlers de Interação com Tooltip Fixado (Drill-down e Fechamento) ---
   const handlePinFilterCategory = (categoryName: string, date: string) => {
     if (pinnedFilterCategory?.toLowerCase() === categoryName.toLowerCase()) {
@@ -1188,13 +1194,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     setPinnedFilterDate(payload.date);
     setPinnedFilterCategory(null);
     setPinnedFilterUnit(null);
-
-    // Sincronização Inteligente com a Data Clicada (Passado = Realizado, Futuro/Hoje = Previsão)
-    if (payload.date < todayISO) {
-      setTableMode('realized');
-    } else {
-      setTableMode('forecast');
-    }
   };
 
   // Hover leve nas barras de receitas e despesas
@@ -1282,20 +1281,13 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
     // 1. Filtragem Temporal:
     // Se houver data fixada pelo clique na barra do gráfico, foca naquele dia específico (pinnedFilterDate).
-    // Senão, reflete rigorosamente o período visível atual do gráfico [startDate, endDate]!
+    // Senão, reflete rigorosamente todo o período visível atual do gráfico [startDate, endDate]!
     if (pinnedFilterDate) {
       base = base.filter((tx) => tx.date === pinnedFilterDate);
     } else {
       base = base.filter(
         (tx) => tx.date >= visibleDateRange.startDate && tx.date <= visibleDateRange.endDate
       );
-    }
-
-    // 2. Aplica o tableMode (Realizado vs Previsão vs Todas)
-    if (tableMode === 'forecast') {
-      base = base.filter((tx) => tx.status !== 'paid');
-    } else if (tableMode === 'realized') {
-      base = base.filter((tx) => tx.status === 'paid' || tx.status === 'marked_reopen');
     }
 
     if (pinnedFilterCategory) {
@@ -1329,7 +1321,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     baseFilteredTransactions,
     pinnedFilterDate,
     visibleDateRange,
-    tableMode,
     pinnedFilterCategory,
     pinnedFilterUnit,
     filtersPayable,
@@ -1807,11 +1798,9 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             <div className="flex items-center gap-2">
               <span className="material-symbols-outlined text-red-600 text-sm">arrow_downward</span>
               <h3 className="font-bold text-red-700 dark:text-red-400 uppercase text-xs tracking-wider">
-                {tableMode === 'forecast'
-                  ? 'CONTAS A PAGAR (PREVISÃO BLING)'
-                  : tableMode === 'realized'
-                  ? 'CONTAS PAGAS (AUDITADAS)'
-                  : 'TODAS AS DESPESAS'}
+                {pinnedFilterDate
+                  ? `DESPESAS (${formatFullDateBr(pinnedFilterDate)})`
+                  : 'CONTAS A PAGAR / DESPESAS'}
               </h3>
               <button
                 onClick={() => setShowAddPayable(true)}
@@ -1823,9 +1812,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             </div>
 
             <div className="bg-white dark:bg-gray-800 px-2.5 py-0.5 rounded-full text-[11px] font-bold text-red-600 shadow-sm border border-red-100 dark:border-gray-700">
-              {tableMode === 'forecast'
-                ? `${payablesList.length} Pendentes`
-                : `${payablesList.length} Pagas`}
+              {payablesList.length} Despesas
             </div>
           </div>
 
@@ -2023,11 +2010,9 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             <div className="flex items-center gap-2">
               <span className="material-symbols-outlined text-emerald-600 text-sm">arrow_upward</span>
               <h3 className="font-bold text-emerald-700 dark:text-emerald-400 uppercase text-xs tracking-wider">
-                {tableMode === 'forecast'
-                  ? 'CONTAS A RECEBER (PREVISÃO BLING)'
-                  : tableMode === 'realized'
-                  ? 'CONTAS RECEBIDAS (AUDITADAS)'
-                  : 'TODAS AS RECEITAS'}
+                {pinnedFilterDate
+                  ? `RECEITAS (${formatFullDateBr(pinnedFilterDate)})`
+                  : 'CONTAS A RECEBER / RECEITAS'}
               </h3>
               <button
                 onClick={() => setShowAddReceivable(true)}
@@ -2039,9 +2024,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             </div>
 
             <div className="bg-white dark:bg-gray-800 px-2.5 py-0.5 rounded-full text-[11px] font-bold text-emerald-600 shadow-sm border border-emerald-100 dark:border-gray-700">
-              {tableMode === 'forecast'
-                ? `${receivablesList.length} Pendentes`
-                : `${receivablesList.length} Recebidas`}
+              {receivablesList.length} Receitas
             </div>
           </div>
 
