@@ -201,11 +201,11 @@ export const App: React.FC = () => {
     }
   };
 
-  // Efeito ao carregar: sincroniza imediatamente os dados reais das empresas que possuem token próprio
+  // Efeito ao carregar: sincroniza imediatamente os dados reais das empresas ativas e válidas
   useEffect(() => {
     empresas.forEach((emp) => {
-      // Isolamento Multi-Tenant: só sincroniza se a empresa tiver seu próprio token configurado
-      if (emp.blingAccessToken && emp.blingAccessToken.trim()) {
+      // Só sincroniza se a empresa tiver token próprio e NÃO estiver expirada
+      if (emp.blingAccessToken && emp.blingAccessToken.trim() && emp.isBlingConectado && !emp.isBlingExpirado) {
         sincronizarEmpresaDoBling(emp.id, emp.blingAccessToken.trim());
       }
     });
