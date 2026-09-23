@@ -269,6 +269,16 @@ export async function tentarAutoRenovarToken(tokenAtual?: string): Promise<strin
   return promessaRenovacaoEmAndamento;
 }
 
+async function fetchComTimeout(url: string, options: RequestInit, timeoutMs: number = 20000): Promise<Response> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(id);
+  }
+}
+
 /**
  * Realiza requisição para a API v3 do Bling (via Proxy Vercel ou direta)
  * Suporta passar token específico de uma empresa ou objeto de opções completo
@@ -323,11 +333,11 @@ export async function callBlingApi(
   // 1. Tenta via Proxy Local ou Vercel (/api/bling-proxy)
   try {
     const proxyUrl = `/api/bling-proxy?endpoint=${encodeURIComponent(cleanEndpoint)}`;
-    const response = await fetch(proxyUrl, {
+    const response = await fetchComTimeout(proxyUrl, {
       method,
       headers: requestHeaders,
       body: serializedBody,
-    });
+    }, 20000);
 
     const data = await response.json().catch(() => null);
 
@@ -357,7 +367,7 @@ export async function callBlingApi(
       throw new Error(msg);
     }
   } catch (proxyErr: any) {
-    if (proxyErr.message && !proxyErr.message.includes('fetch') && !proxyErr.message.includes('Failed to fetch')) {
+    if (proxyErr.message && !proxyErr.message.includes('fetch') && !proxyErr.message.includes('Failed to fetch') && !proxyErr.message.includes('aborted')) {
       throw proxyErr;
     }
   }
@@ -366,11 +376,11 @@ export async function callBlingApi(
   if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
     try {
       const vercelProxyUrl = `https://nfe-boleto-mobile.vercel.app/api/bling-proxy?endpoint=${encodeURIComponent(cleanEndpoint)}`;
-      const vRes = await fetch(vercelProxyUrl, {
+      const vRes = await fetchComTimeout(vercelProxyUrl, {
         method,
         headers: requestHeaders,
         body: serializedBody,
-      });
+      }, 20000);
       const vData = await vRes.json().catch(() => null);
 
       if (!isRetry && (vRes.status === 401 || (vData?.error && String(vData.error.message || vData.error.description || '').toLowerCase().includes('token')))) {
@@ -396,7 +406,7 @@ export async function callBlingApi(
         throw new Error(msg);
       }
     } catch (vErr: any) {
-      if (vErr.message && !vErr.message.includes('fetch') && !vErr.message.includes('Failed to fetch')) {
+      if (vErr.message && !vErr.message.includes('fetch') && !vErr.message.includes('Failed to fetch') && !vErr.message.includes('aborted')) {
         throw vErr;
       }
     }
@@ -404,11 +414,11 @@ export async function callBlingApi(
 
   // 3. Fallback direto via api.bling.com.br
   const directUrl = `https://api.bling.com.br/Api/v3${cleanEndpoint}`;
-  const directRes = await fetch(directUrl, {
+  const directRes = await fetchComTimeout(directUrl, {
     method,
     headers: requestHeaders,
     body: serializedBody,
-  });
+  }, 15000);
 
   const directData = await directRes.json().catch(() => null);
 
@@ -623,6 +633,35 @@ export async function gravarEsbocoNFeNoBling(
       raw: data || resposta,
     };
   } catch (error: any) {
+    // Se a chamada demorou ou a conexão foi interrompida, verifica se o Bling já gravou a nota recentemente
+    try {
+      const buscaRecente = await callBlingApi('/nfe?limite=5&criterio=1', {
+        method: 'GET',
+        customToken: empresaToken,
+      });
+      const notas = buscaRecente?.data || [];
+      if (Array.isArray(notas) && notas.length > 0) {
+        const encontrada = notas.find((n: any) => {
+          const doc = (n.contato?.numeroDocumento || '').replace(/\D/g, '');
+          const mesmoDoc = doc && doc === docLimpo;
+          const mesmoNome = n.contato?.nome?.toLowerCase() === cliente.nome?.toLowerCase();
+          const difValor = n.valorTotal ? Math.abs(Number(n.valorTotal) - valorTotal) : 999;
+          return (mesmoDoc || mesmoNome) && difValor < 0.1;
+        });
+
+        if (encontrada && encontrada.id) {
+          return {
+            sucesso: true,
+            idNotaBling: encontrada.id,
+            numeroNota: encontrada.numero ? String(encontrada.numero) : undefined,
+            serie: encontrada.serie ? String(encontrada.serie) : undefined,
+            mensagem: `Esboço de NF-e confirmado com sucesso no Bling (ID: ${encontrada.id}). Localize em Vendas > Notas Fiscais.`,
+            raw: encontrada,
+          };
+        }
+      }
+    } catch {}
+
     return {
       sucesso: false,
       mensagem: error.message || 'Erro ao gravar esboço de nota fiscal no Bling.',

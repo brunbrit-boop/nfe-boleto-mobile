@@ -318,6 +318,11 @@ export const SalesView: React.FC<SalesViewProps> = ({
     setIsSavingBling(true);
     setResultadoBling(null);
 
+    // Timer de segurança para garantir que o botão nunca fique travado
+    const safetyTimer = setTimeout(() => {
+      setIsSavingBling(false);
+    }, 25000);
+
     // 1. Gera rascunho oficial local para habilitar DANFE imediatamente
     const nfeRascunho = converterPedidoParaNFeRascunho(
       clienteSelecionado,
@@ -341,7 +346,6 @@ export const SalesView: React.FC<SalesViewProps> = ({
           sucesso: false,
           mensagem: `A empresa "${empresa.nomeFantasia || empresa.razaoSocial}" não possui um Token de Acesso do Bling ativo configurado. Conecte as credenciais desta empresa antes de gravar notas fiscais.`,
         });
-        setIsSavingBling(false);
         return;
       }
 
@@ -367,6 +371,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
         mensagem: e?.message || 'Falha ao conectar com o Bling ERP.',
       });
     } finally {
+      clearTimeout(safetyTimer);
       setIsSavingBling(false);
     }
   };

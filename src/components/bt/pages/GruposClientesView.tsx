@@ -365,6 +365,10 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     if (!item.ofertaGerada) return;
     setItemEmitindoNFeId(item.clienteId);
 
+    const safetyTimer = setTimeout(() => {
+      setItemEmitindoNFeId(null);
+    }, 25000);
+
     try {
       const res = await emitirNFeItemGrupo(item, empresa, company, bancoAtual);
       if (res.sucesso && res.nfe) {
@@ -405,6 +409,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         atualizarGrupo(atualizado);
       }
     } finally {
+      clearTimeout(safetyTimer);
       setItemEmitindoNFeId(null);
     }
   };
