@@ -1,13 +1,101 @@
-import type { BlingCliente, BlingFornecedor, BlingContaPagar, BlingContaReceber, ResumoFinanceiro, BankProvider } from '../types';
+import type {
+  BlingCliente,
+  BlingFornecedor,
+  BlingContaPagar,
+  BlingContaReceber,
+  ResumoFinanceiro,
+  BankProvider,
+  EmpresaTenant,
+} from '../types';
 import { formatCurrency, gerarDadosBoletoFebraban, gerarPixCopiaECola } from '../utils/financeEngine';
+import { renovarTokenBling, isTokenExpirando } from '../utils/blingApi';
+
+export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 const STORAGE_KEYS = {
   CLIENTES: 'bling_cache_clientes',
   FORNECEDORES: 'bling_cache_fornecedores',
   PAGAR: 'bling_cache_pagar',
   RECEBER: 'bling_cache_receber',
+  PRODUTOS: 'bling_cache_produtos',
   LAST_SYNC: 'bling_last_sync_timestamp',
 };
+
+export function obterClientesCacheLocal(empresaId?: string): BlingCliente[] {
+  try {
+    const key = empresaId ? `${STORAGE_KEYS.CLIENTES}_${empresaId}` : STORAGE_KEYS.CLIENTES;
+    const cached = localStorage.getItem(key);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+export function salvarClientesCacheLocal(empresaId: string | undefined, clientes: BlingCliente[]): void {
+  try {
+    const key = empresaId ? `${STORAGE_KEYS.CLIENTES}_${empresaId}` : STORAGE_KEYS.CLIENTES;
+    localStorage.setItem(key, JSON.stringify(clientes));
+  } catch {}
+}
+
+export function obterFornecedoresCacheLocal(empresaId?: string): BlingFornecedor[] {
+  try {
+    const key = empresaId ? `${STORAGE_KEYS.FORNECEDORES}_${empresaId}` : STORAGE_KEYS.FORNECEDORES;
+    const cached = localStorage.getItem(key);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+export function salvarFornecedoresCacheLocal(empresaId: string | undefined, fornecedores: BlingFornecedor[]): void {
+  try {
+    const key = empresaId ? `${STORAGE_KEYS.FORNECEDORES}_${empresaId}` : STORAGE_KEYS.FORNECEDORES;
+    localStorage.setItem(key, JSON.stringify(fornecedores));
+  } catch {}
+}
+
+export function obterContasReceberCacheLocal(empresaId?: string): BlingContaReceber[] {
+  try {
+    const key = empresaId ? `${STORAGE_KEYS.RECEBER}_${empresaId}` : STORAGE_KEYS.RECEBER;
+    const cached = localStorage.getItem(key);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+export function salvarContasReceberCacheLocal(empresaId: string | undefined, contas: BlingContaReceber[]): void {
+  try {
+    const key = empresaId ? `${STORAGE_KEYS.RECEBER}_${empresaId}` : STORAGE_KEYS.RECEBER;
+    localStorage.setItem(key, JSON.stringify(contas));
+  } catch {}
+}
+
+export function obterContasPagarCacheLocal(empresaId?: string): BlingContaPagar[] {
+  try {
+    const key = empresaId ? `${STORAGE_KEYS.PAGAR}_${empresaId}` : STORAGE_KEYS.PAGAR;
+    const cached = localStorage.getItem(key);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+export function salvarContasPagarCacheLocal(empresaId: string | undefined, contas: BlingContaPagar[]): void {
+  try {
+    const key = empresaId ? `${STORAGE_KEYS.PAGAR}_${empresaId}` : STORAGE_KEYS.PAGAR;
+    localStorage.setItem(key, JSON.stringify(contas));
+  } catch {}
+}
 
 /**
  * Retorna o token atual do Bling armazenado no navegador
@@ -48,13 +136,127 @@ export function extrairMensagemErroBling(data: any, status: number): string {
   return data.mensagem || data.description || `Bling retornou HTTP ${status}`;
 }
 
+export function marcarEmpresaComoExpirada(token?: string, empresaId?: string | null): void {
+  try {
+    const rawList = localStorage.getItem('nfe_empresas_list');
+    if (rawList) {
+      const empresas: any[] = JSON.parse(rawList);
+      let alterou = false;
+      const cleanTok = (token || '').trim().replace(/^Bearer\s+/i, '');
+      const atualizadas = empresas.map((e: any) => {
+        const empToken = (e.blingAccessToken || '').trim().replace(/^Bearer\s+/i, '');
+        const matches = (empresaId && e.id === empresaId) || (cleanTok && empToken && empToken === cleanTok);
+        if (matches) {
+          alterou = true;
+          return {
+            ...e,
+            isBlingConectado: false,
+            isBlingExpirado: true,
+          };
+        }
+        return e;
+      });
+      if (alterou) {
+        localStorage.setItem('nfe_empresas_list', JSON.stringify(atualizadas));
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('nfe_empresas_updated'));
+        }
+      }
+    }
+  } catch {}
+}
+
+/**
+ * Tenta renovar o token de uma empresa ou do sistema caso esteja expirado
+ */
+export async function tentarAutoRenovarToken(tokenAtual?: string): Promise<string | null> {
+  try {
+    let refreshToken = localStorage.getItem('bling_refresh_token') || '';
+    let clientId = localStorage.getItem('bling_client_id') || '';
+    let clientSecret = localStorage.getItem('bling_client_secret') || '';
+    let empresaIdAlvo: string | null = null;
+
+    const cleanTokenAtual = (tokenAtual || '').trim().replace(/^Bearer\s+/i, '');
+
+    const rawList = localStorage.getItem('nfe_empresas_list');
+    if (rawList) {
+      try {
+        const empresas: any[] = JSON.parse(rawList);
+        const emp = empresas.find((e: any) => {
+          const empToken = (e.blingAccessToken || '').trim().replace(/^Bearer\s+/i, '');
+          return cleanTokenAtual && empToken === cleanTokenAtual;
+        }) || empresas.find((e: any) => e.blingRefreshToken);
+
+        if (emp) {
+          empresaIdAlvo = emp.id;
+          if (emp.blingRefreshToken) {
+            refreshToken = emp.blingRefreshToken;
+          }
+          clientId = emp.blingClientId || clientId;
+          clientSecret = emp.blingClientSecret || clientSecret;
+        }
+      } catch {}
+    }
+
+    if (!refreshToken) {
+      marcarEmpresaComoExpirada(cleanTokenAtual, empresaIdAlvo);
+      return null;
+    }
+
+    const res = await renovarTokenBling(refreshToken, clientId, clientSecret);
+    if (res.success && res.accessToken) {
+      if (rawList) {
+        try {
+          const empresas: any[] = JSON.parse(rawList);
+          const atualizadas = empresas.map((e: any) => {
+            if (empresaIdAlvo ? e.id === empresaIdAlvo : (e.blingRefreshToken === refreshToken || (cleanTokenAtual && (e.blingAccessToken || '').includes(cleanTokenAtual)))) {
+              return {
+                ...e,
+                blingAccessToken: res.accessToken,
+                blingRefreshToken: res.refreshToken || e.blingRefreshToken,
+                blingTokenExpiresAt: res.expiresAt,
+                isBlingConectado: true,
+                isBlingExpirado: false,
+              };
+            }
+            return e;
+          });
+          localStorage.setItem('nfe_empresas_list', JSON.stringify(atualizadas));
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('nfe_empresas_updated'));
+          }
+        } catch {}
+      }
+
+      localStorage.setItem('bling_access_token', res.accessToken);
+      if (res.refreshToken) {
+        localStorage.setItem('bling_refresh_token', res.refreshToken);
+      }
+      if (res.expiresAt) {
+        localStorage.setItem('bling_expires_at', String(res.expiresAt));
+      }
+
+      console.log('✅ Token do Bling auto-renovado com sucesso!');
+      return res.accessToken;
+    } else {
+      console.warn('Falha na renovação do token do Bling:', res.error);
+      marcarEmpresaComoExpirada(cleanTokenAtual, empresaIdAlvo);
+    }
+  } catch (err) {
+    console.warn('Falha na auto-renovação de token do Bling:', err);
+  }
+  return null;
+}
+
 /**
  * Realiza requisição para a API v3 do Bling (via Proxy Vercel ou direta)
  * Suporta passar token específico de uma empresa ou objeto de opções completo
+ * Possui auto-refresh preventivo e reativo (401) com rotação de refresh_token
  */
 export async function callBlingApi(
   endpoint: string,
-  optionsOrToken?: string | BlingApiOptions
+  optionsOrToken?: string | BlingApiOptions,
+  isRetry: boolean = false
 ): Promise<any> {
   let customToken: string | undefined;
   let method: string = 'GET';
@@ -68,10 +270,22 @@ export async function callBlingApi(
     body = optionsOrToken.body;
   }
 
-  const rawToken = customToken || getStoredBlingToken();
-  const token = (rawToken || '').trim().replace(/^Bearer\s+/i, '');
+  const rawToken = customToken !== undefined ? customToken : getStoredBlingToken();
+  let token = (rawToken || '').trim().replace(/^Bearer\s+/i, '');
   if (!token) {
-    throw new Error('Token do Bling não configurado.');
+    throw new Error('Token do Bling não configurado para esta empresa.');
+  }
+
+  // Auto-refresh preventivo se o token estiver prestes a expirar nos próximos 15 minutos
+  if (!isRetry) {
+    const rawExpiresAt = localStorage.getItem('bling_expires_at');
+    const expiresAtNum = rawExpiresAt ? Number(rawExpiresAt) : undefined;
+    if (isTokenExpirando(expiresAtNum, 15)) {
+      const renovado = await tentarAutoRenovarToken(token);
+      if (renovado) {
+        token = renovado;
+      }
+    }
   }
 
   const cleanEndpoint = endpoint.startsWith('/') ? endpoint : '/' + endpoint;
@@ -96,8 +310,22 @@ export async function callBlingApi(
 
     const data = await response.json().catch(() => null);
 
-    // Quando o Bling não tem registros para a consulta, retorna HTTP 404 (RESOURCE_NOT_FOUND)
-    if (response.status === 404 || data?.error?.type === 'RESOURCE_NOT_FOUND') {
+    // Se retornou 401 ou token expirado, tenta renovar e reexecutar a requisição
+    if (!isRetry && (response.status === 401 || (data?.error && String(data.error.message || data.error.description || '').toLowerCase().includes('token')))) {
+      const renovado = await tentarAutoRenovarToken(token);
+      if (renovado) {
+        const nextOptions: BlingApiOptions = typeof optionsOrToken === 'object'
+          ? { ...optionsOrToken, customToken: renovado }
+          : { customToken: renovado, method: method as any, body };
+        return callBlingApi(endpoint, nextOptions, true);
+      } else {
+        marcarEmpresaComoExpirada(token);
+        throw new Error('Token do Bling expirado ou inválido (a validade do token é de 6 horas). Por favor, reconecte a empresa na tela inicial.');
+      }
+    }
+
+    // Quando o Bling não tem registros para a consulta GET, retorna HTTP 404 (RESOURCE_NOT_FOUND)
+    if ((method === 'GET' || !method) && (response.status === 404 || data?.error?.type === 'RESOURCE_NOT_FOUND')) {
       return { data: [] };
     }
 
@@ -123,13 +351,27 @@ export async function callBlingApi(
         body: serializedBody,
       });
       const vData = await vRes.json().catch(() => null);
-      if (vRes.status === 404 || vData?.error?.type === 'RESOURCE_NOT_FOUND') {
+
+      if (!isRetry && (vRes.status === 401 || (vData?.error && String(vData.error.message || vData.error.description || '').toLowerCase().includes('token')))) {
+        const renovado = await tentarAutoRenovarToken(token);
+        if (renovado) {
+          const nextOptions: BlingApiOptions = typeof optionsOrToken === 'object'
+            ? { ...optionsOrToken, customToken: renovado }
+            : { customToken: renovado, method: method as any, body };
+          return callBlingApi(endpoint, nextOptions, true);
+        } else {
+          marcarEmpresaComoExpirada(token);
+          throw new Error('Token do Bling expirado ou inválido (a validade do token é de 6 horas). Por favor, reconecte a empresa na tela inicial.');
+        }
+      }
+
+      if ((method === 'GET' || !method) && (vRes.status === 404 || vData?.error?.type === 'RESOURCE_NOT_FOUND')) {
         return { data: [] };
       }
       if (vRes.ok && vData && typeof vData === 'object') {
         return vData;
-      } else if (vData && vData?.error) {
-        const msg = vData?.error?.description || vData?.error?.message || `Bling retornou HTTP ${vRes.status}`;
+      } else if (!vRes.ok || (vData && vData?.error)) {
+        const msg = vData?.error?.description || vData?.error?.message || extrairMensagemErroBling(vData, vRes.status);
         throw new Error(msg);
       }
     } catch (vErr: any) {
@@ -148,6 +390,20 @@ export async function callBlingApi(
   });
 
   const directData = await directRes.json().catch(() => null);
+
+  if (!isRetry && (directRes.status === 401 || (directData?.error && String(directData.error.message || directData.error.description || '').toLowerCase().includes('token')))) {
+    const renovado = await tentarAutoRenovarToken(token);
+    if (renovado) {
+      const nextOptions: BlingApiOptions = typeof optionsOrToken === 'object'
+        ? { ...optionsOrToken, customToken: renovado }
+        : { customToken: renovado, method: method as any, body };
+      return callBlingApi(endpoint, nextOptions, true);
+    } else {
+      marcarEmpresaComoExpirada(token);
+      throw new Error('Token do Bling expirado ou inválido (a validade do token é de 6 horas). Por favor, reconecte a empresa na tela inicial.');
+    }
+  }
+
   if (directRes.status === 404 || directData?.error?.type === 'RESOURCE_NOT_FOUND') {
     return { data: [] };
   }
@@ -166,6 +422,8 @@ export interface GravarEsbocoBlingParams {
   itens: PedidoItemVenda[];
   parcelasCount?: number;
   banco?: BankProvider;
+  primeiroVencimento?: string;
+  intervaloDias?: number;
 }
 
 export interface ResultadoEsbocoBling {
@@ -184,7 +442,21 @@ export interface ResultadoEsbocoBling {
 export async function gravarEsbocoNFeNoBling(
   params: GravarEsbocoBlingParams
 ): Promise<ResultadoEsbocoBling> {
-  const { empresaToken, cliente, itens, parcelasCount = 1 } = params;
+  const {
+    empresaToken,
+    cliente,
+    itens,
+    parcelasCount = 1,
+    primeiroVencimento,
+    intervaloDias = 15,
+  } = params;
+
+  if (!empresaToken || !empresaToken.trim()) {
+    return {
+      sucesso: false,
+      mensagem: 'Esta empresa não possui um Token de Acesso do Bling ativo configurado. Conecte as chaves da empresa nas configurações antes de gravar notas fiscais.',
+    };
+  }
 
   if (!itens || itens.length === 0) {
     return {
@@ -204,7 +476,7 @@ export async function gravarEsbocoNFeNoBling(
     tipoPessoa,
     numeroDocumento: docLimpo,
   };
-  if (cliente.id && cliente.id > 0) {
+  if (cliente.id && cliente.id > 100000) {
     contatoPayload.id = cliente.id;
   }
   if (cliente.ie) {
@@ -222,30 +494,55 @@ export async function gravarEsbocoNFeNoBling(
     };
   }
 
-  // Itens formatados de acordo com a API v3 do Bling (POST /nfe)
+  // Itens formatados rigorosamente de acordo com a API v3 do Bling (POST /nfe)
   const itensPayload = itens.map((it, idx) => ({
-    codigo: (it as any).codigo || `ITEM-${idx + 1}`,
+    codigo: (it.codigo && it.codigo.trim()) || (it.id && it.id.trim()) || `ITEM-${idx + 1}`,
     descricao: it.descricao,
     unidade: (it.unidade || 'UN').slice(0, 6),
     quantidade: it.quantidade,
     valor: it.valorUnitario,
     tipo: 'P', // P = Produto
-    tributacao: {
-      ncm: (it.ncm || '').replace(/\D/g, '') || '25232910',
-      cfop: (it.cfop || '5102').replace(/\D/g, '') || '5102',
-    },
+    classificacaoFiscal: (it.ncm || '').replace(/\D/g, '') || '25232910',
   }));
 
-  // Parcelas financeiras
+  // Parcelas financeiras e cálculo do vencimento
   const valorTotal = Number(itens.reduce((acc, it) => acc + it.valorTotal, 0).toFixed(2));
   const parcelasPayload = [];
   const valorParcelaBase = Number((valorTotal / parcelasCount).toFixed(2));
   let acumulado = 0;
 
+  // Determina a data base da primeira parcela
+  let dataBase = new Date();
+  if (primeiroVencimento && /^\d{4}-\d{2}-\d{2}$/.test(primeiroVencimento)) {
+    const [ano, mes, dia] = primeiroVencimento.split('-').map(Number);
+    dataBase = new Date(ano, mes - 1, dia);
+  } else {
+    dataBase.setDate(dataBase.getDate() + (intervaloDias || 15));
+  }
+
+  const formatarDataBr = (d: Date): string => {
+    const dia = String(d.getDate()).padStart(2, '0');
+    const mes = String(d.getMonth() + 1).padStart(2, '0');
+    const ano = d.getFullYear();
+    return `${dia}/${mes}/${ano}`;
+  };
+
+  const formatarDataIso = (d: Date): string => {
+    const dia = String(d.getDate()).padStart(2, '0');
+    const mes = String(d.getMonth() + 1).padStart(2, '0');
+    const ano = d.getFullYear();
+    return `${ano}-${mes}-${dia}`;
+  };
+
+  const parcelasDescricoes: string[] = [];
+
   for (let i = 1; i <= parcelasCount; i++) {
-    const d = new Date();
-    d.setDate(d.getDate() + i * 30);
-    const dataVenc = d.toISOString().split('T')[0];
+    const d = new Date(dataBase);
+    if (i > 1) {
+      d.setDate(d.getDate() + (i - 1) * (intervaloDias || 15));
+    }
+    const dataVenc = formatarDataIso(d);
+    const dataVencBr = formatarDataBr(d);
 
     // Ajuste de centavos na última parcela
     const valorParcela = i === parcelasCount ? Number((valorTotal - acumulado).toFixed(2)) : valorParcelaBase;
@@ -256,13 +553,20 @@ export async function gravarEsbocoNFeNoBling(
       valor: valorParcela,
       observacoes: `Parcela ${i}/${parcelasCount}`,
     });
+
+    const valorFormatado = valorParcela.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+    parcelasDescricoes.push(`Parcela ${i}/${parcelasCount}: ${dataVencBr} (${valorFormatado})`);
   }
+
+  // Monta as informações complementares da nota com as datas e valores das parcelas
+  const textoInformacoesComplementares = `Condições de Pagamento: ${parcelasDescricoes.join(' | ')}`;
 
   const payload: any = {
     tipo: 1, // 1 = Nota Fiscal de Saída (Vendas > Notas Fiscais)
     dataOperacao: dataHoje,
     contato: contatoPayload,
     itens: itensPayload,
+    observacoes: textoInformacoesComplementares,
   };
 
   if (parcelasPayload.length > 0) {
@@ -281,12 +585,20 @@ export async function gravarEsbocoNFeNoBling(
     const numeroGerado = data?.numero ? String(data.numero) : undefined;
     const serieGerada = data?.serie ? String(data.serie) : undefined;
 
+    if (!idGerado) {
+      return {
+        sucesso: false,
+        mensagem: resposta?.mensagem || resposta?.error?.description || 'O Bling não retornou o ID da nota fiscal criada.',
+        raw: data || resposta,
+      };
+    }
+
     return {
       sucesso: true,
       idNotaBling: idGerado,
       numeroNota: numeroGerado,
       serie: serieGerada,
-      mensagem: `Esboço de NF-e gravado com sucesso no Bling (ID: ${idGerado || 'Criada com Sucesso'}). Localize em Vendas > Notas Fiscais.`,
+      mensagem: `Esboço de NF-e gravado com sucesso no Bling (ID: ${idGerado}). Localize em Vendas > Notas Fiscais.`,
       raw: data || resposta,
     };
   } catch (error: any) {
@@ -640,6 +952,11 @@ export async function carregarClientesBling(
   empresaId?: string,
   contasReceberCache?: BlingContaReceber[]
 ): Promise<{ data: BlingCliente[]; isLive: boolean; error?: string }> {
+  // Isolamento Multi-Tenant: se não há token para esta empresa, não consulta outra conta nem preenche dados cruzados
+  if (!token || !token.trim()) {
+    return { data: [], isLive: false };
+  }
+
   try {
     const todosContatos: any[] = [];
     let pagina = 1;
@@ -657,6 +974,7 @@ export async function carregarClientesBling(
 
       if (records.length < limite) break;
       pagina++;
+      await sleep(350);
     }
 
     // 2. Se retornou vazio ou poucos, consulta contatos gerais do Bling
@@ -771,6 +1089,10 @@ export async function carregarFornecedoresBling(
   empresaId?: string,
   contasPagarCache?: BlingContaPagar[]
 ): Promise<{ data: BlingFornecedor[]; isLive: boolean; error?: string }> {
+  if (!token || !token.trim()) {
+    return { data: [], isLive: false };
+  }
+
   try {
     const todosFornecedores: any[] = [];
     let pagina = 1;
@@ -878,6 +1200,11 @@ export async function carregarContasPagarBling(
   token?: string,
   empresaId?: string
 ): Promise<{ data: BlingContaPagar[]; resumo: ResumoFinanceiro; isLive: boolean }> {
+  const resumoVazio: ResumoFinanceiro = { totalAberto: 0, totalLiquidado: 0, totalVencido: 0, qtdRegistros: 0 };
+  if (!token || !token.trim()) {
+    return { data: [], resumo: resumoVazio, isLive: false };
+  }
+
   try {
     const todasContas: any[] = [];
     let pagina = 1;
@@ -936,7 +1263,6 @@ export async function carregarContasPagarBling(
     console.error('Erro ao buscar contas a pagar do Bling:', err);
   }
 
-  const resumoVazio: ResumoFinanceiro = { totalAberto: 0, totalLiquidado: 0, totalVencido: 0, qtdRegistros: 0 };
   const key = empresaId ? `${STORAGE_KEYS.PAGAR}_${empresaId}` : STORAGE_KEYS.PAGAR;
   localStorage.setItem(key, JSON.stringify([]));
   return { data: [], resumo: resumoVazio, isLive: true };
@@ -951,6 +1277,11 @@ export async function carregarContasReceberBling(
   empresaId?: string,
   bancoPadrao: BankProvider = 'inter'
 ): Promise<{ data: BlingContaReceber[]; resumo: ResumoFinanceiro; isLive: boolean }> {
+  const resumoVazio: ResumoFinanceiro = { totalAberto: 0, totalLiquidado: 0, totalVencido: 0, qtdRegistros: 0 };
+  if (!token || !token.trim()) {
+    return { data: [], resumo: resumoVazio, isLive: false };
+  }
+
   try {
     const todasContas: any[] = [];
     let pagina = 1;
@@ -1021,7 +1352,6 @@ export async function carregarContasReceberBling(
     console.error('Erro ao buscar contas a receber do Bling:', err);
   }
 
-  const resumoVazio: ResumoFinanceiro = { totalAberto: 0, totalLiquidado: 0, totalVencido: 0, qtdRegistros: 0 };
   const key = empresaId ? `${STORAGE_KEYS.RECEBER}_${empresaId}` : STORAGE_KEYS.RECEBER;
   localStorage.setItem(key, JSON.stringify([]));
   return { data: [], resumo: resumoVazio, isLive: true };
@@ -1100,46 +1430,531 @@ export async function obterDiagnosticoBling(customToken?: string): Promise<{
 /**
  * Busca a lista de produtos reais cadastrados na conta da empresa no Bling (API v3)
  */
-export async function carregarProdutosBling(
-  customToken?: string,
-  _empresaId?: string
-): Promise<{ success: boolean; data: CatalogoProduto[]; error?: string }> {
-  const token = customToken || getStoredBlingToken() || '';
-  if (!token) {
-    return { success: false, data: [], error: 'Token do Bling não configurado.' };
+/**
+ * Obtém produtos salvos no cache local para a empresa selecionada
+ */
+export function obterProdutosCacheLocal(empresaId?: string): CatalogoProduto[] {
+  try {
+    const key = empresaId ? `${STORAGE_KEYS.PRODUTOS}_${empresaId}` : STORAGE_KEYS.PRODUTOS;
+    const cached = localStorage.getItem(key);
+    if (cached) {
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch {}
+  return [];
+}
+
+/**
+ * Salva produtos no cache local para a empresa
+ */
+export function salvarProdutosCacheLocal(
+  empresaId: string | undefined,
+  produtos: CatalogoProduto[],
+  dataSync: string = new Date().toISOString()
+): void {
+  try {
+    const key = empresaId ? `${STORAGE_KEYS.PRODUTOS}_${empresaId}` : STORAGE_KEYS.PRODUTOS;
+    localStorage.setItem(key, JSON.stringify(produtos));
+    localStorage.setItem(`${key}_timestamp`, dataSync);
+  } catch {}
+}
+
+/**
+ * Retorna data/hora da última sincronização de produtos da empresa
+ */
+export function obterDataUltimaSyncProdutos(empresaId?: string): string | null {
+  try {
+    const key = empresaId ? `${STORAGE_KEYS.PRODUTOS}_${empresaId}_timestamp` : `${STORAGE_KEYS.PRODUTOS}_timestamp`;
+    return localStorage.getItem(key);
+  } catch {}
+  return null;
+}
+
+/**
+ * Verifica se um produto do Bling pertence à categoria de Materiais de Construção
+ * Analisa rigorosamente:
+ * 1. NCM (Capítulos e posições fiscais de insumos da construção civil)
+ * 2. Nome, descrição e categoria cadastrada no Bling
+ */
+export function isProdutoMaterialConstrucao(p: any): boolean {
+  if (!p) return false;
+
+  const texto = `${p.nome || ''} ${p.descricao || ''} ${p.categoria?.descricao || ''} ${p.codigo || ''}`.toLowerCase();
+  const ncm = String(p.tributacao?.ncm || p.ncm || '').replace(/\D/g, '');
+
+  // 1. NCMs prioritários da construção civil
+  const ncmsConstrucaoPrefixos = [
+    // Cimento, cal, gesso, areia, brita, pedrisco
+    '2505', '2517', '2520', '2521', '2522', '2523',
+    // Argamassas, aditivos, concreto, refratários
+    '38245', '38244', '3816',
+    // Obras de cimento, fibrocimento, gesso, drywall
+    '6806', '6807', '6808', '6809', '6810', '6811',
+    // Cerâmica, tijolo, bloco, telha cerâmica, pisos, azulejos, louças sanitárias
+    '6901', '6902', '6904', '6905', '6906', '6907', '6908', '6910',
+    // Vidros planos para construção
+    '7003', '7004', '7005', '7007', '7016',
+    // Aço, ferro, vergalhão, arame, tela, perfil
+    '7213', '7214', '7215', '7216', '7217',
+    // Treliças, telas soldadas, tubos de aço, conexões, pregos, parafusos, buchas
+    '7303', '7304', '7305', '7306', '7307', '7308', '7312', '7314', '7317', '7318',
+    // Tubos, conexões, calhas, caixas d'água de plástico (PVC, PPR, CPVC)
+    '3917', '3922', '3925',
+    // Tintas, vernizes, massas (corrida/acrílica), seladores, impermeabilizantes
+    '3208', '3209', '3210', '3214', '2715', '3506',
+    // Elétrica básica de construção (fios, cabos, conduítes, disjuntores, tomadas)
+    '8544', '8536', '8537', '8538', '8547',
+    // Madeiras para obra (vigas, tábuas, compensados, portas, batentes)
+    '4407', '4409', '4410', '4411', '4412', '4418',
+    // Esquadrias de alumínio
+    '7610',
+  ];
+
+  if (ncm.length >= 4 && ncmsConstrucaoPrefixos.some((pref) => ncm.startsWith(pref))) {
+    return true;
   }
 
+  // 2. Palavras-chave no nome ou descrição do produto
+  const termosConstrucao = [
+    // Cimento / Aglomerantes / Agregados
+    'cimento', 'votoran', 'caupe', 'tupi', 'nassau', 'montes claros', 'ciplan', 'intercement',
+    'areia', 'brita', 'pedrisco', 'pedra britada', 'saibro', 'argamassa', 'rejunte', 'cal ', 'cal hidr', 'gesso', 'drywall',
+    'tijolo', 'bloco', 'canaleta', 'telha', 'laje', 'mourao', 'mourão', 'meio fio', 'meio-fio', 'pingadeira', 'combogo', 'cobogo',
+    // Acabamento / Cerâmica
+    'piso', 'porcelanato', 'revestimento', 'azulejo', 'ceramica', 'cerâmica', 'rodape', 'rodapé', 'soleira', 'peitoril',
+    // Aço / Ferro / Fixação
+    'vergalhao', 'vergalhão', 'ca-50', 'ca-60', 'ca50', 'ca60', 'trelica', 'treliça', 'malha pop', 'malha ferro',
+    'arame', 'recozido', 'galvanizado', 'prego', 'parafuso', 'bucha', 'chumbador', 'barra roscada', 'cantoneira',
+    // Hidráulica / Tubos
+    'tubo', 'cano', 'conexao', 'conexão', 'joelho', 'cotovelo', 'luva', 'adaptador', 'registro', 'ralo',
+    'caixa dagua', "caixa d'água", 'caixa dágua', 'sifao', 'sifão', 'torneira', 'valvula', 'válvula', 'tigre', 'amanco', 'krona',
+    'soldavel', 'soldável', 'esgoto', 'pluvial', 'pvc', 'calha', 'grelha',
+    // Tintas / Pintura / Impermeabilização
+    'tinta', 'esmalte', 'latex', 'látex', 'acrilica', 'acrílica', 'verniz', 'selador', 'massa corrida', 'massa acrilica', 'massa acrílica',
+    'impermeabilizante', 'vedacit', 'vedapren', 'sika', 'viapol', 'neutrol', 'manta asfalt', 'silicone', 'selante', 'cola pva', 'thinner', 'aguarras', 'aguarrás',
+    'rolo la', 'rolo lã', 'pincel', 'trincha', 'fita crepe', 'lixa',
+    // Elétrica básica de obra
+    'fio ', 'fio flex', 'cabo flex', 'conduite', 'conduíte', 'corrugado', 'disjuntor', 'interruptor', 'tomada', 'barramento',
+    // Madeira / Esquadrias
+    'tabua', 'tábua', 'viga', 'caibro', 'ripa', 'sarrafo', 'compensado', 'esquadria', 'fechadura', 'dobradica', 'dobradiça',
+    // Geral construção
+    'construcao', 'construção', 'obra', 'alvenaria', 'hidraulica', 'hidráulica', 'eletrica', 'elétrica', 'ferragem'
+  ];
+
+  return termosConstrucao.some((termo) => texto.includes(termo));
+}
+
+/**
+ * Obtém se a empresa deve filtrar estritamente produtos de material de construção
+ */
+export function obterFiltroMaterialConstrucao(empresaId?: string, nomeEmpresa?: string): boolean {
+  if (!empresaId) return false;
   try {
-    const resposta = await callBlingApi('/produtos?criterio=1&limite=100', {
-      method: 'GET',
-      customToken: token,
-    });
-
-    const lista = resposta?.data || [];
-    if (!Array.isArray(lista) || lista.length === 0) {
-      return { success: true, data: [] };
+    const salvo = localStorage.getItem(`filtro_construcao_${empresaId}`);
+    if (salvo !== null) {
+      return salvo === 'true';
     }
+  } catch {}
 
-    const produtosConvertidos: CatalogoProduto[] = lista
-      .filter((p: any) => p && (p.nome || p.descricao))
-      .map((p: any) => {
-        const preco = Number(p.preco || p.precoCusto || 0);
-        return {
-          id: String(p.id || p.codigo || Math.random()),
-          codigo: String(p.codigo || `PROD-${p.id || ''}`),
-          descricao: String(p.nome || p.descricao || 'Produto Bling'),
-          precoUnitario: preco > 0 ? preco : 10.0,
-          unidade: String(p.unidade || 'UN').slice(0, 6),
-          ncm: String(p.tributacao?.ncm || p.ncm || '25232910').replace(/\D/g, '') || '25232910',
-          cfop: '5102',
-          categoria: String(p.categoria?.descricao || 'Geral'),
-        };
+  // Se for a empresa Guias Comércio, ativa por padrão para proteger o armazenamento do navegador
+  if (nomeEmpresa) {
+    const nomeNorm = nomeEmpresa.toLowerCase();
+    if (nomeNorm.includes('guias') || nomeNorm.includes('construcao') || nomeNorm.includes('construção')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Salva a preferência de filtro de material de construção para a empresa
+ */
+export function salvarFiltroMaterialConstrucao(empresaId: string, ativo: boolean): void {
+  try {
+    localStorage.setItem(`filtro_construcao_${empresaId}`, ativo ? 'true' : 'false');
+  } catch {}
+}
+
+/**
+ * Busca a lista de produtos reais cadastrados na conta da empresa no Bling (API v3)
+ * Realiza paginação profunda e permite o filtro inteligente de descarte para Material de Construção
+ * Ao filtrar construção, descarta os itens desnecessários em tempo real a cada página de 100 itens,
+ * permitindo varrer até 150 páginas (15.000 produtos) sem consumir a memória do navegador.
+ */
+export async function carregarProdutosBling(
+  customToken?: string,
+  empresaId?: string,
+  apenasMaterialConstrucao?: boolean,
+  onProgresso?: (info: { pagina: number; produtosEncontrados: number; totalDescartados: number }) => void
+): Promise<{
+  success: boolean;
+  data: CatalogoProduto[];
+  rawData?: any[];
+  totalCount?: number;
+  totalDescartados?: number;
+  filtroConstrucaoAtivo?: boolean;
+  error?: string;
+}> {
+  const token = (customToken !== undefined ? customToken : (getStoredBlingToken() || '')).trim();
+  if (!token) {
+    // Se não tiver token, retorna estritamente a base local desta empresa
+    const locais = obterProdutosCacheLocal(empresaId);
+    return { success: true, data: locais, totalCount: locais.length };
+  }
+
+  // Determina se o filtro de descarte inteligente deve ser aplicado
+  const filtrarConstrucao =
+    apenasMaterialConstrucao !== undefined
+      ? apenasMaterialConstrucao
+      : obterFiltroMaterialConstrucao(empresaId);
+
+  try {
+    let produtosSelecionados: any[] = [];
+    let totalDescartados = 0;
+    let pagina = 1;
+    let temMais = true;
+
+    // Se estiver filtrando construção, varre sem travas rígidas (até 150 páginas = 15.000 produtos analisados do Bling)
+    // Se não estiver filtrando, limita a 15 páginas (1.500 produtos) para não estourar o localStorage
+    const limitePaginas = filtrarConstrucao ? 150 : 15;
+
+    while (temMais && pagina <= limitePaginas) {
+      const resposta = await callBlingApi(`/produtos?criterio=5&limite=100&pagina=${pagina}`, {
+        method: 'GET',
+        customToken: token,
       });
 
-    return { success: true, data: produtosConvertidos };
+      const lista = resposta?.data || [];
+      if (Array.isArray(lista) && lista.length > 0) {
+        if (filtrarConstrucao) {
+          // Filtra em tempo real a cada página de 100 itens
+          const construcaoDaPagina = lista.filter(
+            (p: any) => p && (p.nome || p.descricao) && isProdutoMaterialConstrucao(p)
+          );
+          const descartadosDaPagina = lista.length - construcaoDaPagina.length;
+
+          produtosSelecionados.push(...construcaoDaPagina);
+          totalDescartados += descartadosDaPagina;
+        } else {
+          produtosSelecionados.push(...lista.filter((p: any) => p && (p.nome || p.descricao)));
+        }
+
+        onProgresso?.({
+          pagina,
+          produtosEncontrados: produtosSelecionados.length,
+          totalDescartados,
+        });
+
+        if (lista.length < 100) {
+          temMais = false;
+        } else {
+          pagina++;
+          await sleep(350);
+        }
+      } else {
+        temMais = false;
+      }
+    }
+
+    // Se criterio=5 retornar vazio na primeira página, faz fallback sem o parâmetro de critério
+    if (produtosSelecionados.length === 0 && totalDescartados === 0) {
+      await sleep(350);
+      const fallback = await callBlingApi(`/produtos?limite=100&pagina=1`, {
+        method: 'GET',
+        customToken: token,
+      });
+      const fallbackLista = fallback?.data || [];
+      if (Array.isArray(fallbackLista)) {
+        if (filtrarConstrucao) {
+          const construcao = fallbackLista.filter(
+            (p: any) => p && (p.nome || p.descricao) && isProdutoMaterialConstrucao(p)
+          );
+          produtosSelecionados.push(...construcao);
+          totalDescartados += fallbackLista.length - construcao.length;
+        } else {
+          produtosSelecionados.push(...fallbackLista.filter((p: any) => p && (p.nome || p.descricao)));
+        }
+      }
+    }
+
+    if (produtosSelecionados.length === 0 && totalDescartados === 0) {
+      const locais = obterProdutosCacheLocal(empresaId);
+      if (locais.length > 0) {
+        return { success: true, data: locais, rawData: [], totalCount: locais.length };
+      }
+      return { success: true, data: [], rawData: [], totalCount: 0 };
+    }
+
+    console.log(
+      `🏗️ Varredura Bling Concluída: ${pagina} páginas analisadas. ${produtosSelecionados.length} mantidos, ${totalDescartados} descartados.`
+    );
+
+    const produtosConvertidos: CatalogoProduto[] = produtosSelecionados.map((p: any) => {
+      const preco = Number(p.preco || p.precoCusto || 0);
+      return {
+        id: String(p.id || p.codigo || Math.random()),
+        codigo: String(p.codigo || `PROD-${p.id || ''}`),
+        descricao: String(p.nome || p.descricao || 'Produto Bling'),
+        precoUnitario: preco > 0 ? preco : 10.0,
+        unidade: String(p.unidade || 'UN').slice(0, 6),
+        ncm: String(p.tributacao?.ncm || p.ncm || '25232910').replace(/\D/g, '') || '25232910',
+        cfop: '5102',
+        categoria: String(p.categoria?.descricao || (filtrarConstrucao ? 'Material de Construção' : 'Geral')),
+      };
+    });
+
+    // Salva automaticamente na base de cache local da empresa
+    salvarProdutosCacheLocal(empresaId, produtosConvertidos);
+
+    console.log(
+      `📦 Produtos Bling salvos no cache local: ${produtosConvertidos.length} itens. (Filtro Construção: ${filtrarConstrucao ? 'ATIVO' : 'DESLIGADO'})`
+    );
+
+    return {
+      success: true,
+      data: produtosConvertidos,
+      rawData: produtosSelecionados,
+      totalCount: produtosConvertidos.length,
+      totalDescartados,
+      filtroConstrucaoAtivo: filtrarConstrucao,
+    };
   } catch (err: any) {
     console.error('Erro ao carregar produtos do Bling:', err);
+    // Em caso de falha de conexão, retorna o cache local existente
+    const locais = obterProdutosCacheLocal(empresaId);
+    if (locais.length > 0) {
+      return { success: true, data: locais, totalCount: locais.length };
+    }
     return { success: false, data: [], error: err.message };
+  }
+}
+
+export interface ProgressoSincronizacao {
+  etapa: number;
+  totalEtapas: number;
+  nomeEtapa: string;
+  porcentagem: number;
+  mensagem: string;
+  totalProdutos?: number;
+  totalClientes?: number;
+  totalFornecedores?: number;
+  sucesso?: boolean;
+  erro?: string;
+}
+
+/**
+ * Motor de Sincronização Inteligente em Etapas com Throttling Seguro (respeita a taxa da API v3 do Bling)
+ * Evita o erro 429 Too Many Requests ao executar cada etapa sequencialmente com intervalos programados.
+ */
+export async function sincronizarEmpresaBlingCompleto(
+  empresa: EmpresaTenant,
+  onProgress?: (p: ProgressoSincronizacao) => void
+): Promise<{
+  sucesso: boolean;
+  clientes: BlingCliente[];
+  fornecedores: BlingFornecedor[];
+  produtos: CatalogoProduto[];
+  mensagem: string;
+}> {
+  const token = (empresa.blingAccessToken || '').trim();
+  if (!token) {
+    const msg = 'Esta empresa não possui um Token de Acesso do Bling ativo configurado.';
+    onProgress?.({
+      etapa: 0,
+      totalEtapas: 5,
+      nomeEtapa: 'Erro',
+      porcentagem: 0,
+      mensagem: msg,
+      sucesso: false,
+      erro: msg,
+    });
+    return {
+      sucesso: false,
+      clientes: obterClientesCacheLocal(empresa.id),
+      fornecedores: obterFornecedoresCacheLocal(empresa.id),
+      produtos: obterProdutosCacheLocal(empresa.id),
+      mensagem: msg,
+    };
+  }
+
+  // Notifica início
+  const notificarAtualizacaoStatus = (emAndamento: boolean, msg: string, prog: number, produtosCount?: number, clientesCount?: number) => {
+    try {
+      const rawList = localStorage.getItem('nfe_empresas_list');
+      if (rawList) {
+        const list: EmpresaTenant[] = JSON.parse(rawList);
+        const idx = list.findIndex((e) => e.id === empresa.id);
+        if (idx >= 0) {
+          list[idx].statusSincronizacao = {
+            emAndamento,
+            progresso: prog,
+            mensagem: msg,
+            concluidoEm: !emAndamento ? new Date().toISOString() : list[idx].statusSincronizacao?.concluidoEm,
+            totalProdutos: produtosCount !== undefined ? produtosCount : list[idx].statusSincronizacao?.totalProdutos,
+            totalClientes: clientesCount !== undefined ? clientesCount : list[idx].statusSincronizacao?.totalClientes,
+          };
+          if (!emAndamento) {
+            list[idx].ultimaSincronizacao = new Date().toISOString();
+          }
+          localStorage.setItem('nfe_empresas_list', JSON.stringify(list));
+          window.dispatchEvent(new Event('storage'));
+        }
+      }
+    } catch {}
+  };
+
+  try {
+    // ----------------------------------------------------
+    // Etapa 1 / 5: Dados Cadastrais da Empresa (20%)
+    // ----------------------------------------------------
+    onProgress?.({
+      etapa: 1,
+      totalEtapas: 5,
+      nomeEtapa: 'Dados da Empresa',
+      porcentagem: 20,
+      mensagem: 'Verificando cadastro da empresa no Bling...',
+    });
+    notificarAtualizacaoStatus(true, 'Verificando cadastro da empresa no Bling...', 20);
+
+    try {
+      const dadosEmpresa = await obterDadosEmpresaBling(token);
+      if (dadosEmpresa.success && dadosEmpresa.razaoSocial) {
+        const rawList = localStorage.getItem('nfe_empresas_list');
+        if (rawList) {
+          const list: EmpresaTenant[] = JSON.parse(rawList);
+          const idx = list.findIndex((e) => e.id === empresa.id);
+          if (idx >= 0) {
+            list[idx].razaoSocial = dadosEmpresa.razaoSocial || list[idx].razaoSocial;
+            list[idx].nomeFantasia = dadosEmpresa.nomeFantasia || list[idx].nomeFantasia;
+            list[idx].cnpj = dadosEmpresa.cnpj || list[idx].cnpj;
+            list[idx].cidade = dadosEmpresa.cidade || list[idx].cidade;
+            list[idx].uf = dadosEmpresa.uf || list[idx].uf;
+            localStorage.setItem('nfe_empresas_list', JSON.stringify(list));
+          }
+        }
+      }
+    } catch {}
+
+    await sleep(400);
+
+    // ----------------------------------------------------
+    // Etapa 2 / 5: Clientes (40%)
+    // ----------------------------------------------------
+    onProgress?.({
+      etapa: 2,
+      totalEtapas: 5,
+      nomeEtapa: 'Clientes',
+      porcentagem: 40,
+      mensagem: 'Baixando clientes cadastrados...',
+    });
+    notificarAtualizacaoStatus(true, 'Baixando clientes cadastrados no Bling...', 40);
+
+    const resClientes = await carregarClientesBling(token, empresa.id);
+    const clientes = resClientes.data || [];
+    salvarClientesCacheLocal(empresa.id, clientes);
+
+    await sleep(400);
+
+    // ----------------------------------------------------
+    // Etapa 3 / 5: Fornecedores (60%)
+    // ----------------------------------------------------
+    onProgress?.({
+      etapa: 3,
+      totalEtapas: 5,
+      nomeEtapa: 'Fornecedores',
+      porcentagem: 60,
+      mensagem: 'Baixando fornecedores...',
+    });
+    notificarAtualizacaoStatus(true, 'Baixando fornecedores no Bling...', 60, undefined, clientes.length);
+
+    const resFornec = await carregarFornecedoresBling(token, empresa.id);
+    const fornecedores = resFornec.data || [];
+    salvarFornecedoresCacheLocal(empresa.id, fornecedores);
+
+    await sleep(400);
+
+    // ----------------------------------------------------
+    // Etapa 4 / 5: Catálogo de Produtos e Preços (80%)
+    // ----------------------------------------------------
+    onProgress?.({
+      etapa: 4,
+      totalEtapas: 5,
+      nomeEtapa: 'Produtos',
+      porcentagem: 80,
+      mensagem: 'Baixando catálogo de produtos reais do Bling...',
+    });
+    notificarAtualizacaoStatus(true, 'Baixando catálogo de produtos reais...', 80, undefined, clientes.length);
+
+    const resProdutos = await carregarProdutosBling(token, empresa.id);
+    const produtos = resProdutos.data || [];
+    salvarProdutosCacheLocal(empresa.id, produtos);
+
+    await sleep(400);
+
+    // ----------------------------------------------------
+    // Etapa 5 / 5: Contas a Receber e a Pagar (100%)
+    // ----------------------------------------------------
+    onProgress?.({
+      etapa: 5,
+      totalEtapas: 5,
+      nomeEtapa: 'Financeiro',
+      porcentagem: 95,
+      mensagem: 'Sincronizando contas a receber e pagar...',
+    });
+    notificarAtualizacaoStatus(true, 'Sincronizando contas financeiras...', 95, produtos.length, clientes.length);
+
+    try {
+      const resReceber = await carregarContasReceberBling(token, empresa.id, empresa.bancoPadrao);
+      salvarContasReceberCacheLocal(empresa.id, resReceber.data || []);
+      await sleep(400);
+      const resPagar = await carregarContasPagarBling(token, empresa.id);
+      salvarContasPagarCacheLocal(empresa.id, resPagar.data || []);
+    } catch {}
+
+    const concluidoMsg = `${produtos.length} produtos e ${clientes.length} clientes prontos para uso`;
+    notificarAtualizacaoStatus(false, concluidoMsg, 100, produtos.length, clientes.length);
+
+    onProgress?.({
+      etapa: 5,
+      totalEtapas: 5,
+      nomeEtapa: 'Concluído',
+      porcentagem: 100,
+      mensagem: concluidoMsg,
+      totalProdutos: produtos.length,
+      totalClientes: clientes.length,
+      totalFornecedores: fornecedores.length,
+      sucesso: true,
+    });
+
+    return {
+      sucesso: true,
+      clientes,
+      fornecedores,
+      produtos,
+      mensagem: concluidoMsg,
+    };
+  } catch (err: any) {
+    const erroMsg = err.message || 'Erro durante a sincronização com o Bling.';
+    notificarAtualizacaoStatus(false, `Falha: ${erroMsg}`, 0);
+    onProgress?.({
+      etapa: 0,
+      totalEtapas: 5,
+      nomeEtapa: 'Erro',
+      porcentagem: 0,
+      mensagem: erroMsg,
+      sucesso: false,
+      erro: erroMsg,
+    });
+    return {
+      sucesso: false,
+      clientes: obterClientesCacheLocal(empresa.id),
+      fornecedores: obterFornecedoresCacheLocal(empresa.id),
+      produtos: obterProdutosCacheLocal(empresa.id),
+      mensagem: erroMsg,
+    };
   }
 }
 

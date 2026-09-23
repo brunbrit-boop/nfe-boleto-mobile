@@ -2,9 +2,9 @@
  * Módulo de Integração com a API v3 do Bling ERP (OAuth 2.0)
  */
 
-export const BLING_DEFAULT_CLIENT_ID = '5142f9c38e36e69d55278681ac2864a053be067c';
-export const BLING_DEFAULT_CLIENT_SECRET = 'c34055bd8ec510dec764af628816b2c5da6ee1a69d2011e25628e1c71860';
-export const BLING_DEFAULT_STATE = 'cb9768157cff9aef9675a82bdd68c5e4';
+export const BLING_DEFAULT_CLIENT_ID = '';
+export const BLING_DEFAULT_CLIENT_SECRET = '';
+export const BLING_DEFAULT_STATE = 'bling_oauth_state';
 
 export interface BlingConfig {
   clientId: string;
@@ -48,6 +48,7 @@ export function saveBlingConfig(config: BlingConfig): void {
     localStorage.removeItem('bling_access_token');
   }
   if (config.refreshToken) localStorage.setItem('bling_refresh_token', config.refreshToken);
+  if (config.expiresAt) localStorage.setItem('bling_expires_at', String(config.expiresAt));
 }
 
 /**
@@ -158,7 +159,7 @@ export async function exchangeBlingCodeForToken(
   code: string,
   clientId: string = BLING_DEFAULT_CLIENT_ID,
   clientSecret: string = ''
-): Promise<{ success: boolean; accessToken?: string; error?: string }> {
+): Promise<{ success: boolean; accessToken?: string; refreshToken?: string; expiresAt?: number; error?: string }> {
   try {
     const cSec = clientSecret || localStorage.getItem('bling_client_secret') || BLING_DEFAULT_CLIENT_SECRET;
     if (!cSec) {
@@ -183,16 +184,22 @@ export async function exchangeBlingCodeForToken(
 
       if (serverlessRes.ok) {
         const data = await serverlessRes.json();
+        const expiresAt = Date.now() + (data.expires_in * 1000);
         saveBlingConfig({
           clientId,
           clientSecret: cSec,
           accessToken: data.access_token,
           refreshToken: data.refresh_token,
-          expiresAt: Date.now() + (data.expires_in * 1000),
+          expiresAt,
           isConnected: true,
         });
         localStorage.setItem('bling_access_token', data.access_token);
-        return { success: true, accessToken: data.access_token };
+        return { 
+          success: true, 
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token,
+          expiresAt,
+        };
       }
     } catch {
       // Fallback para chamada direta se rodando fora da Vercel
@@ -217,16 +224,22 @@ export async function exchangeBlingCodeForToken(
 
     if (response.ok) {
       const data = await response.json();
+      const expiresAt = Date.now() + (data.expires_in * 1000);
       saveBlingConfig({
         clientId,
         clientSecret: cSec,
         accessToken: data.access_token,
         refreshToken: data.refresh_token,
-        expiresAt: Date.now() + (data.expires_in * 1000),
+        expiresAt,
         isConnected: true,
       });
       localStorage.setItem('bling_access_token', data.access_token);
-      return { success: true, accessToken: data.access_token };
+      return { 
+        success: true, 
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        expiresAt,
+      };
     } else {
       const err = await response.text();
       return { success: false, error: err };
@@ -235,3 +248,118 @@ export async function exchangeBlingCodeForToken(
     return { success: false, error: err.message || 'Falha na conexão com Bling' };
   }
 }
+
+/**
+ * Verifica se o token está expirado ou prestes a expirar nos próximos X minutos (padrão: 15 min)
+ */
+export function isTokenExpirando(expiresAt?: number, margemMinutos: number = 15): boolean {
+  if (!expiresAt) return false;
+  const agora = Date.now();
+  const margemMs = margemMinutos * 60 * 1000;
+  return agora + margemMs >= expiresAt;
+}
+
+/**
+ * Renova o Access Token do Bling usando o Refresh Token (30 dias)
+ */
+export async function renovarTokenBling(
+  refreshToken: string,
+  clientId: string = BLING_DEFAULT_CLIENT_ID,
+  clientSecret: string = ''
+): Promise<{ success: boolean; accessToken?: string; refreshToken?: string; expiresAt?: number; error?: string }> {
+  try {
+    const cSec = clientSecret || localStorage.getItem('bling_client_secret') || BLING_DEFAULT_CLIENT_SECRET;
+    const cId = clientId || localStorage.getItem('bling_client_id') || BLING_DEFAULT_CLIENT_ID;
+    const cleanRefreshToken = (refreshToken || '').trim();
+
+    if (!cleanRefreshToken) {
+      return { success: false, error: 'Refresh token não informado.' };
+    }
+
+    // 1. Tenta via Vercel Serverless Function (/api/bling-token)
+    try {
+      const serverlessRes = await fetch('/api/bling-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          grant_type: 'refresh_token',
+          refresh_token: cleanRefreshToken,
+          clientId: cId,
+          clientSecret: cSec,
+        }),
+      });
+
+      if (serverlessRes.ok) {
+        const data = await serverlessRes.json();
+        const expiresAt = Date.now() + ((data.expires_in || 21600) * 1000);
+        saveBlingConfig({
+          clientId: cId,
+          clientSecret: cSec,
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token || cleanRefreshToken,
+          expiresAt,
+          isConnected: true,
+        });
+        localStorage.setItem('bling_access_token', data.access_token);
+        if (data.refresh_token) {
+          localStorage.setItem('bling_refresh_token', data.refresh_token);
+        }
+        return {
+          success: true,
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token || cleanRefreshToken,
+          expiresAt,
+        };
+      } else {
+        const errData = await serverlessRes.json().catch(() => null);
+        console.warn('Erro retornado na renovação via serverless:', errData);
+      }
+    } catch {
+      // Fallback para chamada direta
+    }
+
+    // 2. Chamada direta ao Bling (fallback)
+    const basicAuth = btoa(`${cId}:${cSec}`);
+    const response = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${basicAuth}`,
+        'Accept': '1.0',
+      },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: cleanRefreshToken,
+      }),
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      const expiresAt = Date.now() + ((data.expires_in || 21600) * 1000);
+      saveBlingConfig({
+        clientId: cId,
+        clientSecret: cSec,
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token || cleanRefreshToken,
+        expiresAt,
+        isConnected: true,
+      });
+      localStorage.setItem('bling_access_token', data.access_token);
+      if (data.refresh_token) {
+        localStorage.setItem('bling_refresh_token', data.refresh_token);
+      }
+      return {
+        success: true,
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token || cleanRefreshToken,
+        expiresAt,
+      };
+    } else {
+      const errText = await response.text();
+      return { success: false, error: errText };
+    }
+  } catch (err: any) {
+    return { success: false, error: err.message || 'Falha ao renovar token com Bling' };
+  }
+}
+

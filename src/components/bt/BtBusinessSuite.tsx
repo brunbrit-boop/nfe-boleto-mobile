@@ -17,6 +17,7 @@ import { BtHeader } from './BtHeader';
 
 import { FinancesView } from './pages/FinancesView';
 import { SalesView } from './pages/SalesView';
+import { ProductsView } from './pages/ProductsView';
 import { SuppliersView } from './pages/SuppliersView';
 import { ClientsView } from './pages/ClientsView';
 import { PurchasesView } from './pages/PurchasesView';
@@ -67,6 +68,7 @@ interface BtBusinessSuiteProps {
 
 export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
   empresa,
+  company,
   bancoAtual,
   onSelectBanco,
   onBackToEmpresas,
@@ -147,11 +149,21 @@ export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
           {activeMenu === 'sales' && (
             <SalesView
               empresa={empresa}
+              company={company}
               clientes={clientes}
               bancoAtual={bancoAtual}
               onViewDanfe={onViewDanfe}
+              onViewBoleto={onViewBoleto}
               onEmitirNFe={onEmitirNFe}
               onOpenApiKeys={() => setIsApiKeysOpen(true)}
+              onNavigateToProducts={() => setActiveMenu('products')}
+            />
+          )}
+
+          {/* 2.1 Catálogo de Produtos (Bling + Cache Local) */}
+          {activeMenu === 'products' && (
+            <ProductsView
+              empresa={empresa}
             />
           )}
 

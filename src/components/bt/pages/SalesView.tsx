@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import type { BlingCliente, EmpresaTenant, BankProvider, NFeData } from '../../../types';
+import React, { useState, useEffect, useMemo } from 'react';
+import type { BlingCliente, EmpresaTenant, BankProvider, NFeData, CompanyProfile, Installment } from '../../../types';
 import {
   gerarOfertaComIA,
   converterPedidoParaNFeRascunho,
@@ -26,32 +26,42 @@ import {
   CloudUpload,
   AlertTriangle,
   Target,
+  Calendar,
+  Users,
+  RefreshCw,
 } from 'lucide-react';
 import { BANKS } from '../../../utils/financeEngine';
 import {
   gravarEsbocoNFeNoBling,
-  getStoredBlingToken,
-  carregarProdutosBling,
+  obterProdutosCacheLocal,
   type ResultadoEsbocoBling,
 } from '../../../services/blingService';
+import { GruposClientesView } from './GruposClientesView';
 
 interface SalesViewProps {
   empresa: EmpresaTenant;
+  company?: CompanyProfile;
   clientes: BlingCliente[];
   bancoAtual: BankProvider;
   onViewDanfe?: (nfe: NFeData) => void;
+  onViewBoleto?: (parcela: Installment, nfe: NFeData) => void;
   onEmitirNFe?: (nfe: NFeData) => void;
   onOpenApiKeys?: () => void;
+  onNavigateToProducts?: () => void;
 }
 
 export const SalesView: React.FC<SalesViewProps> = ({
   empresa,
+  company,
   clientes = [],
   bancoAtual = 'inter',
   onViewDanfe,
+  onViewBoleto,
   onEmitirNFe,
   onOpenApiKeys,
+  onNavigateToProducts,
 }) => {
+  const [subAbaVendas, setSubAbaVendas] = useState<'individual' | 'grupos'>('individual');
   const [selectedClienteId, setSelectedClienteId] = useState<number | string>(
     clientes.length > 0 ? clientes[0].id : ''
   );
@@ -61,7 +71,52 @@ export const SalesView: React.FC<SalesViewProps> = ({
   const [resultadoOferta, setResultadoOferta] = useState<OfertaGeradaResult | null>(null);
   const [itensPedido, setItensPedido] = useState<PedidoItemVenda[]>([]);
   const [parcelasCount, setParcelasCount] = useState<number>(1);
+  const [primeiroVencimento, setPrimeiroVencimento] = useState<string>(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    return d.toISOString().split('T')[0];
+  });
+  const [intervaloDiasInput, setIntervaloDiasInput] = useState<string>('15');
+  const intervaloDias = Math.max(1, parseInt(intervaloDiasInput, 10) || 15);
   const [bancoSelecionado, setBancoSelecionado] = useState<BankProvider>(bancoAtual);
+
+  const previewParcelas = useMemo(() => {
+    if (itensPedido.length === 0) return [];
+    let baseDate = new Date();
+    if (primeiroVencimento && /^\d{4}-\d{2}-\d{2}$/.test(primeiroVencimento)) {
+      const [ano, mes, dia] = primeiroVencimento.split('-').map(Number);
+      baseDate = new Date(ano, mes - 1, dia);
+    } else {
+      baseDate.setDate(baseDate.getDate() + (intervaloDias || 30));
+    }
+
+    const valorTotal = Number(itensPedido.reduce((acc, it) => acc + it.valorTotal, 0).toFixed(2));
+    const qtd = Math.max(1, Math.min(parcelasCount, 48));
+    const valorBase = Number((valorTotal / qtd).toFixed(2));
+    let acumulado = 0;
+
+    const list: { parcela: number; total: number; dataFormatada: string; valor: number }[] = [];
+
+    for (let i = 1; i <= qtd; i++) {
+      const d = new Date(baseDate);
+      if (i > 1) {
+        d.setDate(d.getDate() + (i - 1) * (intervaloDias || 30));
+      }
+      const dd = String(d.getDate()).padStart(2, '0');
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const yyyy = d.getFullYear();
+      const valor = i === qtd ? Number((valorTotal - acumulado).toFixed(2)) : valorBase;
+      acumulado += valor;
+
+      list.push({
+        parcela: i,
+        total: qtd,
+        dataFormatada: `${dd}/${mm}/${yyyy}`,
+        valor,
+      });
+    }
+    return list;
+  }, [itensPedido, parcelasCount, primeiroVencimento, intervaloDias]);
 
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [nfeGeradaSucesso, setNfeGeradaSucesso] = useState<NFeData | null>(null);
@@ -69,9 +124,15 @@ export const SalesView: React.FC<SalesViewProps> = ({
   const [isSavingBling, setIsSavingBling] = useState(false);
   const [resultadoBling, setResultadoBling] = useState<ResultadoEsbocoBling | null>(null);
 
-  const [catalogoProdutos, setCatalogoProdutos] = useState<CatalogoProduto[]>(CATALOGO_PRODUTOS_PADRAO);
-  const [isProdutosDoBling, setIsProdutosDoBling] = useState<boolean>(false);
-  const [isLoadingProdutosBling, setIsLoadingProdutosBling] = useState<boolean>(false);
+  // Inicializa imediatamente com os produtos do cache local desta empresa (0ms de atraso)
+  const [catalogoProdutos, setCatalogoProdutos] = useState<CatalogoProduto[]>(() => {
+    const cached = obterProdutosCacheLocal(empresa.id);
+    return cached.length > 0 ? cached : CATALOGO_PRODUTOS_PADRAO;
+  });
+  const [isProdutosDoBling, setIsProdutosDoBling] = useState<boolean>(() => {
+    return obterProdutosCacheLocal(empresa.id).length > 0;
+  });
+  const [isLoadingProdutosBling] = useState<boolean>(false);
 
   useEffect(() => {
     const handleKeyChange = () => {
@@ -86,26 +147,31 @@ export const SalesView: React.FC<SalesViewProps> = ({
     };
   }, []);
 
-  // Carrega produtos reais do Bling
+  // Ao trocar de empresa, utiliza rigorosamente a base local (Local-First)
   useEffect(() => {
-    const carregar = async () => {
-      const token = empresa.blingAccessToken || getStoredBlingToken();
-      if (!token) return;
-      setIsLoadingProdutosBling(true);
-      try {
-        const res = await carregarProdutosBling(token, empresa.id);
-        if (res.success && res.data.length > 0) {
-          setCatalogoProdutos(res.data);
-          setIsProdutosDoBling(true);
-        }
-      } catch (e) {
-        console.error('Erro ao buscar produtos do Bling:', e);
-      } finally {
-        setIsLoadingProdutosBling(false);
+    const cached = obterProdutosCacheLocal(empresa.id);
+    if (cached.length > 0) {
+      setCatalogoProdutos(cached);
+      setIsProdutosDoBling(true);
+    } else {
+      // Se não há cache ainda, usa o padrão provisório até a sincronização ocorrer
+      setCatalogoProdutos(CATALOGO_PRODUTOS_PADRAO);
+      setIsProdutosDoBling(false);
+    }
+  }, [empresa.id]);
+
+  // Escuta atualizações de sincronização para recarregar o catálogo automaticamente
+  useEffect(() => {
+    const handleStorageUpdate = () => {
+      const cached = obterProdutosCacheLocal(empresa.id);
+      if (cached.length > 0) {
+        setCatalogoProdutos(cached);
+        setIsProdutosDoBling(true);
       }
     };
-    carregar();
-  }, [empresa.id, empresa.blingAccessToken]);
+    window.addEventListener('storage', handleStorageUpdate);
+    return () => window.removeEventListener('storage', handleStorageUpdate);
+  }, [empresa.id]);
 
   const clienteSelecionado = clientes.find((c) => c.id === Number(selectedClienteId)) || clientes[0] || null;
 
@@ -120,11 +186,13 @@ export const SalesView: React.FC<SalesViewProps> = ({
     setIsGenerating(true);
     setNfeGeradaSucesso(null);
 
+    const catalogoParaOferta = catalogoProdutos.length > 0 ? catalogoProdutos : CATALOGO_PRODUTOS_PADRAO;
+
     try {
       const res = await gerarOfertaComGeminiOuLocal(
         valorAlvo,
         0.05,
-        catalogoProdutos,
+        catalogoParaOferta,
         diretrizComercial.trim() || undefined
       );
       setResultadoOferta(res);
@@ -133,7 +201,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
       const fallback = gerarOfertaComIA(
         valorAlvo,
         0.05,
-        CATALOGO_PRODUTOS_PADRAO,
+        catalogoParaOferta,
         diretrizComercial.trim() || undefined
       );
       setResultadoOferta(fallback);
@@ -221,7 +289,9 @@ export const SalesView: React.FC<SalesViewProps> = ({
       itensPedido,
       empresa,
       bancoSelecionado,
-      parcelasCount
+      parcelasCount,
+      intervaloDias,
+      primeiroVencimento
     );
 
     setNfeGeradaSucesso(nfeRascunho);
@@ -251,7 +321,9 @@ export const SalesView: React.FC<SalesViewProps> = ({
       itensPedido,
       empresa,
       bancoSelecionado,
-      parcelasCount
+      parcelasCount,
+      intervaloDias,
+      primeiroVencimento
     );
     setNfeGeradaSucesso(nfeRascunho);
 
@@ -261,12 +333,23 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
     // 2. Envia para a API v3 do Bling (POST /nfe)
     try {
+      if (!empresa.blingAccessToken || !empresa.blingAccessToken.trim()) {
+        setResultadoBling({
+          sucesso: false,
+          mensagem: `A empresa "${empresa.nomeFantasia || empresa.razaoSocial}" não possui um Token de Acesso do Bling ativo configurado. Conecte as credenciais desta empresa antes de gravar notas fiscais.`,
+        });
+        setIsSavingBling(false);
+        return;
+      }
+
       const res = await gravarEsbocoNFeNoBling({
-        empresaToken: empresa.blingAccessToken || getStoredBlingToken() || undefined,
+        empresaToken: empresa.blingAccessToken.trim(),
         cliente: clienteSelecionado,
         itens: itensPedido,
         parcelasCount,
         banco: bancoSelecionado,
+        primeiroVencimento,
+        intervaloDias,
       });
 
       setResultadoBling(res);
@@ -307,16 +390,76 @@ export const SalesView: React.FC<SalesViewProps> = ({
           </div>
         </div>
 
-        {/* 1. Sucesso ao Gravar no Bling */}
-        {resultadoBling?.sucesso && (
-          <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-[#11d493] text-slate-950 flex items-center justify-center font-bold shrink-0">
-                <CheckCircle2 className="w-5 h-5 stroke-[2.5]" />
-              </div>
-              <div>
-                <h4 className="text-sm font-black text-gray-900 dark:text-white flex items-center gap-2 flex-wrap">
-                  <span>Esboço Gravado com Sucesso no Bling!</span>
+        {/* Seletor de Modo: Orçamento Individual vs Grupos & Lote */}
+        <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-white dark:bg-[#162f27] border border-slate-200 dark:border-[#214739] w-fit shadow-sm">
+          <button
+            type="button"
+            onClick={() => setSubAbaVendas('individual')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              subAbaVendas === 'individual'
+                ? 'bg-[#11d493] text-slate-950 shadow-md shadow-emerald-500/20'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <ShoppingBag className="w-4 h-4" />
+            <span>Orçamento Individual</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSubAbaVendas('grupos')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              subAbaVendas === 'grupos'
+                ? 'bg-[#11d493] text-slate-950 shadow-md shadow-emerald-500/20'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Grupos & Vendas em Lote (IA)</span>
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-400/20 text-amber-500 dark:text-amber-300 font-black">
+              NOVO
+            </span>
+          </button>
+        </div>
+
+        {subAbaVendas === 'grupos' ? (
+          <GruposClientesView
+            empresa={empresa}
+            company={
+              company || {
+                razaoSocial: empresa.razaoSocial,
+                nomeFantasia: empresa.nomeFantasia,
+                cnpj: empresa.cnpj,
+                inscricaoEstadual: empresa.inscricaoEstadual || '',
+                logradouro: empresa.logradouro || '',
+                numero: empresa.numero || '',
+                bairro: empresa.bairro || '',
+                cidade: empresa.cidade || 'São Paulo',
+                uf: empresa.uf || 'SP',
+                cep: empresa.cep || '',
+                regimeTributario: empresa.regimeTributario || 'Simples Nacional',
+                certificadoA1Valido: empresa.certificadoA1Valido ?? true,
+              }
+            }
+            bancoAtual={bancoAtual}
+            clientes={clientes}
+            catalogoProdutos={catalogoProdutos}
+            onViewDanfe={onViewDanfe}
+            onViewBoleto={onViewBoleto}
+            onEmitirNFe={onEmitirNFe}
+          />
+        ) : (
+          <>
+            {/* 1. Sucesso ao Gravar no Bling */}
+            {resultadoBling?.sucesso && (
+              <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#11d493] text-slate-950 flex items-center justify-center font-bold shrink-0">
+                    <CheckCircle2 className="w-5 h-5 stroke-[2.5]" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-gray-900 dark:text-white flex items-center gap-2 flex-wrap">
+                      <span>Esboço Gravado com Sucesso no Bling!</span>
                   {resultadoBling.idNotaBling && (
                     <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-[#11d493] border border-emerald-500/30">
                       ID Bling #{resultadoBling.idNotaBling}
@@ -588,21 +731,34 @@ export const SalesView: React.FC<SalesViewProps> = ({
             </div>
 
             {/* Informações do Catálogo Disponível */}
-            <div className="p-4 rounded-2xl bg-white dark:bg-[#162f27] border border-gray-200 dark:border-[#214739] shadow-sm flex items-center justify-between text-xs">
+            <div className="p-4 rounded-2xl bg-white dark:bg-[#162f27] border border-gray-200 dark:border-[#214739] shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
               <div className="flex items-center gap-2 text-gray-500 dark:text-gray-400">
-                <Layers className="w-4 h-4 text-[#11d493]" />
+                <Layers className="w-4 h-4 text-[#11d493] shrink-0" />
                 <span>
-                  Catálogo de Produtos: <strong>{catalogoProdutos.length} itens {isProdutosDoBling ? '(Bling ERP)' : ''}</strong>
+                  Base de Produtos: <strong>{catalogoProdutos.length} itens {isProdutosDoBling ? '(Bling ERP)' : ''}</strong>
                   {isLoadingProdutosBling && <span className="ml-1 text-[10px] text-gray-400 animate-pulse">(Sincronizando Bling...)</span>}
                 </span>
               </div>
-              <button
-                onClick={() => setShowAddProductModal(true)}
-                className="text-xs font-bold text-[#11d493] hover:underline flex items-center gap-1"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Adicionar Item</span>
-              </button>
+              <div className="flex items-center gap-2.5 self-end sm:self-auto">
+                {onNavigateToProducts && (
+                  <button
+                    type="button"
+                    onClick={onNavigateToProducts}
+                    className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-[#11d493] hover:bg-emerald-500/20 text-[11px] font-bold flex items-center gap-1 cursor-pointer transition"
+                  >
+                    <span>Ver Catálogo</span>
+                    <ArrowRight className="w-3 h-3" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowAddProductModal(true)}
+                  className="text-xs font-bold text-gray-700 dark:text-gray-300 hover:text-[#11d493] flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Item Avulso</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -724,6 +880,121 @@ export const SalesView: React.FC<SalesViewProps> = ({
               {/* Resumo Final & Botão de Aprovação de NF-e */}
               {itensPedido.length > 0 && (
                 <div className="pt-4 border-t border-gray-100 dark:border-[#214739] space-y-3">
+                  {/* Configuração de Vencimento e Condições de Pagamento */}
+                  <div className="p-4 rounded-xl bg-white dark:bg-[#152e25] border border-gray-200 dark:border-[#214739] shadow-sm space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-emerald-600 dark:text-[#11d493]" />
+                        <span className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider">
+                          Condições de Pagamento & Vencimento
+                        </span>
+                      </div>
+                      <span className="text-[10px] font-semibold text-gray-400">
+                        {previewParcelas.length} {previewParcelas.length === 1 ? 'boleto' : 'boletos'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      {/* 1º Vencimento */}
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                          1º Vencimento (Boleto)
+                        </label>
+                        <div className="relative">
+                          <input
+                            type="date"
+                            value={primeiroVencimento}
+                            onChange={(e) => setPrimeiroVencimento(e.target.value)}
+                            className="w-full px-3 py-2 text-xs font-medium bg-gray-50 dark:bg-[#10221c] border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#11d493]"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Prazo Entre Parcelas */}
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                          Prazo entre Parcelas (Dias)
+                        </label>
+                        <div className="relative flex items-center">
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={intervaloDiasInput}
+                            placeholder="15"
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\D/g, '');
+                              setIntervaloDiasInput(val);
+                            }}
+                            onBlur={() => {
+                              if (!intervaloDiasInput || parseInt(intervaloDiasInput, 10) <= 0) {
+                                setIntervaloDiasInput('15');
+                              }
+                            }}
+                            className="w-full px-3 py-2 text-xs font-medium bg-gray-50 dark:bg-[#10221c] border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#11d493]"
+                          />
+                          <span className="absolute right-3 text-[11px] text-gray-400 pointer-events-none">dias</span>
+                        </div>
+                      </div>
+
+                      {/* Parcelas */}
+                      <div>
+                        <label className="text-[11px] font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                          Quantidade de Parcelas
+                        </label>
+                        <select
+                          value={parcelasCount}
+                          onChange={(e) => setParcelasCount(Number(e.target.value))}
+                          className="w-full px-3 py-2 text-xs font-medium bg-gray-50 dark:bg-[#10221c] border border-gray-200 dark:border-gray-700 rounded-lg text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#11d493]"
+                        >
+                          <option value="1">À vista / 1x</option>
+                          <option value="2">2x parcelas</option>
+                          <option value="3">3x parcelas</option>
+                          <option value="4">4x parcelas</option>
+                          <option value="5">5x parcelas</option>
+                          <option value="6">6x parcelas</option>
+                          <option value="8">8x parcelas</option>
+                          <option value="10">10x parcelas</option>
+                          <option value="12">12x parcelas</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {/* Previsão das Parcelas Calculadas */}
+                    {previewParcelas.length > 0 && (
+                      <div className="pt-2 border-t border-gray-100 dark:border-[#214739]">
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="text-[10px] font-bold uppercase text-gray-500 dark:text-gray-400">
+                            Cronograma de Vencimentos & Boletos
+                          </span>
+                          <span className="text-[10px] text-emerald-600 dark:text-[#11d493] font-semibold">
+                            Soma: R$ {totalPedidoAtual.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                          {previewParcelas.map((p) => (
+                            <div
+                              key={p.parcela}
+                              className="px-2.5 py-1 rounded-lg bg-gray-50 dark:bg-[#10221c] border border-gray-200 dark:border-gray-800 text-[11px] flex items-center gap-1.5"
+                            >
+                              <span className="font-bold text-gray-500 dark:text-gray-400">
+                                {p.parcela}/{p.total}:
+                              </span>
+                              <span className="font-semibold text-gray-900 dark:text-white">
+                                {p.dataFormatada}
+                              </span>
+                              <span className="font-black text-emerald-600 dark:text-[#11d493]">
+                                (R$ {p.valor.toLocaleString('pt-BR', { minimumFractionDigits: 2 })})
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[10px] text-gray-400 mt-2">
+                          * As datas e valores das parcelas serão inseridos automaticamente nas Informações Complementares da NF-e no Bling.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Resumo Financeiro */}
                   <div className="p-3.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200 dark:border-gray-800 flex items-center justify-between text-xs">
                     <div>
@@ -795,6 +1066,28 @@ export const SalesView: React.FC<SalesViewProps> = ({
                           </span>
                           <p className="text-xs">{resultadoBling.mensagem}</p>
 
+                          {!resultadoBling.sucesso && (resultadoBling.mensagem.toLowerCase().includes('token') || resultadoBling.mensagem.toLowerCase().includes('expir') || resultadoBling.mensagem.toLowerCase().includes('401')) && (
+                            <div className="pt-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (empresa.blingClientId && empresa.blingClientSecret) {
+                                    localStorage.setItem('bling_oauth_pending_empresa_id', empresa.id);
+                                    localStorage.setItem('bling_client_id', empresa.blingClientId);
+                                    localStorage.setItem('bling_client_secret', empresa.blingClientSecret);
+                                    window.location.href = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${empresa.blingClientId}&state=${empresa.id}`;
+                                  } else {
+                                    alert('Volte à tela inicial de Empresas e clique em "⚡ Ativar Bling" para reconectar com suas credenciais.');
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white shadow-sm transition active:scale-95 cursor-pointer"
+                              >
+                                <RefreshCw className="w-3.5 h-3.5" />
+                                <span>⚡ Reconectar Bling Agora (1 Clique)</span>
+                              </button>
+                            </div>
+                          )}
+
                           {resultadoBling.sucesso && resultadoBling.idNotaBling && (
                             <div className="pt-2 mt-2 border-t border-emerald-200 dark:border-emerald-800 flex items-center justify-between font-mono text-[11px]">
                               <span>ID Bling: <strong>{resultadoBling.idNotaBling}</strong></span>
@@ -818,6 +1111,8 @@ export const SalesView: React.FC<SalesViewProps> = ({
             </div>
           </div>
         </div>
+        </>
+        )}
       </div>
 
       {/* Modal Adicionar Produto do Catálogo */}

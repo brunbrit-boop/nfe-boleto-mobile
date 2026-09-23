@@ -50,7 +50,9 @@ export interface EmpresaTenant {
   blingClientSecret?: string;
   blingAccessToken: string;
   blingRefreshToken?: string;
+  blingTokenExpiresAt?: number;
   isBlingConectado: boolean;
+  isBlingExpirado?: boolean;
   ultimaSincronizacao?: string;
 
   // Universo Bancário
@@ -68,9 +70,23 @@ export interface EmpresaTenant {
     mensagem?: string;
   };
   
+  // Sincronização em Lote
+  statusSincronizacao?: StatusSincronizacao;
+  
   // Customização Visual
   corAvatar?: string;
   criadoEm: string;
+}
+
+export interface StatusSincronizacao {
+  emAndamento: boolean;
+  etapaAtual?: string;
+  progresso?: number; // 0 a 100
+  mensagem?: string;
+  concluidoEm?: string;
+  totalProdutos?: number;
+  totalClientes?: number;
+  erro?: string;
 }
 
 export interface ClientProfile {
@@ -85,6 +101,7 @@ export interface ClientProfile {
 
 export interface ProductItem {
   id: string;
+  codigo?: string;
   descricao: string;
   quantidade: number;
   unidade: string;
@@ -126,6 +143,7 @@ export interface NFeData {
   parcelas: Installment[];
   banco: BankProvider;
   linkDanfe?: string;
+  informacoesComplementares?: string;
 }
 
 export interface ChatMessage {
@@ -254,3 +272,49 @@ export interface ResumoFinanceiro {
   totalVencido: number;
   qtdRegistros: number;
 }
+
+/* =========================================================
+   Grupos de Clientes & Orçamentos em Lote com IA
+========================================================= */
+
+export interface GrupoProdutos {
+  id: string;
+  empresaId: string;
+  nome: string;
+  descricao?: string;
+  produtosCodigos: string[]; // Códigos ou IDs dos produtos pertencentes a este grupo
+  criadoEm: string;
+  atualizadoEm: string;
+}
+
+export interface GrupoClienteItem {
+  clienteId: number;
+  nome: string;
+  fantasia?: string;
+  numeroDocumento: string;
+  cidade?: string;
+  uf?: string;
+  telefone?: string;
+  email?: string;
+  valorAlvo: number;
+  filtroFoco?: string;
+  grupoProdutoId?: string; // Vinculo opcional com um grupo de produtos especifico
+  status: 'pendente' | 'gerando' | 'gerado' | 'erro';
+  ofertaGerada?: any; // OfertaGeradaResult
+  nfeEmitida?: NFeData;
+  erro?: string;
+}
+
+export interface GrupoClientes {
+  id: string;
+  empresaId: string;
+  nome: string;
+  descricao?: string;
+  valorPadrao: number;
+  filtroPadrao?: string;
+  grupoProdutoPadraoId?: string; // Vinculo padrao para todos do grupo
+  clientes: GrupoClienteItem[];
+  criadoEm: string;
+  atualizadoEm: string;
+}
+

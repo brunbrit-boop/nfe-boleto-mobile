@@ -98,10 +98,18 @@ export const RegistrationView: React.FC<RegistrationViewProps> = ({
                   <span className="text-gray-400">Integração Bling:</span>
                   <span
                     className={`font-semibold ${
-                      emp.isBlingConectado ? 'text-emerald-500' : 'text-amber-500'
+                      emp.isBlingExpirado
+                        ? 'text-rose-500'
+                        : emp.isBlingConectado
+                        ? 'text-emerald-500'
+                        : 'text-amber-500'
                     }`}
                   >
-                    {emp.isBlingConectado ? '🟢 Conectado' : '🟡 Pendente'}
+                    {emp.isBlingExpirado
+                      ? '⚠️ Token Expirado'
+                      : emp.isBlingConectado
+                      ? '🟢 Conectado'
+                      : '🟡 Pendente'}
                   </span>
                 </div>
               </div>

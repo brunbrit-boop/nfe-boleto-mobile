@@ -114,6 +114,7 @@ export function gerarOfertaComIA(
     if (totalAcumulado + valorItem <= limiteMaximo) {
       itensCompostos.set(prod.id, {
         id: prod.id,
+        codigo: prod.codigo,
         descricao: prod.descricao,
         quantidade: qtdSugerida,
         unidade: prod.unidade,
@@ -147,6 +148,7 @@ export function gerarOfertaComIA(
     if (totalAcumulado + valorItem <= limiteMaximo) {
       itensCompostos.set(prod.id, {
         id: prod.id,
+        codigo: prod.codigo,
         descricao: prod.descricao,
         quantidade: qtdAcessorio,
         unidade: prod.unidade,
@@ -223,12 +225,31 @@ export function converterPedidoParaNFeRascunho(
   itens: PedidoItemVenda[],
   empresa: EmpresaTenant,
   banco: BankProvider = 'inter',
-  quantidadeParcelas: number = 1
+  quantidadeParcelas: number = 1,
+  intervaloDias: number = 15,
+  primeiroVencimento?: string
 ): NFeData {
   const numeroNFe = String(Math.floor(1000 + Math.random() * 9000));
   const valorTotal = itens.reduce((acc, it) => acc + it.valorTotal, 0);
 
-  const parcelas = calcularDivisaoParcelas(valorTotal, quantidadeParcelas, banco);
+  let dataPrimeiroVenc: Date | undefined;
+  if (primeiroVencimento && /^\d{4}-\d{2}-\d{2}$/.test(primeiroVencimento)) {
+    const [ano, mes, dia] = primeiroVencimento.split('-').map(Number);
+    dataPrimeiroVenc = new Date(ano, mes - 1, dia);
+  }
+
+  const parcelas = calcularDivisaoParcelas(
+    valorTotal,
+    quantidadeParcelas,
+    banco,
+    intervaloDias,
+    dataPrimeiroVenc
+  );
+
+  const parcelasDescricoes = parcelas.map(
+    (p, idx) => `Parcela ${idx + 1}/${quantidadeParcelas}: ${p.dataVencimentoFormatada} (${formatCurrency(p.valor)})`
+  );
+  const informacoesComplementares = `Condições de Pagamento: ${parcelasDescricoes.join(' | ')}`;
   const dataHoje = new Date().toISOString().split('T')[0];
 
   const emitente: CompanyProfile = {
@@ -274,5 +295,6 @@ export function converterPedidoParaNFeRascunho(
     quantidadeParcelas,
     parcelas,
     banco,
+    informacoesComplementares,
   };
 }

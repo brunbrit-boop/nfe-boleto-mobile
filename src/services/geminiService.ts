@@ -205,6 +205,7 @@ Retorne ESTRITAMENTE um objeto JSON válido (sem blocos markdown) com a seguinte
           const itemTotal = Number((qtd * prod.precoUnitario).toFixed(2));
           itensCompostos.push({
             id: prod.id,
+            codigo: prod.codigo,
             descricao: prod.descricao,
             quantidade: qtd,
             unidade: prod.unidade,

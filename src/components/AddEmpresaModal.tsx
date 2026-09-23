@@ -1,9 +1,6 @@
 import React, { useState } from 'react';
-import { X, Building2, Sparkles, Check, AlertCircle, Loader2 } from 'lucide-react';
-import type { EmpresaTenant, BankProvider } from '../types';
-import { BANKS } from '../utils/financeEngine';
-import { obterDadosEmpresaBling } from '../services/blingService';
-import { BLING_DEFAULT_CLIENT_ID } from '../utils/blingApi';
+import { X, Building2, Sparkles, ShieldCheck, Eye, EyeOff, ArrowRight, LogOut } from 'lucide-react';
+import type { EmpresaTenant } from '../types';
 
 interface AddEmpresaModalProps {
   onClose: () => void;
@@ -14,371 +11,268 @@ export const AddEmpresaModal: React.FC<AddEmpresaModalProps> = ({
   onClose,
   onAddEmpresa,
 }) => {
-  const [token, setToken] = useState('');
-  const [clientId, setClientId] = useState(BLING_DEFAULT_CLIENT_ID);
+  const [linkOuClientId, setLinkOuClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
-  const [bancoPadrao, setBancoPadrao] = useState<BankProvider>('inter');
+  const [showSecret, setShowSecret] = useState(false);
+  const [nomeOpcional, setNomeOpcional] = useState('');
+  const [showManual, setShowManual] = useState(false);
 
-  // Dados cadastrais (preenchidos manualmente ou puxados da API do Bling)
-  const [razaoSocial, setRazaoSocial] = useState('');
-  const [nomeFantasia, setNomeFantasia] = useState('');
-  const [cnpj, setCnpj] = useState('');
-  const [inscricaoEstadual, setInscricaoEstadual] = useState('');
-  const [cidade, setCidade] = useState('');
-  const [uf, setUf] = useState('');
-  const [logradouro, setLogradouro] = useState('');
-  const [numero, setNumero] = useState('');
-  const [bairro, setBairro] = useState('');
-  const [cep, setCep] = useState('');
+  const [empresaId] = useState<string>(() => `emp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
 
-  const [isLoadingBling, setIsLoadingBling] = useState(false);
-  const [blingFeedback, setBlingFeedback] = useState<{ tipo: 'sucesso' | 'erro'; mensagem: string } | null>(null);
+  // Extrai o client_id caso o usuário tenha colado a URL completa de convite
+  const extrairClientId = (input: string): string => {
+    const trimmed = input.trim();
+    if (!trimmed) return '';
+    if (trimmed.includes('client_id=')) {
+      try {
+        const url = new URL(trimmed);
+        return url.searchParams.get('client_id') || trimmed;
+      } catch {
+        const match = trimmed.match(/[?&]client_id=([^&]+)/);
+        return match ? match[1] : trimmed;
+      }
+    }
+    return trimmed;
+  };
 
-  // Puxa dados automaticamente da API v3 do Bling
-  const handlePuxarDadosBling = async () => {
-    const tokenParaUsar = token.trim();
-    if (!tokenParaUsar) {
-      setBlingFeedback({
-        tipo: 'erro',
-        mensagem: 'Informe o Token de Acesso do Bling para consultar os dados automaticamente.',
-      });
+  const clientIdDetectado = extrairClientId(linkOuClientId);
+
+  // Inicia o fluxo de autorização no Bling diretamente com o Link e o Secret
+  const handleConectarBling = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const cid = clientIdDetectado;
+    const sec = clientSecret.trim();
+
+    if (!cid) {
+      alert('Por favor, cole o Link de Convite ou o Client ID da sua empresa no Bling.');
       return;
     }
 
-    setIsLoadingBling(true);
-    setBlingFeedback(null);
-
-    try {
-      const res = await obterDadosEmpresaBling(tokenParaUsar);
-      if (res.success) {
-        if (res.razaoSocial) setRazaoSocial(res.razaoSocial);
-        if (res.nomeFantasia) setNomeFantasia(res.nomeFantasia);
-        if (res.cnpj) setCnpj(res.cnpj);
-        if (res.inscricaoEstadual) setInscricaoEstadual(res.inscricaoEstadual);
-        if (res.cidade) setCidade(res.cidade);
-        if (res.uf) setUf(res.uf);
-        if (res.logradouro) setLogradouro(res.logradouro);
-        if (res.numero) setNumero(res.numero);
-        if (res.bairro) setBairro(res.bairro);
-        if (res.cep) setCep(res.cep);
-
-        setBlingFeedback({
-          tipo: 'sucesso',
-          mensagem: res.mensagem || 'Dados cadastrais extraídos com sucesso do Bling!',
-        });
-      } else {
-        setBlingFeedback({
-          tipo: 'erro',
-          mensagem: res.mensagem || 'Não foi possível extrair dados automaticamente. Você pode preencher manualmente abaixo.',
-        });
-      }
-    } catch (err: any) {
-      setBlingFeedback({
-        tipo: 'erro',
-        mensagem: err.message || 'Erro ao conectar à API do Bling.',
-      });
-    } finally {
-      setIsLoadingBling(false);
+    if (!sec) {
+      alert('Por favor, cole o Client Secret gerado no painel do Bling.');
+      return;
     }
-  };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+    // Registra a empresa pendente com seu ID, Client ID e Client Secret
+    const rawList = localStorage.getItem('nfe_empresas_list');
+    let lista: EmpresaTenant[] = [];
+    if (rawList) {
+      try {
+        lista = JSON.parse(rawList);
+      } catch {}
+    }
 
-    const nomeFinal = nomeFantasia.trim() || razaoSocial.trim() || 'Nova Empresa';
-    const razaoFinal = razaoSocial.trim() || nomeFinal;
-
-    const cores = ['blue', 'emerald', 'indigo', 'purple', 'amber', 'rose'];
-    const corAvatar = cores[Math.floor(Math.random() * cores.length)];
-
-    const novaEmpresa: EmpresaTenant = {
-      id: `emp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-      razaoSocial: razaoFinal,
-      nomeFantasia: nomeFinal,
-      cnpj: cnpj.trim(),
-      inscricaoEstadual: inscricaoEstadual.trim(),
-      logradouro: logradouro.trim(),
-      numero: numero.trim(),
-      bairro: bairro.trim(),
-      cidade: cidade.trim() || 'São Paulo',
-      uf: uf.trim().toUpperCase() || 'SP',
-      cep: cep.trim(),
+    const preCadastro: EmpresaTenant = {
+      id: empresaId,
+      razaoSocial: nomeOpcional.trim() || 'Aguardando Bling...',
+      nomeFantasia: nomeOpcional.trim() || 'Nova Empresa Bling',
+      cnpj: '00.000.000/0001-00',
+      cidade: 'São Paulo',
+      uf: 'SP',
+      bancoPadrao: 'inter',
+      corAvatar: 'emerald',
       regimeTributario: 'Simples Nacional',
       certificadoA1Valido: true,
-
-      blingClientId: clientId.trim(),
-      blingClientSecret: clientSecret.trim(),
-      blingAccessToken: token.trim(),
-      isBlingConectado: Boolean(token.trim()),
-      ultimaSincronizacao: new Date().toISOString(),
-
-      bancoPadrao,
-      corAvatar,
       criadoEm: new Date().toISOString(),
+      blingClientId: cid,
+      blingClientSecret: sec,
+      blingAccessToken: '',
+      isBlingConectado: false,
+    };
+
+    lista.push(preCadastro);
+    localStorage.setItem('nfe_empresas_list', JSON.stringify(lista));
+
+    // Salva referências para o retorno do OAuth
+    localStorage.setItem('bling_oauth_pending_empresa_id', empresaId);
+    localStorage.setItem('bling_client_id', cid);
+    localStorage.setItem('bling_client_secret', sec);
+
+    // Redireciona para o OAuth oficial do Bling com o state amarrado à empresa
+    const redirectUrl = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${cid}&state=${empresaId}`;
+    window.location.href = redirectUrl;
+  };
+
+  // Criação manual alternativa sem o Bling
+  const handleCriarManual = () => {
+    const nomeFinal = nomeOpcional.trim() || 'Nova Empresa';
+    const novaEmpresa: EmpresaTenant = {
+      id: empresaId,
+      razaoSocial: nomeFinal,
+      nomeFantasia: nomeFinal,
+      cnpj: '00.000.000/0001-00',
+      cidade: 'São Paulo',
+      uf: 'SP',
+      bancoPadrao: 'inter',
+      corAvatar: 'blue',
+      regimeTributario: 'Simples Nacional',
+      certificadoA1Valido: true,
+      criadoEm: new Date().toISOString(),
+      blingAccessToken: '',
+      isBlingConectado: false,
     };
 
     onAddEmpresa(novaEmpresa);
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-900/60 backdrop-blur-sm overflow-y-auto animate-fade-in">
-      <div className="bg-white text-slate-900 w-full max-w-lg rounded-2xl border border-slate-200 shadow-2xl overflow-hidden my-auto flex flex-col max-h-[92vh]">
-        {/* Header */}
-        <div className="px-5 py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 text-white flex items-center justify-between shrink-0 shadow-sm">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-white/10 backdrop-blur-md flex items-center justify-center">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+      <div className="bg-white dark:bg-[#10221c] text-slate-900 dark:text-white w-full max-w-md rounded-2xl border border-slate-200 dark:border-[#1a382e] shadow-2xl overflow-hidden flex flex-col">
+        {/* Header Compacto */}
+        <div className="px-5 py-4 bg-gradient-to-r from-emerald-600 to-teal-700 text-white flex items-center justify-between shrink-0 shadow-sm">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-white/10 backdrop-blur-md flex items-center justify-center shadow-inner">
               <Building2 className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h2 className="text-sm font-bold leading-tight">Conectar Nova Empresa (Bling)</h2>
-              <p className="text-[11px] text-blue-100/90 leading-tight">Adicione um novo CNPJ ao seu painel</p>
+              <h2 className="text-sm font-bold leading-tight">Adicionar Empresa via Bling</h2>
+              <p className="text-[11px] text-emerald-100/90 leading-tight">
+                Conexão direta com 1 clique pelo seu aplicativo do Bling
+              </p>
             </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition"
+            className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition cursor-pointer"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        {/* Formulário com Scroll */}
-        <form onSubmit={handleSubmit} className="p-5 space-y-4 overflow-y-auto flex-1">
-          {/* Sessão 1: Credenciais do Bling */}
-          <div className="bg-slate-50/80 rounded-2xl p-4 border border-slate-200/90 space-y-3">
+        {/* Formulário Enxuto com apenas 2 campos */}
+        <form onSubmit={handleConectarBling} className="p-5 space-y-4">
+          <div className="bg-slate-50 dark:bg-[#162f27] rounded-xl p-4 border border-slate-200/90 dark:border-[#214739] space-y-3.5">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <span>🔑</span> Credenciais da Conta Bling
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-500" />
+                <span>Dados de Conexão do Bling</span>
               </span>
-              <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
-                API v3
+              <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300">
+                OAuth 2.0
               </span>
             </div>
 
+            {/* Campo 1: Link de Convite do Bling */}
             <div>
-              <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                Token de Acesso do Bling (Bearer Token)
+              <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                Link de convite do Bling <span className="text-emerald-600 font-normal">(ou Client ID)</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={linkOuClientId}
+                  onChange={(e) => setLinkOuClientId(e.target.value)}
+                  placeholder="Cole aqui o Link de convite gerado no Bling..."
+                  required
+                  className="w-full text-xs font-mono bg-white dark:bg-[#10221c] text-slate-800 dark:text-slate-100 px-3 py-2 rounded-xl border border-slate-200 dark:border-[#214739] focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              {clientIdDetectado && (
+                <p className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1 flex items-center gap-1 font-mono truncate">
+                  <span>✓ Client ID detectado:</span>
+                  <span className="font-bold truncate">{clientIdDetectado}</span>
+                </p>
+              )}
+            </div>
+
+            {/* Campo 2: Client Secret */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                  Client Secret
+                </label>
+                <span className="text-[10px] text-slate-400">Chave secreta do seu aplicativo</span>
+              </div>
+              <div className="relative">
+                <input
+                  type={showSecret ? 'text' : 'password'}
+                  value={clientSecret}
+                  onChange={(e) => setClientSecret(e.target.value)}
+                  placeholder="Cole aqui o Client Secret do Bling..."
+                  required
+                  className="w-full text-xs font-mono bg-white dark:bg-[#10221c] text-slate-800 dark:text-slate-100 px-3 py-2 pr-9 rounded-xl border border-slate-200 dark:border-[#214739] focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowSecret(!showSecret)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                >
+                  {showSecret ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Dica e Botão de Logout no Bling */}
+            <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-800/40 text-[11px] text-amber-900 dark:text-amber-200 space-y-2">
+              <p className="leading-relaxed">
+                ⚠️ <strong>Atenção à sessão no Bling:</strong> Se o seu navegador ainda estiver com o site do Bling logado na <em>Empresa 1</em>, o Bling tentará autorizar a Empresa 1.
+              </p>
+              <div className="flex items-center gap-2 pt-0.5">
+                <a
+                  href="https://www.bling.com.br/logout.php"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-bold bg-white dark:bg-amber-900/50 hover:bg-amber-100 text-amber-900 dark:text-amber-100 rounded-lg border border-amber-300 dark:border-amber-700 shadow-sm transition"
+                >
+                  <LogOut className="w-3 h-3 text-amber-600" />
+                  <span>🚪 Deslogar da conta atual no Bling</span>
+                </a>
+              </div>
+            </div>
+          </div>
+
+          {/* Nome Opcional (caso queira adiantar) */}
+          {showManual ? (
+            <div className="p-3 bg-slate-50 dark:bg-[#162f27] rounded-xl border border-slate-200 dark:border-[#214739]">
+              <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400 block mb-1">
+                Nome ou Apelido da Empresa (Opcional)
               </label>
               <input
                 type="text"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="Cole o access_token gerado para esta empresa..."
-                className="w-full text-xs font-mono bg-white text-slate-800 px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                value={nomeOpcional}
+                onChange={(e) => setNomeOpcional(e.target.value)}
+                placeholder="Ex: Minha Empresa Filial"
+                className="w-full text-xs bg-white dark:bg-[#10221c] text-slate-800 dark:text-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-[#214739] focus:outline-none"
               />
             </div>
-
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">
-                  Client ID (Opcional)
-                </label>
-                <input
-                  type="text"
-                  value={clientId}
-                  onChange={(e) => setClientId(e.target.value)}
-                  placeholder="ID da aplicação Bling"
-                  className="w-full text-[11px] font-mono bg-white text-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold text-slate-500 block mb-1">
-                  Client Secret (Opcional)
-                </label>
-                <input
-                  type="password"
-                  value={clientSecret}
-                  onChange={(e) => setClientSecret(e.target.value)}
-                  placeholder="Secret da aplicação"
-                  className="w-full text-[11px] font-mono bg-white text-slate-800 px-2.5 py-1.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-              </div>
-            </div>
-
-            {/* Botão de Puxar Automaticamente */}
+          ) : (
             <button
               type="button"
-              onClick={handlePuxarDadosBling}
-              disabled={isLoadingBling || !token.trim()}
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl font-bold text-xs bg-gradient-to-r from-blue-600 to-emerald-600 hover:from-blue-700 hover:to-emerald-700 text-white shadow-sm transition active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={() => setShowManual(true)}
+              className="text-[10px] text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:underline cursor-pointer block text-center w-full"
             >
-              {isLoadingBling ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Consultando dados no Bling...</span>
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-4 h-4 text-amber-300" />
-                  <span>Puxar Dados da Empresa do Bling Automaticamente</span>
-                </>
-              )}
+              + Deseja definir um apelido ou cadastrar sem o Bling?
             </button>
-
-            {blingFeedback && (
-              <div
-                className={`p-2.5 rounded-xl text-xs flex items-start gap-2 ${
-                  blingFeedback.tipo === 'sucesso'
-                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                    : 'bg-amber-50 text-amber-800 border border-amber-200'
-                }`}
-              >
-                {blingFeedback.tipo === 'sucesso' ? (
-                  <Check className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-                ) : (
-                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
-                )}
-                <span>{blingFeedback.mensagem}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Sessão 2: Universo Bancário da Empresa */}
-          <div className="bg-slate-50/80 rounded-2xl p-4 border border-slate-200/90 space-y-2">
-            <label className="text-xs font-bold text-slate-800 block">
-              🏦 Banco Emissor Padrão desta Empresa (Boletos & Pix)
-            </label>
-            <p className="text-[11px] text-slate-500">
-              Cada empresa opera com seu próprio banco para emissão de cobranças.
-            </p>
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              {Object.values(BANKS).map((banco) => (
-                <button
-                  key={banco.id}
-                  type="button"
-                  onClick={() => setBancoPadrao(banco.id)}
-                  className={`flex items-center gap-2 p-2.5 rounded-xl border text-left transition ${
-                    bancoPadrao === banco.id
-                      ? 'bg-white border-blue-500 ring-2 ring-blue-500/20 shadow-sm'
-                      : 'bg-white/60 border-slate-200 hover:bg-white text-slate-700'
-                  }`}
-                >
-                  <span className="text-base">{banco.logoIcon}</span>
-                  <div>
-                    <span className="text-xs font-bold block text-slate-900 leading-tight">
-                      {banco.name}
-                    </span>
-                    <span className="text-[10px] text-slate-400 block">
-                      Cód: {banco.code}
-                    </span>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Sessão 3: Dados Cadastrais */}
-          <div className="space-y-3">
-            <span className="text-xs font-bold text-slate-800 block">
-              🏢 Dados Cadastrais da Empresa (Pré-preenchidos ou Manuais)
-            </span>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                  Nome Fantasia *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={nomeFantasia}
-                  onChange={(e) => setNomeFantasia(e.target.value)}
-                  placeholder="Ex: Minha Empresa Filial"
-                  className="w-full text-xs bg-white text-slate-800 px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                  Razão Social *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={razaoSocial}
-                  onChange={(e) => setRazaoSocial(e.target.value)}
-                  placeholder="Ex: Minha Empresa Comercio LTDA"
-                  className="w-full text-xs bg-white text-slate-800 px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                  CNPJ *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={cnpj}
-                  onChange={(e) => setCnpj(e.target.value)}
-                  placeholder="00.000.000/0000-00"
-                  className="w-full text-xs bg-white text-slate-800 px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                  Inscrição Estadual
-                </label>
-                <input
-                  type="text"
-                  value={inscricaoEstadual}
-                  onChange={(e) => setInscricaoEstadual(e.target.value)}
-                  placeholder="Ex: 110.829.391.002"
-                  className="w-full text-xs bg-white text-slate-800 px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                  Cidade
-                </label>
-                <input
-                  type="text"
-                  value={cidade}
-                  onChange={(e) => setCidade(e.target.value)}
-                  placeholder="Ex: São Paulo"
-                  className="w-full text-xs bg-white text-slate-800 px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
-                />
-              </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 block mb-1">
-                  UF
-                </label>
-                <input
-                  type="text"
-                  maxLength={2}
-                  value={uf}
-                  onChange={(e) => setUf(e.target.value.toUpperCase())}
-                  placeholder="SP"
-                  className="w-full text-xs bg-white text-slate-800 px-3 py-2 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 uppercase"
-                />
-              </div>
-            </div>
-          </div>
+          )}
 
           {/* Botões de Ação */}
-          <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-800 hover:bg-slate-100 rounded-xl transition"
-            >
-              Cancelar
-            </button>
+          <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-100 dark:border-[#214739]">
+            {showManual ? (
+              <button
+                type="button"
+                onClick={handleCriarManual}
+                className="px-3 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-[#162f27] rounded-xl transition cursor-pointer"
+              >
+                Cadastrar sem Bling
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-3.5 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-xl transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+            )}
 
             <button
               type="submit"
-              className="px-5 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 active:scale-95 rounded-xl shadow-md shadow-blue-500/20 transition flex items-center gap-1.5"
+              className="px-5 py-2.5 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-95 rounded-xl shadow-md shadow-emerald-500/20 transition flex items-center gap-2 cursor-pointer"
             >
-              <Check className="w-4 h-4" />
-              <span>Salvar e Conectar Empresa</span>
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Conectar com 1 Clique</span>
+              <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
         </form>

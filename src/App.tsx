@@ -21,17 +21,15 @@ import { BtBusinessSuite } from './components/bt/BtBusinessSuite';
 import { criarNFeDeComando, interpretarComandoVoz } from './utils/aiParser';
 import { speechEngine } from './utils/speechEngine';
 import {
-  carregarClientesBling,
-  carregarFornecedoresBling,
-  carregarContasPagarBling,
-  carregarContasReceberBling,
-  getStoredBlingToken,
   obterDadosEmpresaBling,
+  sincronizarEmpresaBlingCompleto,
+  obterClientesCacheLocal,
+  obterFornecedoresCacheLocal,
+  obterContasPagarCacheLocal,
+  obterContasReceberCacheLocal,
 } from './services/blingService';
 import {
   exchangeBlingCodeForToken,
-  BLING_DEFAULT_CLIENT_ID,
-  BLING_DEFAULT_CLIENT_SECRET,
 } from './utils/blingApi';
 
 export const App: React.FC = () => {
@@ -46,13 +44,19 @@ export const App: React.FC = () => {
           // Limpa dados de demonstração residuais caso ainda estejam no localStorage
           const limpas = parsed.map((e: EmpresaTenant) => {
             const isDemo = e.razaoSocial?.includes('BRASIL TECH') || e.cnpj === '24.912.830/0001-52';
+            const token = e.blingAccessToken || tokenAtual;
+            const expAt = e.blingTokenExpiresAt;
+            const isExpirado = Boolean(e.isBlingExpirado || (expAt && Date.now() > expAt && !e.blingRefreshToken));
+            const isConectado = Boolean(token) && !isExpirado && e.isBlingConectado !== false;
+
             return {
               ...e,
               razaoSocial: isDemo ? 'Empresa Bling ERP' : e.razaoSocial,
               nomeFantasia: isDemo ? 'Minha Empresa' : (e.nomeFantasia || 'Minha Empresa'),
               cnpj: isDemo ? '' : (e.cnpj || ''),
-              blingAccessToken: e.blingAccessToken || tokenAtual,
-              isBlingConectado: Boolean(e.blingAccessToken || tokenAtual),
+              blingAccessToken: token,
+              isBlingConectado: isConectado,
+              isBlingExpirado: isExpirado,
             };
           });
           return limpas;
@@ -74,8 +78,8 @@ export const App: React.FC = () => {
       cep: '',
       regimeTributario: 'Simples Nacional',
       certificadoA1Valido: true,
-      blingClientId: localStorage.getItem('bling_client_id') || BLING_DEFAULT_CLIENT_ID,
-      blingClientSecret: localStorage.getItem('bling_client_secret') || '',
+      blingClientId: '',
+      blingClientSecret: '',
       blingAccessToken: tokenAtual,
       isBlingConectado: Boolean(tokenAtual),
       bancoPadrao: (localStorage.getItem('nfe_banco_padrao') as BankProvider) || 'inter',
@@ -131,9 +135,27 @@ export const App: React.FC = () => {
   // Mensagens do Chat do Robô (100% limpo, sem conteúdo fake)
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
+  // Mantém estado das empresas sincronizado quando tokens expiram ou são renovados
+  useEffect(() => {
+    const handleEmpresasUpdated = () => {
+      const raw = localStorage.getItem('nfe_empresas_list');
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setEmpresas(parsed);
+          }
+        } catch {}
+      }
+    };
+    window.addEventListener('nfe_empresas_updated', handleEmpresasUpdated);
+    return () => window.removeEventListener('nfe_empresas_updated', handleEmpresasUpdated);
+  }, []);
+
   // Sincroniza dados cadastrais reais da empresa através do endpoint oficial do Bling (/empresas/me/dados-basicos)
   const sincronizarEmpresaDoBling = async (empresaId: string, tokenParam?: string) => {
-    const token = tokenParam || localStorage.getItem('bling_access_token');
+    const targetEmpresa = empresas.find((e) => e.id === empresaId);
+    const token = (tokenParam || targetEmpresa?.blingAccessToken || '').trim();
     if (!token) return;
 
     try {
@@ -179,39 +201,82 @@ export const App: React.FC = () => {
     }
   };
 
-  // Efeito ao carregar: sincroniza imediatamente os dados reais da empresa ativa ou cadastradas
+  // Efeito ao carregar: sincroniza imediatamente os dados reais das empresas que possuem token próprio
   useEffect(() => {
     empresas.forEach((emp) => {
-      const token = emp.blingAccessToken || localStorage.getItem('bling_access_token');
-      if (token) {
-        sincronizarEmpresaDoBling(emp.id, token);
+      // Isolamento Multi-Tenant: só sincroniza se a empresa tiver seu próprio token configurado
+      if (emp.blingAccessToken && emp.blingAccessToken.trim()) {
+        sincronizarEmpresaDoBling(emp.id, emp.blingAccessToken.trim());
       }
     });
   }, []);
 
-  // Carrega dados do Bling para a empresa ativa
-  const carregarDadosBling = async (customToken?: string, empIdParam?: string, customBanco?: BankProvider) => {
-    setIsLoadingBling(true);
-    const token = customToken || empresaAtiva?.blingAccessToken || getStoredBlingToken() || '';
+  // Listener para sincronização em background e atualizações de cache
+  useEffect(() => {
+    const handleSyncUpdate = () => {
+      const saved = localStorage.getItem('nfe_empresas_list');
+      if (saved) {
+        try {
+          const list = JSON.parse(saved);
+          if (Array.isArray(list)) {
+            setEmpresas(list);
+          }
+        } catch {}
+      }
+    };
+    window.addEventListener('bling_sync_update', handleSyncUpdate);
+    window.addEventListener('storage', handleSyncUpdate);
+    return () => {
+      window.removeEventListener('bling_sync_update', handleSyncUpdate);
+      window.removeEventListener('storage', handleSyncUpdate);
+    };
+  }, []);
+
+  // Carrega dados do Bling para a empresa ativa com Local-First rigoroso
+  const carregarDadosBling = async (customToken?: string, empIdParam?: string, _customBanco?: BankProvider, forceSync: boolean = false) => {
     const empId = empIdParam || empresaAtiva?.id;
-    const banco = customBanco || empresaAtiva?.bancoPadrao || bancoAtual;
+    const token = (customToken !== undefined ? customToken : (empresaAtiva?.blingAccessToken || '')).trim();
 
-    try {
-      const [resClientes, resPagar, resReceber] = await Promise.all([
-        carregarClientesBling(token, empId),
-        carregarContasPagarBling(token, empId),
-        carregarContasReceberBling(token, empId, banco),
-      ]);
+    if (!empId) return;
 
-      setClientes(resClientes.data);
-      setContasPagar(resPagar.data);
-      setContasReceber(resReceber.data);
+    // 1. Local-First: Carrega IMEDIATAMENTE do cache local (0ms de espera e 0 requisições)
+    const clientesCache = obterClientesCacheLocal(empId);
+    const fornecedoresCache = obterFornecedoresCacheLocal(empId);
+    const pagarCache = obterContasPagarCacheLocal(empId);
+    const receberCache = obterContasReceberCacheLocal(empId);
 
-      const resFornec = await carregarFornecedoresBling(token, empId, resPagar.data);
-      setFornecedores(resFornec.data);
-    } catch {
-      // Ignora erro de rede
-    } finally {
+    setClientes(clientesCache);
+    setFornecedores(fornecedoresCache);
+    setContasPagar(pagarCache);
+    setContasReceber(receberCache);
+
+    // Se esta empresa não tem token próprio configurado, encerra
+    if (!token) {
+      setIsLoadingBling(false);
+      return;
+    }
+
+    // Se os dados locais estiverem vazios ou foi solicitada sincronização explícita:
+    const precisaSincronizar = forceSync || (clientesCache.length === 0 && pagarCache.length === 0);
+    if (precisaSincronizar) {
+      const empAlvo = empresas.find((e) => e.id === empId) || (empresaAtiva?.id === empId ? empresaAtiva : null);
+      if (empAlvo) {
+        setIsLoadingBling(true);
+        try {
+          const res = await sincronizarEmpresaBlingCompleto(empAlvo);
+          if (res.sucesso) {
+            setClientes(res.clientes);
+            setFornecedores(res.fornecedores);
+            setContasPagar(obterContasPagarCacheLocal(empId));
+            setContasReceber(obterContasReceberCacheLocal(empId));
+          }
+        } catch {
+          // Erro de rede tratado silenciosamente
+        } finally {
+          setIsLoadingBling(false);
+        }
+      }
+    } else {
       setIsLoadingBling(false);
     }
   };
@@ -236,17 +301,53 @@ export const App: React.FC = () => {
     setCompany(novoPerfil);
     setBancoAtual(empresa.bancoPadrao);
 
+    // Atualiza ou limpa as credenciais ativas do navegador estritamente para esta empresa
     if (empresa.blingAccessToken) {
       localStorage.setItem('bling_access_token', empresa.blingAccessToken);
-    }
-    if (empresa.blingClientId) {
-      localStorage.setItem('bling_client_id', empresa.blingClientId);
-    }
-    if (empresa.blingClientSecret) {
-      localStorage.setItem('bling_client_secret', empresa.blingClientSecret);
+    } else {
+      localStorage.removeItem('bling_access_token');
     }
 
-    carregarDadosBling(empresa.blingAccessToken, empresa.id, empresa.bancoPadrao);
+    if (empresa.blingClientId) {
+      localStorage.setItem('bling_client_id', empresa.blingClientId);
+    } else {
+      localStorage.removeItem('bling_client_id');
+    }
+
+    if (empresa.blingClientSecret) {
+      localStorage.setItem('bling_client_secret', empresa.blingClientSecret);
+    } else {
+      localStorage.removeItem('bling_client_secret');
+    }
+
+    if (empresa.blingRefreshToken) {
+      localStorage.setItem('bling_refresh_token', empresa.blingRefreshToken);
+    } else {
+      localStorage.removeItem('bling_refresh_token');
+    }
+
+    // Carrega instantaneamente do cache local
+    const clientesCache = obterClientesCacheLocal(empresa.id);
+    const fornecedoresCache = obterFornecedoresCacheLocal(empresa.id);
+    const pagarCache = obterContasPagarCacheLocal(empresa.id);
+    const receberCache = obterContasReceberCacheLocal(empresa.id);
+
+    setClientes(clientesCache);
+    setFornecedores(fornecedoresCache);
+    setContasPagar(pagarCache);
+    setContasReceber(receberCache);
+
+    // Se tiver token mas nunca sincronizou (cache zerado), dispara sincronização gradual em background
+    if (empresa.blingAccessToken && clientesCache.length === 0 && pagarCache.length === 0) {
+      sincronizarEmpresaBlingCompleto(empresa).then((res) => {
+        if (res.sucesso) {
+          setClientes(res.clientes);
+          setFornecedores(res.fornecedores);
+          setContasPagar(obterContasPagarCacheLocal(empresa.id));
+          setContasReceber(obterContasReceberCacheLocal(empresa.id));
+        }
+      });
+    }
   };
 
   // Adiciona nova empresa na lista
@@ -272,38 +373,109 @@ export const App: React.FC = () => {
     }
   };
 
-  // Monitora retorno OAuth do Bling
+  // Monitora retorno OAuth do Bling e vincula estritamente à empresa alvo (via state ou pending ID)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
+    const stateParam = params.get('state');
+
     if (code) {
       localStorage.setItem('bling_auth_code', code);
-      const clientSecret = localStorage.getItem('bling_client_secret') || BLING_DEFAULT_CLIENT_SECRET;
-      const clientId = localStorage.getItem('bling_client_id') || BLING_DEFAULT_CLIENT_ID;
+      const pendingEmpresaId = localStorage.getItem('bling_oauth_pending_empresa_id');
+      const targetEmpresaId = stateParam && stateParam !== 'login' && stateParam !== 'cb9768157cff9aef9675a82bdd68c5e4' 
+        ? stateParam 
+        : (pendingEmpresaId || empresaAtivaId);
 
-      console.log('Trocando código de autorização por token de acesso no Bling...');
-      exchangeBlingCodeForToken(code, clientId, clientSecret).then((res) => {
+      localStorage.removeItem('bling_oauth_pending_empresa_id');
+
+      const rawList = localStorage.getItem('nfe_empresas_list');
+      let listaEmpresas: EmpresaTenant[] = [];
+      if (rawList) {
+        try {
+          listaEmpresas = JSON.parse(rawList);
+        } catch {}
+      }
+
+      const existingTarget = listaEmpresas.find((e) => e.id === targetEmpresaId) || empresas.find((e) => e.id === targetEmpresaId);
+
+      const clientSecret = existingTarget?.blingClientSecret || localStorage.getItem('bling_client_secret') || '';
+      const clientId = existingTarget?.blingClientId || localStorage.getItem('bling_client_id') || '';
+
+      console.log('Trocando código de autorização por token de acesso no Bling para a empresa:', targetEmpresaId);
+      exchangeBlingCodeForToken(code, clientId, clientSecret).then(async (res) => {
         if (res.success && res.accessToken) {
           console.log('Conta do Bling conectada com sucesso! Token gerado:', res.accessToken.slice(0, 10));
-          // Atualiza as empresas e a empresa ativa
+
+          // Busca dados cadastrais da empresa recém-conectada
+          let dadosBling: any = null;
+          try {
+            dadosBling = await obterDadosEmpresaBling(res.accessToken);
+          } catch {}
+
+          const nomeDetectado = dadosBling?.nomeFantasia || dadosBling?.razaoSocial;
+          const cnpjDetectado = dadosBling?.cnpj;
+
           setEmpresas((prev) => {
-            const atualizadas = prev.map((e, idx) => {
-              if (e.id === empresaAtivaId || idx === 0) {
+            let found = false;
+            const atualizadas = prev.map((e) => {
+              if (targetEmpresaId && e.id === targetEmpresaId) {
+                found = true;
                 return {
                   ...e,
+                  nomeFantasia: nomeDetectado || e.nomeFantasia,
+                  razaoSocial: dadosBling?.razaoSocial || e.razaoSocial,
+                  cnpj: cnpjDetectado || e.cnpj,
+                  cidade: dadosBling?.cidade || e.cidade,
+                  uf: dadosBling?.uf || e.uf,
                   blingAccessToken: res.accessToken || '',
+                  blingRefreshToken: res.refreshToken || e.blingRefreshToken,
                   blingClientId: clientId,
                   blingClientSecret: clientSecret,
+                  blingTokenExpiresAt: res.expiresAt || (Date.now() + 21600 * 1000),
                   isBlingConectado: true,
+                  ultimaSincronizacao: new Date().toISOString(),
                 };
               }
               return e;
             });
+
+            // Se for uma nova empresa que estava sendo adicionada
+            if (!found && targetEmpresaId) {
+              const nova: EmpresaTenant = {
+                id: targetEmpresaId,
+                nomeFantasia: nomeDetectado || 'Empresa Bling ERP',
+                razaoSocial: dadosBling?.razaoSocial || nomeDetectado || 'Empresa Bling ERP',
+                cnpj: cnpjDetectado || '00.000.000/0001-00',
+                cidade: dadosBling?.cidade || 'São Paulo',
+                uf: dadosBling?.uf || 'SP',
+                bancoPadrao: 'inter',
+                corAvatar: 'emerald',
+                regimeTributario: 'Simples Nacional',
+                certificadoA1Valido: true,
+                criadoEm: new Date().toISOString(),
+                blingAccessToken: res.accessToken || '',
+                blingRefreshToken: res.refreshToken,
+                blingClientId: clientId,
+                blingClientSecret: clientSecret,
+                blingTokenExpiresAt: res.expiresAt || (Date.now() + 21600 * 1000),
+                isBlingConectado: true,
+                ultimaSincronizacao: new Date().toISOString(),
+              };
+              atualizadas.push(nova);
+            }
+
             localStorage.setItem('nfe_empresas_list', JSON.stringify(atualizadas));
             return atualizadas;
           });
-          carregarDadosBling(res.accessToken);
-          alert('🎉 Sucesso! Sua conta do Bling foi autorizada e conectada com sucesso!');
+
+          // Seleciona a empresa conectada e inicia sincronização completa
+          const idParaAtivar = targetEmpresaId || empresaAtivaId;
+          if (idParaAtivar) {
+            setEmpresaAtivaId(idParaAtivar);
+            carregarDadosBling(res.accessToken, idParaAtivar, undefined, true);
+          }
+
+          alert(`🎉 Sucesso! A conta do Bling da empresa "${nomeDetectado || 'Empresa Bling'}" foi conectada com sucesso sem alterar as outras!`);
         } else {
           console.error(`Erro ao autenticar: ${res.error}`);
           alert(`Aviso ao autenticar no Bling: ${res.error}`);
@@ -485,7 +657,13 @@ export const App: React.FC = () => {
 
   const handleSaveCompany = (
     updated: CompanyProfile,
-    blingTokens?: { token: string; clientId: string; clientSecret: string }
+    blingTokens?: {
+      token: string;
+      clientId: string;
+      clientSecret: string;
+      refreshToken?: string;
+      expiresAt?: number;
+    }
   ) => {
     setCompany(updated);
     localStorage.setItem('nfe_company_profile', JSON.stringify(updated));
@@ -504,6 +682,12 @@ export const App: React.FC = () => {
             const cSec = blingTokens?.clientSecret !== undefined
               ? blingTokens.clientSecret
               : (e.blingClientSecret || localStorage.getItem('bling_client_secret') || '');
+            const rToken = blingTokens?.refreshToken !== undefined
+              ? blingTokens.refreshToken
+              : (e.blingRefreshToken || localStorage.getItem('bling_refresh_token') || '');
+            const expAt = blingTokens?.expiresAt !== undefined
+              ? blingTokens.expiresAt
+              : (e.blingTokenExpiresAt || (localStorage.getItem('bling_expires_at') ? Number(localStorage.getItem('bling_expires_at')) : undefined));
 
             return {
               ...e,
@@ -522,7 +706,10 @@ export const App: React.FC = () => {
               blingAccessToken: tokenFinal,
               blingClientId: cId,
               blingClientSecret: cSec,
+              blingRefreshToken: rToken,
+              blingTokenExpiresAt: expAt,
               isBlingConectado: Boolean(tokenFinal),
+              isBlingExpirado: false,
             };
           }
           return e;
@@ -562,7 +749,30 @@ export const App: React.FC = () => {
           onOpenAddEmpresa={() => setIsAddEmpresaOpen(true)}
           onDeleteEmpresa={handleDeleteEmpresa}
           onSyncEmpresa={async (emp) => {
-            await sincronizarEmpresaDoBling(emp.id, emp.blingAccessToken);
+            const res = await sincronizarEmpresaBlingCompleto(emp);
+            if (res.sucesso && empresaAtivaId === emp.id) {
+              setClientes(res.clientes);
+              setFornecedores(res.fornecedores);
+              setContasPagar(obterContasPagarCacheLocal(emp.id));
+              setContasReceber(obterContasReceberCacheLocal(emp.id));
+            }
+          }}
+          onDisconnectBling={(empId) => {
+            setEmpresas((prev) => {
+              const atualizadas = prev.map((e) =>
+                e.id === empId
+                  ? {
+                      ...e,
+                      blingAccessToken: '',
+                      blingRefreshToken: undefined,
+                      blingTokenExpiresAt: undefined,
+                      isBlingConectado: false,
+                    }
+                  : e
+              );
+              localStorage.setItem('nfe_empresas_list', JSON.stringify(atualizadas));
+              return atualizadas;
+            });
           }}
           onUpdateEmpresaBanco={(empId, banco) => {
             setEmpresas((prev) => {
@@ -658,6 +868,7 @@ export const App: React.FC = () => {
       {isSettingsOpen && (
         <CompanySettingsModal
           company={company}
+          empresa={empresaAtiva || undefined}
           onSave={handleSaveCompany}
           onClose={() => setIsSettingsOpen(false)}
           onBlingConnected={() => carregarDadosBling(empresaAtiva?.blingAccessToken, empresaAtiva?.id, bancoAtual)}

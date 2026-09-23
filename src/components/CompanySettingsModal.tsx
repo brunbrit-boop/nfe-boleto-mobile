@@ -1,18 +1,29 @@
 import React, { useState } from 'react';
-import { X, Building2, ShieldCheck, Key, Save, Check } from 'lucide-react';
-import type { CompanyProfile } from '../types';
-import { setBlingAccessTokenDirect, testBlingConnection, BLING_DEFAULT_CLIENT_ID } from '../utils/blingApi';
+import { X, Building2, ShieldCheck, Key, Save, Check, RefreshCw } from 'lucide-react';
+import type { CompanyProfile, EmpresaTenant } from '../types';
+import { setBlingAccessTokenDirect, testBlingConnection, renovarTokenBling } from '../utils/blingApi';
 import { obterDiagnosticoBling } from '../services/blingService';
 
 interface CompanySettingsModalProps {
   company: CompanyProfile;
-  onSave: (updated: CompanyProfile, blingTokens?: { token: string; clientId: string; clientSecret: string }) => void;
+  empresa?: EmpresaTenant;
+  onSave: (
+    updatedCompany: CompanyProfile,
+    blingConfig?: {
+      token: string;
+      clientId: string;
+      clientSecret: string;
+      refreshToken?: string;
+      expiresAt?: number;
+    }
+  ) => void;
   onClose: () => void;
   onBlingConnected?: () => void;
 }
 
 export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
   company,
+  empresa,
   onSave,
   onClose,
   onBlingConnected,
@@ -23,16 +34,25 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
     localStorage.getItem('gemini_api_key') || ''
   );
   const [blingAccessToken, setBlingAccessToken] = useState(
-    localStorage.getItem('bling_access_token') || ''
+    empresa?.blingAccessToken || ''
+  );
+  const [blingRefreshToken, setBlingRefreshToken] = useState(
+    empresa?.blingRefreshToken || ''
   );
   const [blingClientId, setBlingClientId] = useState(
-    localStorage.getItem('bling_client_id') || BLING_DEFAULT_CLIENT_ID
+    empresa?.blingClientId || ''
   );
   const [blingClientSecret, setBlingClientSecret] = useState(
-    localStorage.getItem('bling_client_secret') || ''
+    empresa?.blingClientSecret || ''
   );
+  const [blingExpiresAt, setBlingExpiresAt] = useState<number | undefined>(
+    empresa?.blingTokenExpiresAt
+  );
+
   const [isTestingBling, setIsTestingBling] = useState(false);
   const [testBlingResult, setTestBlingResult] = useState<{ success: boolean; message: string } | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshFeedback, setRefreshFeedback] = useState<{ success: boolean; message: string } | null>(null);
   const [diagnostico, setDiagnostico] = useState<{ ok: boolean; contatosCount?: number; contatosRaw?: any; error?: string } | null>(null);
   const [isRunningDiag, setIsRunningDiag] = useState(false);
 
@@ -70,9 +90,50 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
     }
   };
 
+  const handleRenovarToken = async () => {
+    if (!blingRefreshToken.trim()) {
+      setRefreshFeedback({
+        success: false,
+        message: 'Informe o Refresh Token para realizar a renovação de 6 horas.',
+      });
+      return;
+    }
+    setIsRefreshing(true);
+    setRefreshFeedback(null);
+    try {
+      const res = await renovarTokenBling(blingRefreshToken, blingClientId, blingClientSecret);
+      if (res.success && res.accessToken) {
+        setBlingAccessToken(res.accessToken);
+        if (res.refreshToken) setBlingRefreshToken(res.refreshToken);
+        if (res.expiresAt) setBlingExpiresAt(res.expiresAt);
+        setRefreshFeedback({
+          success: true,
+          message: 'Token renovado com sucesso! Mais 6 horas de conexão garantidas.',
+        });
+        if (onBlingConnected) onBlingConnected();
+      } else {
+        setRefreshFeedback({
+          success: false,
+          message: res.error || 'Não foi possível renovar o token. Verifique as credenciais.',
+        });
+      }
+    } catch (err: any) {
+      setRefreshFeedback({
+        success: false,
+        message: err.message || 'Erro na renovação do token',
+      });
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   const handleDisconnectBling = () => {
     setBlingAccessTokenDirect('');
     setBlingAccessToken('');
+    setBlingRefreshToken('');
+    setBlingExpiresAt(undefined);
+    localStorage.removeItem('bling_refresh_token');
+    localStorage.removeItem('bling_expires_at');
     setTestBlingResult({
       success: false,
       message: 'Conta do Bling desconectada com sucesso.',
@@ -88,14 +149,34 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
       localStorage.removeItem('gemini_api_key');
     }
 
-    setBlingAccessTokenDirect(blingAccessToken);
-    if (blingClientId) localStorage.setItem('bling_client_id', blingClientId);
-    if (blingClientSecret) localStorage.setItem('bling_client_secret', blingClientSecret);
+    if (blingAccessToken.trim()) {
+      localStorage.setItem('bling_access_token', blingAccessToken.trim());
+    } else {
+      localStorage.removeItem('bling_access_token');
+    }
+    if (blingClientId.trim()) {
+      localStorage.setItem('bling_client_id', blingClientId.trim());
+    }
+    if (blingClientSecret.trim()) {
+      localStorage.setItem('bling_client_secret', blingClientSecret.trim());
+    }
+    if (blingRefreshToken.trim()) {
+      localStorage.setItem('bling_refresh_token', blingRefreshToken.trim());
+    } else {
+      localStorage.removeItem('bling_refresh_token');
+    }
+    if (blingExpiresAt) {
+      localStorage.setItem('bling_expires_at', String(blingExpiresAt));
+    } else {
+      localStorage.removeItem('bling_expires_at');
+    }
 
     onSave(formData, {
       token: blingAccessToken.trim(),
       clientId: blingClientId.trim(),
       clientSecret: blingClientSecret.trim(),
+      refreshToken: blingRefreshToken.trim(),
+      expiresAt: blingExpiresAt,
     });
     setSavedAlert(true);
     if (onBlingConnected && blingAccessToken) {
@@ -278,6 +359,53 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
                 </p>
               </div>
 
+              {/* Campo de Refresh Token (30 dias / Auto-Renovação) */}
+              <div className="bg-purple-50/60 border border-purple-200/80 rounded-xl p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-purple-950 flex items-center gap-1.5">
+                    <span>🔄</span> Refresh Token do Bling (Validade: 30 dias)
+                  </label>
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">
+                    Auto-Renovação Contínua
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={blingRefreshToken}
+                    onChange={(e) => setBlingRefreshToken(e.target.value)}
+                    placeholder="Cole seu Refresh Token do Bling aqui..."
+                    className="flex-1 bg-white border border-purple-300 rounded-lg px-3 py-2 text-slate-900 text-xs font-mono focus:outline-none focus:ring-2 focus:ring-purple-500 font-semibold"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleRenovarToken}
+                    disabled={isRefreshing || !blingRefreshToken}
+                    className="px-3.5 py-2 rounded-lg text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white transition flex items-center gap-1.5 shadow-sm disabled:opacity-50 cursor-pointer shrink-0"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                    <span>{isRefreshing ? 'Renovando...' : 'Renovar Token'}</span>
+                  </button>
+                </div>
+
+                {refreshFeedback && (
+                  <div
+                    className={`p-2 rounded-lg text-[11px] font-medium border flex items-center gap-1.5 animate-fade-in ${
+                      refreshFeedback.success
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        : 'bg-rose-50 text-rose-800 border-rose-200'
+                    }`}
+                  >
+                    <span>{refreshFeedback.success ? '✅' : '❌'}</span>
+                    <span>{refreshFeedback.message}</span>
+                  </div>
+                )}
+
+                <p className="text-[10px] text-purple-800/80 leading-relaxed">
+                  Com o <strong>Refresh Token</strong> salvo nesta empresa, a aplicação renovará o acesso automaticamente a cada 6 horas, sem que você precise digitar ou gerar chaves novamente por 30 dias!
+                </p>
+              </div>
+
               {/* Informação sobre Client ID e Secret */}
               <div className="bg-blue-50/70 border border-blue-200 rounded-xl p-2.5 text-slate-700 text-[11px] leading-relaxed">
                 <span className="font-bold text-blue-900 block mb-0.5">ℹ️ Ou conecte via Aplicativo (OAuth 2.0):</span>
@@ -317,9 +445,11 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
                 <button
                   type="button"
                   onClick={() => {
+                    const targetId = empresa?.id || 'emp_default';
+                    localStorage.setItem('bling_oauth_pending_empresa_id', targetId);
                     if (blingClientId) localStorage.setItem('bling_client_id', blingClientId);
                     if (blingClientSecret) localStorage.setItem('bling_client_secret', blingClientSecret);
-                    const authUrl = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${blingClientId}&state=cb9768157cff9aef9675a82bdd68c5e4`;
+                    const authUrl = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${blingClientId}&state=${targetId}`;
                     window.location.href = authUrl;
                   }}
                   className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs shadow-md shadow-emerald-600/20 transition flex items-center justify-center gap-2 active:scale-95 cursor-pointer"

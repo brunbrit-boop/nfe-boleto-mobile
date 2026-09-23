@@ -222,7 +222,9 @@ export const NFeModal: React.FC<NFeModalProps> = ({ nfe, onClose }) => {
             <span className="font-bold block uppercase text-[8px] text-gray-600 mb-0.5">DADOS ADICIONAIS / INFORMAÇÕES COMPLEMENTARES</span>
             <p>
               Documento emitido por ME ou EPP optante pelo Simples Nacional. Não gera direito a crédito fiscal de IPI.
-              Emissão automática autorizada via Robô Assistente de Voz com integração Bancária ({nfe.banco.toUpperCase()}).
+              {nfe.informacoesComplementares && (
+                <span className="block mt-1 font-semibold text-gray-900">{nfe.informacoesComplementares}</span>
+              )}
             </p>
           </div>
         </div>

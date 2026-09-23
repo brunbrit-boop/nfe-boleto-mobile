@@ -4,6 +4,7 @@ import type { EmpresaTenant } from '../../types';
 export type BtMenuOption =
   | 'finances'
   | 'sales'
+  | 'products'
   | 'suppliers'
   | 'clients'
   | 'purchases'
@@ -33,7 +34,7 @@ export const BtSidebar: React.FC<BtSidebarProps> = ({
   mobileOpen,
   onCloseMobile,
 }) => {
-  // Menus idênticos aos do BT Business original + Vendas & IA
+  // Menus idênticos aos do BT Business original + Vendas & IA + Catálogo de Produtos
   const links: {
     id: BtMenuOption;
     icon: string;
@@ -42,7 +43,8 @@ export const BtSidebar: React.FC<BtSidebarProps> = ({
     badgeColor?: string;
   }[] = [
     { id: 'finances', icon: 'account_balance', label: 'Financeiro' },
-    { id: 'sales', icon: 'point_of_sale', label: 'Vendas', badge: 'IA', badgeColor: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' },
+    { id: 'sales', icon: 'point_of_sale', label: 'Vendas & IA', badge: 'IA', badgeColor: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' },
+    { id: 'products', icon: 'inventory_2', label: 'Catálogo Produtos', badge: 'Bling', badgeColor: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300' },
     { id: 'suppliers', icon: 'domain', label: 'Fornecedores' },
     { id: 'clients', icon: 'groups', label: 'Clientes' },
     { id: 'purchases', icon: 'shopping_cart', label: 'Compras' },

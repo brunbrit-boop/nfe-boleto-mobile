@@ -1,0 +1,389 @@
+/**
+ * gruposService.ts
+ * Gerenciamento e Execução em Lote de Grupos de Clientes com IA
+ */
+
+import type { GrupoClientes, GrupoClienteItem, GrupoProdutos, BlingCliente, CompanyProfile, EmpresaTenant, NFeData, BankProvider } from '../types';
+import type { CatalogoProduto, OfertaGeradaResult } from '../utils/salesOptimizer';
+import { gerarOfertaComGeminiOuLocal } from './geminiService';
+import { CATALOGO_PRODUTOS_PADRAO } from '../utils/salesOptimizer';
+import { sleep, gravarEsbocoNFeNoBling } from './blingService';
+import { formatCurrency, gerarChaveAcessoNFe, calcularDivisaoParcelas } from '../utils/financeEngine';
+
+const STORAGE_PREFIX = 'nfe_grupos_clientes';
+const STORAGE_PREFIX_PRODUTOS = 'nfe_grupos_produtos';
+
+/**
+ * Carrega a lista de grupos de produtos da empresa a partir do cache local
+ */
+export function obterGruposProdutosCacheLocal(empresaId: string): GrupoProdutos[] {
+  if (!empresaId) return [];
+  try {
+    const raw = localStorage.getItem(`${STORAGE_PREFIX_PRODUTOS}_${empresaId}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {}
+
+  // Cria grupos de produtos sugeridos iniciais baseados no catálogo padrão
+  const sugeridos: GrupoProdutos[] = [
+    {
+      id: `gp_hidraulica_${empresaId}`,
+      empresaId,
+      nome: 'Kit Hidráulica & Tubulações',
+      descricao: 'Tubos, conexões, joelhos e registros de alta demanda',
+      produtosCodigos: ['TUB-001', 'TUB-002', 'REG-001'],
+      criadoEm: new Date().toISOString(),
+      atualizadoEm: new Date().toISOString(),
+    },
+    {
+      id: `gp_eletrica_${empresaId}`,
+      empresaId,
+      nome: 'Kit Elétrica Predial',
+      descricao: 'Fios 2.5mm e 4.0mm, disjuntores e fita isolante',
+      produtosCodigos: ['FIO-001', 'FIO-002', 'DIS-001'],
+      criadoEm: new Date().toISOString(),
+      atualizadoEm: new Date().toISOString(),
+    },
+    {
+      id: `gp_obra_${empresaId}`,
+      empresaId,
+      nome: 'Cimento & Argamassa Base',
+      descricao: 'Cimento CP II 50kg, argamassas e insumos de construção',
+      produtosCodigos: ['CIM-001', 'ARG-001', 'ARE-001'],
+      criadoEm: new Date().toISOString(),
+      atualizadoEm: new Date().toISOString(),
+    },
+  ];
+  salvarGruposProdutosCacheLocal(empresaId, sugeridos);
+  return sugeridos;
+}
+
+/**
+ * Salva a lista de grupos de produtos no cache local da empresa
+ */
+export function salvarGruposProdutosCacheLocal(empresaId: string, grupos: GrupoProdutos[]): void {
+  if (!empresaId) return;
+  try {
+    localStorage.setItem(`${STORAGE_PREFIX_PRODUTOS}_${empresaId}`, JSON.stringify(grupos));
+    window.dispatchEvent(new CustomEvent('grupos_produtos_updated', { detail: { empresaId } }));
+  } catch {}
+}
+
+/**
+ * Cria um novo grupo de produtos (kit/combo)
+ */
+export function criarNovoGrupoProdutos(
+  empresaId: string,
+  nome: string,
+  produtosCodigos: string[] = [],
+  descricao: string = ''
+): GrupoProdutos {
+  const agora = new Date().toISOString();
+  return {
+    id: `gp_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+    empresaId,
+    nome: nome.trim(),
+    descricao: descricao.trim(),
+    produtosCodigos,
+    criadoEm: agora,
+    atualizadoEm: agora,
+  };
+}
+/**
+ * Distribui uma Meta Total de Vendas entre N clientes de forma escalonada (Critério 1: Mix Comercial)
+ * Cria uma gradação natural entre pedidos âncora (maiores), médios e de reposição,
+ * com arredondamento comercial e soma total 100% exata ao centavo.
+ * Exemplo para R$ 15.000 com 3 clientes: [7000, 5000, 3000].
+ */
+export function distribuirMetaEscalonada(valorTotal: number, numClientes: number): number[] {
+  if (numClientes <= 0 || valorTotal <= 0) return [];
+  if (numClientes === 1) return [Math.round(valorTotal)];
+
+  // Define os fatores de peso: âncora (~1.4x da média) até reposição (~0.6x da média)
+  const maxFactor = 1.4;
+  const minFactor = 0.6;
+  const pesos: number[] = [];
+
+  for (let i = 0; i < numClientes; i++) {
+    const ratio = i / (numClientes - 1);
+    const peso = maxFactor - ratio * (maxFactor - minFactor);
+    pesos.push(peso);
+  }
+
+  const somaPesos = pesos.reduce((acc, p) => acc + p, 0);
+  const step = valorTotal >= 5000 ? 50 : 10;
+  const valores: number[] = [];
+  let somaCalculada = 0;
+
+  for (let i = 0; i < numClientes; i++) {
+    if (i === numClientes - 1) {
+      // O último cliente recebe a diferença exata para fechar o montante com 100% de precisão
+      const restante = Math.max(step, Number((valorTotal - somaCalculada).toFixed(2)));
+      valores.push(restante);
+    } else {
+      const valorBruto = (valorTotal * pesos[i]) / somaPesos;
+      const valorArredondado = Math.max(step, Math.round(valorBruto / step) * step);
+      valores.push(valorArredondado);
+      somaCalculada += valorArredondado;
+    }
+  }
+
+  return valores;
+}
+
+/**
+ * Carrega a lista de grupos de clientes fixos da empresa a partir do cache local
+ */
+export function obterGruposCacheLocal(empresaId: string): GrupoClientes[] {
+  if (!empresaId) return [];
+  try {
+    const raw = localStorage.getItem(`${STORAGE_PREFIX}_${empresaId}`);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {}
+  return [];
+}
+
+/**
+ * Salva a lista de grupos de clientes fixos no cache local da empresa
+ */
+export function salvarGruposCacheLocal(empresaId: string, grupos: GrupoClientes[]): void {
+  if (!empresaId) return;
+  try {
+    localStorage.setItem(`${STORAGE_PREFIX}_${empresaId}`, JSON.stringify(grupos));
+    window.dispatchEvent(new CustomEvent('grupos_clientes_updated', { detail: { empresaId } }));
+  } catch {}
+}
+
+/**
+ * Cria um novo grupo fixo de clientes
+ */
+export function criarNovoGrupo(
+  empresaId: string,
+  nome: string,
+  clientesIniciais: BlingCliente[] = [],
+  valorPadrao: number = 5000,
+  filtroPadrao: string = ''
+): GrupoClientes {
+  const agora = new Date().toISOString();
+  const grupoId = `grupo_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+
+  const itensClientes: GrupoClienteItem[] = clientesIniciais.map((c) => ({
+    clienteId: c.id,
+    nome: c.nome,
+    fantasia: c.fantasia,
+    numeroDocumento: c.numeroDocumento,
+    cidade: c.endereco?.geral?.municipio,
+    uf: c.endereco?.geral?.uf,
+    telefone: c.telefone || c.celular,
+    email: c.email,
+    valorAlvo: valorPadrao,
+    filtroFoco: filtroPadrao || undefined,
+    status: 'pendente',
+  }));
+
+  return {
+    id: grupoId,
+    empresaId,
+    nome: nome.trim() || 'Novo Grupo de Clientes',
+    valorPadrao,
+    filtroPadrao,
+    clientes: itensClientes,
+    criadoEm: agora,
+    atualizadoEm: agora,
+  };
+}
+
+/**
+ * Executa a geração com IA para um único cliente do grupo (com suporte a Grupos de Produtos/Kits)
+ */
+export async function gerarOfertaParaItem(
+  item: GrupoClienteItem,
+  catalogoDisponivel: CatalogoProduto[],
+  margemMax: number = 0.05,
+  gruposProdutos: GrupoProdutos[] = []
+): Promise<OfertaGeradaResult> {
+  let catalogoEfetivo = catalogoDisponivel;
+  let diretriz: string | undefined = undefined;
+
+  // 1. Prioridade Máxima: Se o item estiver vinculado a um Grupo de Produtos (Kit/Combo)
+  if (item.grupoProdutoId && gruposProdutos.length > 0) {
+    const gp = gruposProdutos.find((g) => g.id === item.grupoProdutoId);
+    if (gp && gp.produtosCodigos && gp.produtosCodigos.length > 0) {
+      const codigosSet = new Set(gp.produtosCodigos.map((c) => c.toLowerCase().trim()));
+      const filtradosPorGrupo = catalogoDisponivel.filter((p) =>
+        codigosSet.has((p.codigo || '').toLowerCase().trim()) ||
+        codigosSet.has((p.id || '').toLowerCase().trim())
+      );
+      if (filtradosPorGrupo.length > 0) {
+        catalogoEfetivo = filtradosPorGrupo;
+        diretriz = `Compor pedido utilizando exclusivamente os produtos do Grupo/Kit: "${gp.nome}".`;
+      }
+    }
+  }
+
+  // 2. Se não encontrou grupo ou não tem grupo vinculado, aplica o filtro de texto/foco
+  if (!diretriz) {
+    const foco = (item.filtroFoco || '').trim().toLowerCase();
+    if (foco) {
+      const filtrados = catalogoDisponivel.filter((p) =>
+        p.descricao.toLowerCase().includes(foco) ||
+        p.categoria.toLowerCase().includes(foco) ||
+        (p.codigo && p.codigo.toLowerCase().includes(foco))
+      );
+      if (filtrados.length >= 2) {
+        catalogoEfetivo = filtrados;
+      }
+      diretriz = `Foco em produtos da linha: "${item.filtroFoco}".`;
+    }
+  }
+
+  // Se o catálogo estiver vazio, utiliza o padrão
+  if (catalogoEfetivo.length === 0) {
+    catalogoEfetivo = CATALOGO_PRODUTOS_PADRAO;
+  }
+
+  return await gerarOfertaComGeminiOuLocal(item.valorAlvo, margemMax, catalogoEfetivo, diretriz);
+}
+
+/**
+ * Executa a geração em lote para todos os clientes selecionados de um grupo
+ */
+export async function executarGeracaoEmLote(
+  grupo: GrupoClientes,
+  catalogo: CatalogoProduto[],
+  onProgress?: (clienteId: number, status: 'gerando' | 'gerado' | 'erro', oferta?: OfertaGeradaResult, erro?: string) => void,
+  shouldCancel?: () => boolean
+): Promise<GrupoClientes> {
+  const grupoAtualizado: GrupoClientes = {
+    ...grupo,
+    atualizadoEm: new Date().toISOString(),
+    clientes: [...grupo.clientes],
+  };
+
+  for (let i = 0; i < grupoAtualizado.clientes.length; i++) {
+    if (shouldCancel && shouldCancel()) break;
+
+    const item = grupoAtualizado.clientes[i];
+    onProgress?.(item.clienteId, 'gerando');
+    item.status = 'gerando';
+
+    try {
+      // Gera a oferta personalizada com IA
+      const oferta = await gerarOfertaParaItem(item, catalogo);
+
+      item.status = 'gerado';
+      item.ofertaGerada = oferta;
+      item.erro = undefined;
+
+      onProgress?.(item.clienteId, 'gerado', oferta);
+    } catch (err: any) {
+      item.status = 'erro';
+      item.erro = err.message || 'Falha ao gerar orçamento.';
+      onProgress?.(item.clienteId, 'erro', undefined, item.erro);
+    }
+
+    // Pequeno intervalo para renderização fluida na tabela
+    await sleep(200);
+  }
+
+  return grupoAtualizado;
+}
+
+/**
+ * Cria o rascunho oficial de NF-e e Boleto no Bling a partir da oferta gerada do item do grupo
+ */
+export async function emitirNFeItemGrupo(
+  item: GrupoClienteItem,
+  empresa: EmpresaTenant,
+  company: CompanyProfile,
+  bancoAtual: BankProvider
+): Promise<{ sucesso: boolean; nfe?: NFeData; erro?: string }> {
+  if (!item.ofertaGerada || !item.ofertaGerada.itens || item.ofertaGerada.itens.length === 0) {
+    return { sucesso: false, erro: 'Este cliente ainda não possui orçamento gerado pela IA.' };
+  }
+
+  const token = empresa.blingAccessToken?.trim();
+  const valorTotal = item.ofertaGerada.valorTotal;
+  const numParcelas = 3;
+
+  const parcelasCalculadas = calcularDivisaoParcelas(valorTotal, numParcelas, bancoAtual, 15);
+
+  const novaNFe: NFeData = {
+    numeroNFe: String(Math.floor(1000 + Math.random() * 9000)),
+    serie: '1',
+    dataEmissao: new Date().toISOString().split('T')[0],
+    naturezaOperacao: 'Venda de Mercadorias (Grupo IA)',
+    chaveAcesso: gerarChaveAcessoNFe(company.cnpj, '1001', '1', '35'),
+    status: 'rascunho',
+    emitente: company,
+    destinatario: {
+      razaoSocial: item.nome,
+      cnpj: item.numeroDocumento,
+      inscricaoEstadual: 'ISENTO',
+      cidade: item.cidade || 'São Paulo',
+      uf: item.uf || 'SP',
+      email: item.email,
+      telefone: item.telefone,
+    },
+    itens: item.ofertaGerada.itens,
+    valorProdutos: valorTotal,
+    valorTotal,
+    valorTotalFormatado: formatCurrency(valorTotal),
+    quantidadeParcelas: numParcelas,
+    parcelas: parcelasCalculadas,
+    banco: bancoAtual,
+    informacoesComplementares: `Orçamento gerado por IA para o grupo de clientes. Condição: ${numParcelas}x parcelas quinzenais.`,
+  };
+
+  // Verifica se a empresa possui token Bling conectado para emissão do rascunho
+  if (!token) {
+    return {
+      sucesso: false,
+      erro: `A empresa "${empresa.nomeFantasia || empresa.razaoSocial}" não possui Token de Acesso do Bling conectado. Conecte o Bling nas configurações da empresa antes de emitir notas.`,
+    };
+  }
+
+  try {
+    const resBling = await gravarEsbocoNFeNoBling({
+      empresaToken: token,
+      cliente: {
+        id: item.clienteId,
+        nome: item.nome,
+        fantasia: item.fantasia,
+        tipoPessoa: item.numeroDocumento.length > 14 ? 'J' : 'F',
+        numeroDocumento: item.numeroDocumento,
+        situacao: 'A',
+        telefone: item.telefone,
+        email: item.email,
+      } as any,
+      itens: item.ofertaGerada.itens,
+      parcelasCount: numParcelas,
+      banco: bancoAtual,
+      intervaloDias: 15,
+    });
+
+    if (!resBling.sucesso) {
+      return {
+        sucesso: false,
+        erro: resBling.mensagem || 'Falha ao gravar rascunho de nota fiscal no Bling.',
+      };
+    }
+
+    if (resBling.idNotaBling) {
+      novaNFe.numeroNFe = String(resBling.idNotaBling);
+    }
+    novaNFe.status = 'rascunho';
+  } catch (err: any) {
+    return {
+      sucesso: false,
+      erro: err.message || 'Erro inesperado na comunicação com o Bling.',
+    };
+  }
+
+  return { sucesso: true, nfe: novaNFe };
+}

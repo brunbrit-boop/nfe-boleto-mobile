@@ -19,22 +19,36 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { code, clientId, clientSecret, redirectUri } = req.body || {};
-
-    if (!code) {
-      return res.status(400).json({ error: 'Parâmetro "code" obrigatório.' });
-    }
+    const {
+      grant_type = 'authorization_code',
+      code,
+      refresh_token,
+      clientId,
+      clientSecret,
+      redirectUri,
+    } = req.body || {};
 
     const cId = clientId || '5142f9c38e36e69d55278681ac2864a053be067c';
     const cSec = clientSecret || process.env.BLING_CLIENT_SECRET || 'c34055bd8ec510dec764af628816b2c5da6ee1a69d2011e25628e1c71860';
 
     const basicAuth = Buffer.from(`${cId}:${cSec}`).toString('base64');
-
     const params = new URLSearchParams();
-    params.append('grant_type', 'authorization_code');
-    params.append('code', code);
-    if (redirectUri) {
-      params.append('redirect_uri', redirectUri);
+
+    if (grant_type === 'refresh_token') {
+      if (!refresh_token) {
+        return res.status(400).json({ error: 'Parâmetro "refresh_token" obrigatório para renovação.' });
+      }
+      params.append('grant_type', 'refresh_token');
+      params.append('refresh_token', refresh_token);
+    } else {
+      if (!code) {
+        return res.status(400).json({ error: 'Parâmetro "code" obrigatório para autorização inicial.' });
+      }
+      params.append('grant_type', 'authorization_code');
+      params.append('code', code);
+      if (redirectUri) {
+        params.append('redirect_uri', redirectUri);
+      }
     }
 
     let response = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
@@ -47,10 +61,10 @@ export default async function handler(req: any, res: any) {
       body: params.toString(),
     });
 
-    let data = await response.json().catch(() => null);
+    let data: any = await response.json().catch(() => null);
 
-    // Se falhar e tínhamos enviado redirect_uri, tenta novamente sem redirect_uri
-    if (!response.ok && redirectUri) {
+    // Se falhou no authorization_code com redirect_uri, tenta novamente sem redirect_uri
+    if (!response.ok && grant_type === 'authorization_code' && redirectUri) {
       const fallbackParams = new URLSearchParams();
       fallbackParams.append('grant_type', 'authorization_code');
       fallbackParams.append('code', code);
@@ -65,7 +79,7 @@ export default async function handler(req: any, res: any) {
         body: fallbackParams.toString(),
       });
 
-      const fallbackData = await fallbackRes.json().catch(() => null);
+      const fallbackData: any = await fallbackRes.json().catch(() => null);
       if (fallbackRes.ok && fallbackData) {
         response = fallbackRes;
         data = fallbackData;
@@ -73,7 +87,8 @@ export default async function handler(req: any, res: any) {
     }
 
     if (!response.ok) {
-      const errorMsg = data?.error_description || data?.error || data?.mensagem || 'Erro retornado pelo Bling ao trocar código';
+      const errObj: any = data || {};
+      const errorMsg = errObj?.error_description || errObj?.error?.message || errObj?.error || errObj?.mensagem || 'Erro retornado pelo Bling ao processar token';
       return res.status(response.status).json({
         error: errorMsg,
         details: data,

@@ -6,7 +6,6 @@ import {
   ArrowRight,
   Trash2,
   CheckCircle2,
-  AlertTriangle,
   ShieldCheck,
   RefreshCw,
   Search,
@@ -17,6 +16,9 @@ import {
   Layers,
   CreditCard,
   Key,
+  Eye,
+  EyeOff,
+  LogOut,
 } from 'lucide-react';
 import type { EmpresaTenant, BankProvider } from '../types';
 import { BANKS } from '../utils/financeEngine';
@@ -28,6 +30,7 @@ interface EmpresasScreenProps {
   onOpenAddEmpresa: () => void;
   onDeleteEmpresa: (empresaId: string) => void;
   onSyncEmpresa?: (empresa: EmpresaTenant) => Promise<void>;
+  onDisconnectBling?: (empresaId: string) => void;
   onUpdateEmpresaBanco?: (empresaId: string, banco: BankProvider) => void;
 }
 
@@ -37,6 +40,7 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
   onOpenAddEmpresa,
   onDeleteEmpresa,
   onSyncEmpresa,
+  onDisconnectBling,
   onUpdateEmpresaBanco,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -44,6 +48,12 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
   const [copiedCnpjId, setCopiedCnpjId] = useState<string | null>(null);
   const [selectedEmpresaForBanks, setSelectedEmpresaForBanks] = useState<EmpresaTenant | null>(null);
   const [isApiKeysOpen, setIsApiKeysOpen] = useState(false);
+
+  // Modal para Ativar Bling em empresa existente
+  const [empresaParaAtivarBling, setEmpresaParaAtivarBling] = useState<EmpresaTenant | null>(null);
+  const [linkOuCidModal, setLinkOuCidModal] = useState('');
+  const [secretModal, setSecretModal] = useState('');
+  const [showSecretModal, setShowSecretModal] = useState(false);
 
   const getGradientByCor = (cor?: string) => {
     switch (cor) {
@@ -100,6 +110,72 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
     }
   };
 
+  const extrairClientId = (input: string): string => {
+    const trimmed = input.trim();
+    if (!trimmed) return '';
+    if (trimmed.includes('client_id=')) {
+      try {
+        const url = new URL(trimmed);
+        return url.searchParams.get('client_id') || trimmed;
+      } catch {
+        const match = trimmed.match(/[?&]client_id=([^&]+)/);
+        return match ? match[1] : trimmed;
+      }
+    }
+    return trimmed;
+  };
+
+  const handleAbrirConectarBling = (empresa: EmpresaTenant) => {
+    // Se a empresa já tem Client ID e Secret configurados, pode ir direto
+    if (empresa.blingClientId && empresa.blingClientSecret) {
+      localStorage.setItem('bling_oauth_pending_empresa_id', empresa.id);
+      localStorage.setItem('bling_client_id', empresa.blingClientId);
+      localStorage.setItem('bling_client_secret', empresa.blingClientSecret);
+      window.location.href = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${empresa.blingClientId}&state=${empresa.id}`;
+      return;
+    }
+
+    setEmpresaParaAtivarBling(empresa);
+    setLinkOuCidModal(empresa.blingClientId || '');
+    setSecretModal(empresa.blingClientSecret || '');
+  };
+
+  const handleConfirmarConexaoBling = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!empresaParaAtivarBling) return;
+
+    const cid = extrairClientId(linkOuCidModal);
+    const sec = secretModal.trim();
+
+    if (!cid) {
+      alert('Por favor, cole o Link de Convite ou o Client ID da sua empresa no Bling.');
+      return;
+    }
+    if (!sec) {
+      alert('Por favor, cole o Client Secret gerado no painel do Bling.');
+      return;
+    }
+
+    const rawList = localStorage.getItem('nfe_empresas_list');
+    if (rawList) {
+      try {
+        const lista: EmpresaTenant[] = JSON.parse(rawList);
+        const atualizadas = lista.map((item) =>
+          item.id === empresaParaAtivarBling.id
+            ? { ...item, blingClientId: cid, blingClientSecret: sec }
+            : item
+        );
+        localStorage.setItem('nfe_empresas_list', JSON.stringify(atualizadas));
+      } catch {}
+    }
+
+    localStorage.setItem('bling_oauth_pending_empresa_id', empresaParaAtivarBling.id);
+    localStorage.setItem('bling_client_id', cid);
+    localStorage.setItem('bling_client_secret', sec);
+
+    window.location.href = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${cid}&state=${empresaParaAtivarBling.id}`;
+  };
+
   // Filtragem de empresas por busca
   const empresasFiltradas = empresas.filter((emp) => {
     const term = searchTerm.toLowerCase();
@@ -152,7 +228,30 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
         </button>
 
         {/* Direita: Botões de Ação */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2 sm:gap-2.5">
+          <button
+            onClick={() => {
+              if (confirm('Deseja limpar todo o cache e tokens do Bling para começar do zero com conexões 100% limpas?')) {
+                localStorage.removeItem('nfe_empresas_list');
+                localStorage.removeItem('nfe_empresa_ativa_id');
+                localStorage.removeItem('bling_client_id');
+                localStorage.removeItem('bling_client_secret');
+                localStorage.removeItem('bling_access_token');
+                localStorage.removeItem('bling_refresh_token');
+                localStorage.removeItem('bling_expires_at');
+                localStorage.removeItem('bling_config');
+                localStorage.removeItem('bling_oauth_pending_empresa_id');
+                localStorage.removeItem('bling_auth_code');
+                window.location.href = window.location.origin;
+              }
+            }}
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-2 rounded-xl text-xs font-bold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/20 hover:bg-rose-100 dark:hover:bg-rose-950/40 border border-rose-200 dark:border-rose-800/30 transition-all cursor-pointer"
+            title="Limpar todo o cache e tokens antigos do Bling para começar limpo"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+            <span className="hidden sm:inline">Resetar Cache</span>
+          </button>
+
           <button
             onClick={() => setIsApiKeysOpen(true)}
             className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold text-slate-700 dark:text-slate-200 bg-slate-100 dark:bg-[#162f27] hover:bg-slate-200 dark:hover:bg-[#1f4236] border border-slate-200 dark:border-[#214739] transition-all cursor-pointer"
@@ -338,17 +437,53 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                             {empresa.razaoSocial || 'Razão Social não informada'}
                           </p>
 
-                          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                            {empresa.isBlingConectado ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/10 text-[#11d493] border border-emerald-500/20 shrink-0">
-                                <span className="w-1.5 h-1.5 rounded-full bg-[#11d493] animate-pulse" />
-                                <span>Bling Ativo</span>
-                              </span>
+                          <div className="mt-2.5 flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                            {empresa.isBlingExpirado || (empresa.blingTokenExpiresAt && Date.now() > empresa.blingTokenExpiresAt && !empresa.blingRefreshToken) ? (
+                              <button
+                                type="button"
+                                onClick={() => handleAbrirConectarBling(empresa)}
+                                className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white shadow-sm shadow-amber-500/30 transition-all duration-150 active:scale-95 cursor-pointer animate-pulse"
+                                title="O token do Bling expirou (validade de 6h). Clique para reconectar agora com 1 clique!"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                                <span>⚠️ Token Expirado • Reconectar</span>
+                              </button>
+                            ) : empresa.isBlingConectado ? (
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleAbrirConectarBling(empresa)}
+                                  className="inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-[#11d493] border border-emerald-500/25 hover:bg-emerald-500/20 transition cursor-pointer"
+                                  title="A integração do Bling ERP já está ativa. Clique caso queira renovar a conexão."
+                                >
+                                  <span className="w-1.5 h-1.5 rounded-full bg-[#11d493] animate-pulse" />
+                                  <span>✓ Bling Ativo</span>
+                                </button>
+                                {onDisconnectBling && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (confirm(`Deseja desconectar a integração do Bling da empresa "${empresa.nomeFantasia || empresa.razaoSocial}"?`)) {
+                                        onDisconnectBling(empresa.id);
+                                      }
+                                    }}
+                                    className="text-[10px] font-semibold text-rose-500 hover:text-rose-600 dark:text-rose-400 hover:underline px-1.5 py-0.5 rounded transition cursor-pointer"
+                                    title="Desconectar Bling desta empresa"
+                                  >
+                                    Desconectar
+                                  </button>
+                                )}
+                              </div>
                             ) : (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-500 border border-amber-500/20 shrink-0">
-                                <AlertTriangle className="w-3 h-3 text-amber-500" />
-                                <span>Configurar</span>
-                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleAbrirConectarBling(empresa)}
+                                className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-sm shadow-emerald-600/30 transition-all duration-150 active:scale-95 cursor-pointer"
+                                title="Conectar aplicativo do Bling para sincronizar notas, clientes e produtos"
+                              >
+                                <Sparkles className="w-3 h-3 text-amber-300" />
+                                <span>⚡ Ativar Bling</span>
+                              </button>
                             )}
                           </div>
                         </div>
@@ -478,6 +613,61 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                           </div>
                         </div>
                       </div>
+
+                      {/* Status de Sincronização Progressiva com Bling */}
+                      {empresa.statusSincronizacao?.emAndamento ? (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="mt-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-2 animate-pulse"
+                        >
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="font-bold text-amber-600 dark:text-amber-400 flex items-center gap-1.5 truncate">
+                              <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0 text-amber-500" />
+                              <span className="truncate">A empresa está sendo atualizada...</span>
+                            </span>
+                            <span className="font-mono font-bold text-amber-600 dark:text-amber-400 shrink-0 ml-1">
+                              {empresa.statusSincronizacao.progresso || 20}%
+                            </span>
+                          </div>
+
+                          <div className="w-full bg-slate-200 dark:bg-[#162f27] h-1.5 rounded-full overflow-hidden">
+                            <div
+                              className="bg-gradient-to-r from-amber-500 to-amber-400 h-full transition-all duration-300 rounded-full"
+                              style={{ width: `${empresa.statusSincronizacao.progresso || 20}%` }}
+                            />
+                          </div>
+
+                          <p className="text-[10px] text-amber-700 dark:text-amber-300 font-medium truncate">
+                            {empresa.statusSincronizacao.etapaAtual || 'Processando dados por etapas no Bling...'}
+                          </p>
+                        </div>
+                      ) : empresa.isBlingConectado ? (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="mt-2.5 px-3 py-2 rounded-xl bg-emerald-500/5 dark:bg-[#162f27]/40 border border-emerald-500/20 flex items-center justify-between text-xs"
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <Check className="w-3.5 h-3.5 text-[#11d493] shrink-0" />
+                            <span className="text-slate-600 dark:text-slate-300 font-medium text-[11px] truncate">
+                              {empresa.statusSincronizacao?.totalProdutos !== undefined
+                                ? `${empresa.statusSincronizacao.totalProdutos} produtos • ${empresa.statusSincronizacao.totalClientes || 0} clientes`
+                                : 'Dados do Bling salvos no app'}
+                            </span>
+                          </div>
+                          {onSyncEmpresa && (
+                            <button
+                              type="button"
+                              disabled={isSyncing}
+                              onClick={(e) => handleSync(e, empresa)}
+                              className="text-[10px] font-bold text-[#11d493] hover:underline shrink-0 ml-2 cursor-pointer flex items-center gap-1"
+                              title="Atualizar dados do Bling em segundo plano"
+                            >
+                              <RefreshCw className={`w-3 h-3 ${isSyncing ? 'animate-spin' : ''}`} />
+                              <span>Atualizar</span>
+                            </button>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
 
@@ -580,6 +770,118 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                 Concluir
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Rápido de Ativação do Bling para Empresa Existente */}
+      {empresaParaAtivarBling && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white dark:bg-[#10221c] text-slate-900 dark:text-white w-full max-w-md rounded-2xl border border-slate-200 dark:border-[#1a382e] shadow-2xl overflow-hidden flex flex-col">
+            <div className="px-5 py-4 bg-gradient-to-r from-emerald-600 to-teal-700 text-white flex items-center justify-between shrink-0 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded-xl bg-white/10 backdrop-blur-md flex items-center justify-center shadow-inner">
+                  <Building2 className="w-4 h-4 text-white" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold leading-tight">Ativar Bling na Empresa</h2>
+                  <p className="text-[11px] text-emerald-100/90 leading-tight">
+                    {empresaParaAtivarBling.nomeFantasia || empresaParaAtivarBling.razaoSocial}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEmpresaParaAtivarBling(null)}
+                className="p-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmarConexaoBling} className="p-5 space-y-4">
+              <div className="bg-slate-50 dark:bg-[#162f27] rounded-xl p-4 border border-slate-200/90 dark:border-[#214739] space-y-3.5">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
+                    Link de convite do Bling <span className="text-emerald-600 font-normal">(ou Client ID)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={linkOuCidModal}
+                    onChange={(e) => setLinkOuCidModal(e.target.value)}
+                    placeholder="Cole aqui o Link de convite do Bling..."
+                    required
+                    className="w-full text-xs font-mono bg-white dark:bg-[#10221c] text-slate-800 dark:text-slate-100 px-3 py-2 rounded-xl border border-slate-200 dark:border-[#214739] focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                      Client Secret
+                    </label>
+                    <span className="text-[10px] text-slate-400">Senha secreta do aplicativo</span>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showSecretModal ? 'text' : 'password'}
+                      value={secretModal}
+                      onChange={(e) => setSecretModal(e.target.value)}
+                      placeholder="Cole aqui o Client Secret do Bling..."
+                      required
+                      className="w-full text-xs font-mono bg-white dark:bg-[#10221c] text-slate-800 dark:text-slate-100 px-3 py-2 pr-9 rounded-xl border border-slate-200 dark:border-[#214739] focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowSecretModal(!showSecretModal)}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
+                    >
+                      {showSecretModal ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-2.5 rounded-lg bg-emerald-50/70 dark:bg-emerald-950/20 border border-emerald-200/50 dark:border-emerald-800/30 text-[11px] text-emerald-800 dark:text-emerald-300 leading-relaxed">
+                  💡 O sistema abrirá a página oficial de autorização do Bling para esta empresa e vinculará o token automaticamente!
+                </div>
+
+                {/* Dica e Botão de Logout no Bling */}
+                <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-800/40 text-[11px] text-amber-900 dark:text-amber-200 space-y-2">
+                  <p className="leading-relaxed">
+                    ⚠️ <strong>Atenção à sessão no Bling:</strong> Se o seu navegador ainda estiver com o site do Bling logado na <em>Empresa 1</em>, o Bling tentará autorizar a Empresa 1.
+                  </p>
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <a
+                      href="https://www.bling.com.br/logout.php"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[10px] font-bold bg-white dark:bg-amber-900/50 hover:bg-amber-100 text-amber-900 dark:text-amber-100 rounded-lg border border-amber-300 dark:border-amber-700 shadow-sm transition"
+                    >
+                      <LogOut className="w-3 h-3 text-amber-600" />
+                      <span>🚪 Deslogar da conta atual no Bling</span>
+                    </a>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-[#214739]">
+                <button
+                  type="button"
+                  onClick={() => setEmpresaParaAtivarBling(null)}
+                  className="px-3.5 py-2 text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-xl transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+
+                <button
+                  type="submit"
+                  className="px-5 py-2.5 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 active:scale-95 rounded-xl shadow-md shadow-emerald-500/20 transition flex items-center gap-2 cursor-pointer"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Conectar e Autorizar</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
