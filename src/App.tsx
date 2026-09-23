@@ -33,6 +33,13 @@ import {
   salvarContasPagarCacheLocal,
 } from './services/blingService';
 import {
+  obterContasReceberDoBanco,
+  obterContasPagarDoBanco,
+  salvarContasReceberNoBanco,
+  salvarContasPagarNoBanco,
+  registrarEmpresaNoBanco,
+} from './services/pocketbaseService';
+import {
   exchangeBlingCodeForToken,
 } from './utils/blingApi';
 
@@ -282,6 +289,21 @@ export const App: React.FC = () => {
     setContasPagar(pagarCache);
     setContasReceber(receberCache);
 
+    // Consulta em segundo plano o banco PocketBase no RDP (persistência durável):
+    obterContasReceberDoBanco(empId).then((dbReceber) => {
+      if (dbReceber && dbReceber.length > 0) {
+        setContasReceber(dbReceber);
+        salvarContasReceberCacheLocal(empId, dbReceber);
+      }
+    }).catch(() => {});
+
+    obterContasPagarDoBanco(empId).then((dbPagar) => {
+      if (dbPagar && dbPagar.length > 0) {
+        setContasPagar(dbPagar);
+        salvarContasPagarCacheLocal(empId, dbPagar);
+      }
+    }).catch(() => {});
+
     // Se esta empresa não tem token próprio configurado, encerra
     if (!token) {
       setIsLoadingBling(false);
@@ -303,11 +325,14 @@ export const App: React.FC = () => {
           if (resReceber?.data) {
             setContasReceber(resReceber.data);
             salvarContasReceberCacheLocal(empAlvo.id, resReceber.data);
+            salvarContasReceberNoBanco(empAlvo.id, resReceber.data).catch(() => {});
           }
           if (resPagar?.data) {
             setContasPagar(resPagar.data);
             salvarContasPagarCacheLocal(empAlvo.id, resPagar.data);
+            salvarContasPagarNoBanco(empAlvo.id, resPagar.data).catch(() => {});
           }
+          registrarEmpresaNoBanco(empAlvo).catch(() => {});
 
           const res = await sincronizarEmpresaBlingCompleto(empAlvo);
           if (res.sucesso) {

@@ -9,6 +9,11 @@ import type {
 } from '../types';
 import { formatCurrency, gerarDadosBoletoFebraban, gerarPixCopiaECola } from '../utils/financeEngine';
 import { renovarTokenBling, isTokenExpirando } from '../utils/blingApi';
+import {
+  salvarContasReceberNoBanco,
+  salvarContasPagarNoBanco,
+  registrarEmpresaNoBanco,
+} from './pocketbaseService';
 
 export const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -2028,10 +2033,17 @@ export async function sincronizarEmpresaBlingCompleto(
 
     try {
       const resReceber = await carregarContasReceberBling(token, empresa.id, empresa.bancoPadrao);
-      salvarContasReceberCacheLocal(empresa.id, resReceber.data || []);
+      if (resReceber?.data) {
+        salvarContasReceberCacheLocal(empresa.id, resReceber.data);
+        salvarContasReceberNoBanco(empresa.id, resReceber.data).catch(() => {});
+      }
       await sleep(400);
       const resPagar = await carregarContasPagarBling(token, empresa.id);
-      salvarContasPagarCacheLocal(empresa.id, resPagar.data || []);
+      if (resPagar?.data) {
+        salvarContasPagarCacheLocal(empresa.id, resPagar.data);
+        salvarContasPagarNoBanco(empresa.id, resPagar.data).catch(() => {});
+      }
+      registrarEmpresaNoBanco(empresa).catch(() => {});
     } catch {}
 
     const concluidoMsg = `${produtos.length} produtos e ${clientes.length} clientes prontos para uso`;

@@ -14,6 +14,12 @@ import {
 import { BankUploadModal } from '../finances/BankUploadModal';
 import { ClassifyTransactionsModal, type ClassificationRule } from '../finances/ClassifyTransactionsModal';
 import { BankPatternChatbotModal } from '../finances/BankPatternChatbotModal';
+import {
+  obterContasReceberDoBanco,
+  obterContasPagarDoBanco,
+  testarConexaoPocketBase,
+  getPocketBaseUrl,
+} from '../../../services/pocketbaseService';
 
 export interface FinanceTransaction {
   id: string;
@@ -550,16 +556,73 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   // --- Base de Transações com Simulação em Estado Local ---
   const [allTransactions, setAllTransactions] = useState<FinanceTransaction[]>([]);
 
-  // Inicializa e sincroniza transações reais do Bling ERP
+  // --- Suporte a Visão Consolidada Multi-Empresas (PocketBase RDP) ---
+  const [modoConsolidado, setModoConsolidado] = useState<boolean>(false);
+  const [contasConsolidadasReceber, setContasConsolidadasReceber] = useState<BlingContaReceber[]>([]);
+  const [contasConsolidadasPagar, setContasConsolidadasPagar] = useState<BlingContaPagar[]>([]);
+  const [carregandoConsolidado, setCarregandoConsolidado] = useState<boolean>(false);
+  const [pbOnline, setPbOnline] = useState<boolean | null>(null);
+
+  // Mapa de ID -> Nome da empresa
+  const mapaNomesEmpresas = useMemo(() => {
+    const map: Record<string, string> = {};
+    try {
+      const raw = localStorage.getItem('nfe_empresas_list');
+      if (raw) {
+        const list = JSON.parse(raw);
+        if (Array.isArray(list)) {
+          list.forEach((e: any) => {
+            if (e.id) map[e.id] = e.nomeFantasia || e.razaoSocial || e.id;
+          });
+        }
+      }
+    } catch {}
+    return map;
+  }, []);
+
+  // Monitora saúde do servidor PocketBase RDP
+  useEffect(() => {
+    testarConexaoPocketBase()
+      .then((res) => setPbOnline(res.ok))
+      .catch(() => setPbOnline(false));
+  }, []);
+
+  // Busca dados consolidados de todas as empresas do PocketBase
+  const carregarDadosConsolidados = async () => {
+    setCarregandoConsolidado(true);
+    try {
+      const [cr, cp] = await Promise.all([
+        obterContasReceberDoBanco(),
+        obterContasPagarDoBanco(),
+      ]);
+      setContasConsolidadasReceber(cr);
+      setContasConsolidadasPagar(cp);
+    } catch (e) {
+      console.error('Erro ao carregar dados consolidados:', e);
+    } finally {
+      setCarregandoConsolidado(false);
+    }
+  };
+
+  useEffect(() => {
+    if (modoConsolidado) {
+      carregarDadosConsolidados();
+    }
+  }, [modoConsolidado]);
+
+  // Inicializa e sincroniza transações reais do Bling ERP (ou consolidadas)
   useEffect(() => {
     const list: FinanceTransaction[] = [];
+    const crList = modoConsolidado ? contasConsolidadasReceber : contasReceber;
+    const cpList = modoConsolidado ? contasConsolidadasPagar : contasPagar;
 
     // 1. Contas a Receber Reais do Bling
-    contasReceber.forEach((cr: BlingContaReceber) => {
+    crList.forEach((cr: BlingContaReceber) => {
       const dateISO = cr.vencimento || cr.dataEmissao || todayISO;
       const isPaid = cr.situacao === 2;
+      const nomeEmp = (cr.empresaId && mapaNomesEmpresas[cr.empresaId]) || empresaNome || 'Minha Empresa';
       list.push({
-        id: `rec-bling-${cr.id}`,
+        id: `rec-bling-${cr.empresaId || ''}-${cr.id}`,
         date: dateISO,
         displayDate: formatDateBr(dateISO),
         description: cr.historico || `Recebimento Ref #${cr.numeroDocumento || cr.id}`,
@@ -572,21 +635,22 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         type: 'receivable',
         status: isPaid ? 'paid' : 'open',
         originType: 'bling_erp',
-        companyName: empresaNome || 'Minha Empresa',
+        companyName: nomeEmp,
         bankName: 'Bling ERP',
         method: cr.pixCopiaECola ? 'PIX' : cr.linkBoleto ? 'Boleto' : 'Bolepix',
-        unit: 'Matriz',
+        unit: nomeEmp,
         numeroDocumento: cr.numeroDocumento,
         originalBlingReceber: cr,
       });
     });
 
     // 2. Contas a Pagar Reais do Bling
-    contasPagar.forEach((cp: BlingContaPagar) => {
+    cpList.forEach((cp: BlingContaPagar) => {
       const dateISO = cp.vencimento || cp.dataEmissao || todayISO;
       const isPaid = cp.situacao === 2;
+      const nomeEmp = (cp.empresaId && mapaNomesEmpresas[cp.empresaId]) || empresaNome || 'Minha Empresa';
       list.push({
-        id: `pay-bling-${cp.id}`,
+        id: `pay-bling-${cp.empresaId || ''}-${cp.id}`,
         date: dateISO,
         displayDate: formatDateBr(dateISO),
         description: cp.historico || `Pagamento Ref #${cp.numeroDocumento || cp.id}`,
@@ -599,10 +663,10 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         type: 'payable',
         status: isPaid ? 'paid' : 'open',
         originType: 'bling_erp',
-        companyName: empresaNome || 'Minha Empresa',
+        companyName: nomeEmp,
         bankName: 'Bling ERP',
         method: cp.formaPagamento?.descricao || 'Boleto',
-        unit: 'Matriz',
+        unit: nomeEmp,
         numeroDocumento: cp.numeroDocumento,
         originalBlingPagar: cp,
       });
@@ -615,7 +679,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
       );
       return [...userUploaded, ...list];
     });
-  }, [contasPagar, contasReceber, todayISO, empresaNome]);
+  }, [contasPagar, contasReceber, todayISO, empresaNome, modoConsolidado, contasConsolidadasReceber, contasConsolidadasPagar, mapaNomesEmpresas]);
 
   // --- Opções Dinâmicas para os Selects das Tabelas e Modais ---
   const bankOptions = useMemo(() => {
@@ -1257,6 +1321,46 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
         {/* Botões de Ação do BT Business */}
         <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Status PocketBase RDP */}
+          <div
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-lg text-xs font-semibold select-none"
+            title={`Servidor RDP PocketBase: ${getPocketBaseUrl()}`}
+          >
+            <span
+              className={`w-2 h-2 rounded-full ${
+                pbOnline === true
+                  ? 'bg-emerald-500 shadow-xs shadow-emerald-500 animate-pulse'
+                  : pbOnline === false
+                  ? 'bg-rose-500'
+                  : 'bg-amber-400'
+              }`}
+            />
+            <span className="text-slate-600 dark:text-slate-300 font-mono text-[11px]">
+              {pbOnline === true ? 'RDP PocketBase' : pbOnline === false ? 'RDP Offline' : 'RDP...'}
+            </span>
+          </div>
+
+          {/* Toggle Visão Consolidada Multi-Empresas */}
+          <button
+            onClick={() => setModoConsolidado((prev) => !prev)}
+            disabled={carregandoConsolidado}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xs border ${
+              modoConsolidado
+                ? 'bg-indigo-600 text-white border-indigo-500 shadow-indigo-500/25 ring-2 ring-indigo-400/30'
+                : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-750'
+            }`}
+            title="Consolidar contas de todas as empresas armazenadas no banco de dados do seu servidor RDP"
+          >
+            <span className={`material-symbols-outlined text-base ${carregandoConsolidado ? 'animate-spin' : ''}`}>
+              {carregandoConsolidado ? 'progress_activity' : modoConsolidado ? 'hub' : 'storefront'}
+            </span>
+            <span>
+              {modoConsolidado
+                ? 'Visão Consolidada (Todas as Empresas)'
+                : 'Empresa Atual'}
+            </span>
+          </button>
+
           {/* Botão Sincronizar Bling */}
           {onRefreshBling && (
             <button

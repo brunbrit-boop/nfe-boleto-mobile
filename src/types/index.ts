@@ -221,6 +221,8 @@ export interface BlingFornecedor {
 
 export interface BlingContaPagar {
   id: number;
+  empresaId?: string;
+  empresaNome?: string;
   numeroDocumento: string;
   dataEmissao: string; // YYYY-MM-DD
   vencimento: string; // YYYY-MM-DD
@@ -244,6 +246,8 @@ export interface BlingContaPagar {
 
 export interface BlingContaReceber {
   id: number;
+  empresaId?: string;
+  empresaNome?: string;
   numeroDocumento: string;
   dataEmissao: string; // YYYY-MM-DD
   vencimento: string; // YYYY-MM-DD
@@ -264,6 +268,10 @@ export interface BlingContaReceber {
   codigoBarras?: string;
   pixCopiaECola?: string;
   linkBoleto?: string;
+  formaPagamento?: {
+    id?: number;
+    descricao?: string;
+  };
 }
 
 export interface ResumoFinanceiro {
