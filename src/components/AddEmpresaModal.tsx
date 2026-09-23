@@ -54,6 +54,12 @@ export const AddEmpresaModal: React.FC<AddEmpresaModalProps> = ({
       return;
     }
 
+    // Se o Client ID informado for o mesmo da empresa já conectada, vincula diretamente sem redirecionar
+    if (empresaConectadaExistente && (cid === empresaConectadaExistente.blingClientId || (!empresaConectadaExistente.blingClientId && cid))) {
+      handleVincularExistente(empresaConectadaExistente);
+      return;
+    }
+
     // Registra a empresa pendente com seu ID, Client ID e Client Secret
     const rawList = localStorage.getItem('nfe_empresas_list');
     let lista: EmpresaTenant[] = [];
@@ -118,6 +124,41 @@ export const AddEmpresaModal: React.FC<AddEmpresaModalProps> = ({
     onAddEmpresa(novaEmpresa);
   };
 
+  const empresasSalvas: EmpresaTenant[] = (() => {
+    try {
+      const raw = localStorage.getItem('nfe_empresas_list');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  })();
+  const empresaConectadaExistente = empresasSalvas.find((e) => e.isBlingConectado && e.blingAccessToken);
+
+  const handleVincularExistente = (origem: EmpresaTenant) => {
+    const nomeFinal = nomeOpcional.trim() || 'Nova Empresa Bling';
+    const novaEmpresa: EmpresaTenant = {
+      id: empresaId,
+      razaoSocial: nomeFinal,
+      nomeFantasia: nomeFinal,
+      cnpj: '00.000.000/0001-00',
+      cidade: 'São Paulo',
+      uf: 'SP',
+      bancoPadrao: 'inter',
+      corAvatar: 'emerald',
+      regimeTributario: 'Simples Nacional',
+      certificadoA1Valido: true,
+      criadoEm: new Date().toISOString(),
+      blingAccessToken: origem.blingAccessToken,
+      blingRefreshToken: origem.blingRefreshToken,
+      blingClientId: origem.blingClientId,
+      blingClientSecret: origem.blingClientSecret,
+      blingTokenExpiresAt: origem.blingTokenExpiresAt,
+      isBlingConectado: true,
+      isBlingExpirado: false,
+    };
+    onAddEmpresa(novaEmpresa);
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
       <div className="bg-white dark:bg-[#10221c] text-slate-900 dark:text-white w-full max-w-md rounded-2xl border border-slate-200 dark:border-[#1a382e] shadow-2xl overflow-hidden flex flex-col">
@@ -144,6 +185,27 @@ export const AddEmpresaModal: React.FC<AddEmpresaModalProps> = ({
 
         {/* Formulário Enxuto com apenas 2 campos */}
         <form onSubmit={handleConectarBling} className="p-5 space-y-4">
+          {empresaConectadaExistente && (
+            <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-emerald-500/10 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
+              <div>
+                <span className="text-xs font-black text-emerald-600 dark:text-[#11d493] flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Mesmo Bling / Multi-empresa (1 Clique)</span>
+                </span>
+                <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-1 leading-snug">
+                  Seus CNPJs ficam no mesmo painel do Bling? Vincule à conexão já ativa (<strong>{empresaConectadaExistente.nomeFantasia || empresaConectadaExistente.razaoSocial}</strong>) sem deslogar ninguém!
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleVincularExistente(empresaConectadaExistente)}
+                className="px-4 py-2.5 rounded-xl bg-[#11d493] hover:bg-[#0eb880] text-slate-950 font-extrabold text-xs shrink-0 transition shadow-md shadow-emerald-500/20 active:scale-95 cursor-pointer text-center"
+              >
+                ⚡ Criar e Vincular
+              </button>
+            </div>
+          )}
+
           <div className="bg-slate-50 dark:bg-[#162f27] rounded-xl p-4 border border-slate-200/90 dark:border-[#214739] space-y-3.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">

@@ -249,7 +249,11 @@ export async function tentarAutoRenovarToken(tokenAtual?: string, empresaIdParam
           try {
             const empresas: any[] = JSON.parse(rawList);
             const atualizadas = empresas.map((e: any) => {
-              if (empresaIdAlvo ? e.id === empresaIdAlvo : (e.blingRefreshToken === refreshToken || (cleanTokenAtual && (e.blingAccessToken || '').includes(cleanTokenAtual)))) {
+              const isMatch = empresaIdAlvo
+                ? (e.id === empresaIdAlvo || (refreshToken && e.blingRefreshToken === refreshToken) || (clientId && e.blingClientId === clientId))
+                : (e.blingRefreshToken === refreshToken || (cleanTokenAtual && (e.blingAccessToken || '').includes(cleanTokenAtual)));
+
+              if (isMatch) {
                 return {
                   ...e,
                   blingAccessToken: res.accessToken,
