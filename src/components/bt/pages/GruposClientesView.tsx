@@ -17,6 +17,8 @@ import {
   Package,
   Layers,
   Target,
+  Pencil,
+  Check,
 } from 'lucide-react';
 import type {
   EmpresaTenant,
@@ -151,6 +153,10 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
   const [itemVisualizandoOferta, setItemVisualizandoOferta] = useState<GrupoClienteItem | null>(null);
   const [itemEmitindoNFeId, setItemEmitindoNFeId] = useState<number | null>(null);
 
+  // Edição do Nome do Grupo
+  const [isEditandoNomeGrupo, setIsEditandoNomeGrupo] = useState<boolean>(false);
+  const [novoNomeGrupoTemp, setNovoNomeGrupoTemp] = useState<string>(() => grupoAtivo?.nome || '');
+
   // Sub-aba ativa: Grupos de Clientes vs Grupos de Produtos
   const [subAbaAtiva, setSubAbaAtiva] = useState<'clientes' | 'produtos'>('clientes');
 
@@ -225,12 +231,14 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         setPrimeiroVencMassa(grupoAtivo.primeiroVencimentoPadrao);
       }
       setIntervaloDiasMassa(grupoAtivo.intervaloDiasPadrao || 30);
+      setIsEditandoNomeGrupo(false);
+      setNovoNomeGrupoTemp(grupoAtivo.nome || '');
       const soma = grupoAtivo.clientes.reduce((acc, c) => acc + (c.valorAlvo || 5000), 0);
       if (soma > 0) {
         setMetaTotalGrupo(soma);
       }
     }
-  }, [grupoAtivoId]);
+  }, [grupoAtivoId, grupoAtivo?.nome]);
 
   // Distribuição de Meta Total Escalonada com Trava: Maior <= Menor * 1.5
   const handleDistribuirMetaEscalonada = () => {
@@ -728,6 +736,25 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     }
   };
 
+  // Renomear Grupo de Clientes
+  const handleSalvarNovoNomeGrupo = (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!grupoAtivo) return;
+    const nomeLimpo = novoNomeGrupoTemp.trim();
+    if (!nomeLimpo) {
+      setIsEditandoNomeGrupo(false);
+      return;
+    }
+
+    const atualizado: GrupoClientes = {
+      ...grupoAtivo,
+      nome: nomeLimpo,
+      atualizadoEm: new Date().toISOString(),
+    };
+    atualizarGrupo(atualizado);
+    setIsEditandoNomeGrupo(false);
+  };
+
   // Funções de Gestão de Grupos de Produtos
   const grupoProdutoSelecionado = gruposProdutos.find((g) => g.id === grupoProdutoSelecionadoId) || gruposProdutos[0];
 
@@ -1105,24 +1132,86 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                   </span>
                 </div>
 
-                <div className="relative mt-1">
-                  <select
-                    value={grupoAtivoId}
-                    onChange={(e) => setGrupoAtivoId(e.target.value)}
-                    className="font-black text-base sm:text-lg text-slate-900 dark:text-white bg-transparent pr-8 cursor-pointer focus:outline-none hover:text-[#11d493] transition-colors"
-                  >
-                    {grupos.map((g) => (
-                      <option key={g.id} value={g.id} className="bg-white dark:bg-[#10221c] text-slate-900 dark:text-white font-semibold">
-                        {g.nome} ({g.clientes.length} clientes)
-                      </option>
-                    ))}
-                  </select>
+                <div className="flex items-center gap-2 mt-1">
+                  {isEditandoNomeGrupo ? (
+                    <form
+                      onSubmit={handleSalvarNovoNomeGrupo}
+                      className="flex items-center gap-1.5"
+                    >
+                      <input
+                        type="text"
+                        autoFocus
+                        value={novoNomeGrupoTemp}
+                        onChange={(e) => setNovoNomeGrupoTemp(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') setIsEditandoNomeGrupo(false);
+                        }}
+                        className="font-black text-base sm:text-lg px-2.5 py-1 rounded-xl bg-slate-50 dark:bg-[#162f27] border-2 border-[#11d493] text-slate-900 dark:text-white focus:outline-none shadow-sm min-w-[200px]"
+                        placeholder="Nome do Grupo"
+                      />
+                      <button
+                        type="submit"
+                        className="p-2 rounded-xl bg-[#11d493] text-slate-950 hover:bg-[#0eb880] transition active:scale-95 cursor-pointer shadow-sm"
+                        title="Salvar novo nome"
+                      >
+                        <Check className="w-4 h-4 stroke-[3]" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setIsEditandoNomeGrupo(false)}
+                        className="p-2 rounded-xl bg-slate-100 dark:bg-[#162f27] text-slate-500 hover:text-slate-900 dark:hover:text-white transition active:scale-95 cursor-pointer"
+                        title="Cancelar"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </form>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <div className="relative">
+                        <select
+                          value={grupoAtivoId}
+                          onChange={(e) => setGrupoAtivoId(e.target.value)}
+                          className="font-black text-base sm:text-lg text-slate-900 dark:text-white bg-transparent pr-8 cursor-pointer focus:outline-none hover:text-[#11d493] transition-colors"
+                        >
+                          {grupos.map((g) => (
+                            <option key={g.id} value={g.id} className="bg-white dark:bg-[#10221c] text-slate-900 dark:text-white font-semibold">
+                              {g.nome} ({g.clientes.length} clientes)
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNovoNomeGrupoTemp(grupoAtivo?.nome || '');
+                          setIsEditandoNomeGrupo(true);
+                        }}
+                        className="p-1.5 rounded-lg text-slate-400 hover:text-[#11d493] hover:bg-emerald-500/10 transition cursor-pointer"
+                        title="Renomear este grupo"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
 
             {/* Direita: Botões de Ação do Grupo */}
             <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => {
+                  setNovoNomeGrupoTemp(grupoAtivo?.nome || '');
+                  setIsEditandoNomeGrupo(true);
+                }}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-[#162f27] hover:bg-slate-200 dark:hover:bg-[#1f4237] text-slate-700 dark:text-slate-200 transition active:scale-95 cursor-pointer"
+                title="Alterar o nome do grupo atual"
+              >
+                <Pencil className="w-3.5 h-3.5 text-amber-500" />
+                <span>Renomear</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setIsNovoGrupoModalOpen(true)}
