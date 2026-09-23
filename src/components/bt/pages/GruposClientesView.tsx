@@ -79,10 +79,31 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     };
   }, []);
 
+  // Helper para data padrão D+30
+  const obterDataPadraoD30 = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    return d.toISOString().split('T')[0];
+  };
+
   // Lista de grupos salvos no cache local para esta empresa
   const [grupos, setGrupos] = useState<GrupoClientes[]>(() => {
     const salvos = obterGruposCacheLocal(empresa.id);
-    if (salvos.length > 0) return salvos;
+    const dataPadraoStr = obterDataPadraoD30();
+    if (salvos.length > 0) {
+      return salvos.map((g) => ({
+        ...g,
+        parcelasPadrao: g.parcelasPadrao || 1,
+        primeiroVencimentoPadrao: g.primeiroVencimentoPadrao || dataPadraoStr,
+        intervaloDiasPadrao: g.intervaloDiasPadrao || 30,
+        clientes: g.clientes.map((c) => ({
+          ...c,
+          parcelasCount: c.parcelasCount || g.parcelasPadrao || 1,
+          primeiroVencimento: c.primeiroVencimento || g.primeiroVencimentoPadrao || dataPadraoStr,
+          intervaloDias: c.intervaloDias || g.intervaloDiasPadrao || 30,
+        })),
+      }));
+    }
 
     // Se não tiver nenhum, cria um inicial de exemplo com os primeiros clientes da base
     const primeirosClientes = clientes.slice(0, 6);
@@ -163,9 +184,22 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
   // Ao trocar de empresa, recarrega grupos de clientes e grupos de produtos
   useEffect(() => {
     const salvos = obterGruposCacheLocal(empresa.id);
+    const dataPadraoStr = obterDataPadraoD30();
     if (salvos.length > 0) {
-      setGrupos(salvos);
-      setGrupoAtivoId(salvos[0].id);
+      const normalizados = salvos.map((g) => ({
+        ...g,
+        parcelasPadrao: g.parcelasPadrao || 1,
+        primeiroVencimentoPadrao: g.primeiroVencimentoPadrao || dataPadraoStr,
+        intervaloDiasPadrao: g.intervaloDiasPadrao || 30,
+        clientes: g.clientes.map((c) => ({
+          ...c,
+          parcelasCount: c.parcelasCount || g.parcelasPadrao || 1,
+          primeiroVencimento: c.primeiroVencimento || g.primeiroVencimentoPadrao || dataPadraoStr,
+          intervaloDias: c.intervaloDias || g.intervaloDiasPadrao || 30,
+        })),
+      }));
+      setGrupos(normalizados);
+      setGrupoAtivoId(normalizados[0].id);
     } else {
       const inicial = criarNovoGrupo(empresa.id, 'Grupo Principal', clientes.slice(0, 5), 5000, '');
       setGrupos([inicial]);
@@ -664,6 +698,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         email: c.email,
         valorAlvo: grupoAtivo.valorPadrao || 5000,
         filtroFoco: grupoAtivo.filtroPadrao || undefined,
+        parcelasCount: grupoAtivo.parcelasPadrao || parcelasMassa || 1,
+        primeiroVencimento: grupoAtivo.primeiroVencimentoPadrao || primeiroVencMassa || obterDataPadraoD30(),
+        intervaloDias: grupoAtivo.intervaloDiasPadrao || intervaloDiasMassa || 30,
         status: 'pendente',
       }));
 
@@ -1401,7 +1438,12 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                 type="date"
                 value={primeiroVencMassa}
                 onChange={(e) => setPrimeiroVencMassa(e.target.value)}
-                className="bg-transparent text-white font-mono text-xs focus:outline-none cursor-pointer"
+                onClick={(e) => {
+                  try {
+                    e.currentTarget.showPicker?.();
+                  } catch {}
+                }}
+                className="bg-slate-900 text-white font-mono font-bold text-xs focus:outline-none cursor-pointer [color-scheme:dark]"
               />
             </div>
 
@@ -1601,9 +1643,19 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                             <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">1º Vencimento</span>
                             <input
                               type="date"
-                              value={item.primeiroVencimento || primeiroVencMassa}
+                              value={item.primeiroVencimento !== undefined ? item.primeiroVencimento : (primeiroVencMassa || obterDataPadraoD30())}
                               onChange={(e) => handleUpdateItemPrimeiroVenc(item.clienteId, e.target.value)}
-                              className="w-full bg-slate-50 dark:bg-[#162f27]/60 border border-slate-200 dark:border-[#214739] rounded-lg py-1 px-2 text-[10px] font-mono font-medium text-slate-800 dark:text-white focus:outline-none focus:border-[#11d493] cursor-pointer"
+                              onBlur={(e) => {
+                                if (!e.target.value) {
+                                  handleUpdateItemPrimeiroVenc(item.clienteId, primeiroVencMassa || obterDataPadraoD30());
+                                }
+                              }}
+                              onClick={(e) => {
+                                try {
+                                  e.currentTarget.showPicker?.();
+                                } catch {}
+                              }}
+                              className="w-full bg-white dark:bg-[#162f27] border border-slate-300 dark:border-[#214739] rounded-lg py-1 px-2 text-[11px] font-mono font-bold text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-[#11d493] cursor-pointer [color-scheme:light] dark:[color-scheme:dark]"
                             />
                           </div>
 

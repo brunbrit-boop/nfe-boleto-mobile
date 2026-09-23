@@ -202,6 +202,9 @@ export function criarNovoGrupo(
 ): GrupoClientes {
   const agora = new Date().toISOString();
   const grupoId = `grupo_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+  const dataHoje = new Date();
+  dataHoje.setDate(dataHoje.getDate() + 30);
+  const primeiroVencPadrao = dataHoje.toISOString().split('T')[0];
 
   const itensClientes: GrupoClienteItem[] = clientesIniciais.map((c) => ({
     clienteId: c.id,
@@ -214,6 +217,9 @@ export function criarNovoGrupo(
     email: c.email,
     valorAlvo: valorPadrao,
     filtroFoco: filtroPadrao || undefined,
+    parcelasCount: 1,
+    primeiroVencimento: primeiroVencPadrao,
+    intervaloDias: 30,
     status: 'pendente',
   }));
 
@@ -223,6 +229,9 @@ export function criarNovoGrupo(
     nome: nome.trim() || 'Novo Grupo de Clientes',
     valorPadrao,
     filtroPadrao,
+    parcelasPadrao: 1,
+    primeiroVencimentoPadrao: primeiroVencPadrao,
+    intervaloDiasPadrao: 30,
     clientes: itensClientes,
     criadoEm: agora,
     atualizadoEm: agora,
