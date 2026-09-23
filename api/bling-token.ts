@@ -65,6 +65,41 @@ export default async function handler(req: any, res: any) {
 
     let data: any = await response.json().catch(() => null);
 
+    // Se falhou na troca de authorization_code (ex: incompatibilidade de redirect_uri entre localhost e vercel), tenta fallback
+    if (!response.ok && code && !refresh_token) {
+      const fallbackUris = [
+        'https://nfe-boleto-mobile.vercel.app/oauth/callback',
+        'http://localhost:5173/oauth/callback',
+        '', // Sem redirect_uri
+      ].filter((u) => u !== (params.get('redirect_uri') || ''));
+
+      for (const altUri of fallbackUris) {
+        const altParams = new URLSearchParams();
+        altParams.append('grant_type', 'authorization_code');
+        altParams.append('code', code);
+        if (altUri) {
+          altParams.append('redirect_uri', altUri);
+        }
+
+        const altRes = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Authorization': `Basic ${basicAuth}`,
+            'Accept': '1.0',
+          },
+          body: altParams.toString(),
+        });
+
+        const altData: any = await altRes.json().catch(() => null);
+        if (altRes.ok && altData?.access_token) {
+          response = altRes;
+          data = altData;
+          break;
+        }
+      }
+    }
+
     if (!response.ok) {
       const errObj: any = data || {};
       let errorMsg = errObj?.error_description || errObj?.error?.message || errObj?.error || errObj?.mensagem;

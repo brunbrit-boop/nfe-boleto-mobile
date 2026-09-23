@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import type {
   BankProvider,
   ChatMessage,
@@ -390,6 +390,9 @@ export const App: React.FC = () => {
     }
   };
 
+  // Trava para evitar que o React StrictMode ou re-renders executem o mesmo código OAuth duas vezes
+  const codeJaProcessadoRef = useRef<string | null>(null);
+
   // Monitora retorno OAuth do Bling e vincula estritamente à empresa alvo (via state ou pending ID)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -397,6 +400,14 @@ export const App: React.FC = () => {
     const stateParam = params.get('state');
 
     if (code) {
+      if (codeJaProcessadoRef.current === code) {
+        return;
+      }
+      codeJaProcessadoRef.current = code;
+
+      // Limpa imediatamente da URL para evitar requisições concorrentes ou re-execuções
+      window.history.replaceState({}, document.title, window.location.pathname);
+
       localStorage.setItem('bling_auth_code', code);
       const pendingEmpresaId = localStorage.getItem('bling_oauth_pending_empresa_id');
       const targetEmpresaId = stateParam && stateParam !== 'login' && stateParam !== 'cb9768157cff9aef9675a82bdd68c5e4' 
@@ -426,8 +437,8 @@ export const App: React.FC = () => {
 
       const existingTarget = listaEmpresas.find((e) => e.id === targetEmpresaId) || empresas.find((e) => e.id === targetEmpresaId);
 
-      const clientSecret = pendingCreds.clientSecret || existingTarget?.blingClientSecret || localStorage.getItem('bling_client_secret') || '';
-      const clientId = pendingCreds.clientId || existingTarget?.blingClientId || localStorage.getItem('bling_client_id') || '';
+      const clientSecret = pendingCreds.clientSecret || existingTarget?.blingClientSecret || (targetEmpresaId === 'emp_default_1' ? localStorage.getItem('bling_client_secret') : '') || '';
+      const clientId = pendingCreds.clientId || existingTarget?.blingClientId || (targetEmpresaId === 'emp_default_1' ? localStorage.getItem('bling_client_id') : '') || '';
 
       console.log('Trocando código de autorização por token de acesso no Bling para a empresa:', targetEmpresaId);
       exchangeBlingCodeForToken(code, clientId, clientSecret, targetEmpresaId || undefined).then(async (res) => {
@@ -516,9 +527,8 @@ export const App: React.FC = () => {
           alert(`⚠️ Aviso ao autenticar no Bling:\n\n${res.error}\n\nDica: Se você possui duas contas diferentes no Bling, faça logout da conta atual no Bling antes de autorizar a segunda empresa.`);
         }
       });
-      window.history.replaceState({}, document.title, window.location.pathname);
     }
-  }, [empresaAtivaId]);
+  }, []);
 
   // Processamento do comando de voz pelo Robô
   const handleProcessUserCommand = (textoComando: string, isFromAudio: boolean = false) => {
