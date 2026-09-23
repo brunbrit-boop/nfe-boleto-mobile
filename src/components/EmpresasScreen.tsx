@@ -131,47 +131,6 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
     setSecretModal(empresa.blingClientSecret || '');
   };
 
-  const outraEmpresaConectada = empresas.find(
-    (e) => e.id !== empresaParaAtivarBling?.id && e.isBlingConectado && e.blingAccessToken
-  );
-
-  const handleVincularConexaoExistente = (origem: EmpresaTenant, alvo?: EmpresaTenant) => {
-    const destino = alvo || empresaParaAtivarBling;
-    if (!destino) return;
-
-    const rawList = localStorage.getItem('nfe_empresas_list');
-    let lista: EmpresaTenant[] = empresas;
-    if (rawList) {
-      try {
-        lista = JSON.parse(rawList);
-      } catch {}
-    }
-
-    const atualizadas = lista.map((item) => {
-      if (item.id === destino.id) {
-        return {
-          ...item,
-          blingAccessToken: origem.blingAccessToken,
-          blingRefreshToken: origem.blingRefreshToken,
-          blingClientId: origem.blingClientId,
-          blingClientSecret: origem.blingClientSecret,
-          blingTokenExpiresAt: origem.blingTokenExpiresAt,
-          isBlingConectado: true,
-          isBlingExpirado: false,
-          ultimaSincronizacao: new Date().toISOString(),
-        };
-      }
-      return item;
-    });
-
-    localStorage.setItem('nfe_empresas_list', JSON.stringify(atualizadas));
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('nfe_empresas_updated'));
-    }
-    setEmpresaParaAtivarBling(null);
-    alert(`🎉 Sucesso! A empresa "${destino.nomeFantasia || destino.razaoSocial}" foi vinculada ao seu Bling! Ambas empresas permanecem conectadas e ativas simultaneamente.`);
-  };
-
   const handleConfirmarConexaoBling = (e: React.FormEvent) => {
     e.preventDefault();
     if (!empresaParaAtivarBling) return;
@@ -185,13 +144,6 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
     }
     if (!sec) {
       alert('Por favor, cole o Client Secret gerado no painel do Bling.');
-      return;
-    }
-
-    // Se o usuário colou o mesmo Client ID de outra empresa já conectada, vincula diretamente sem redirecionar
-    // para evitar que o Bling revogue o token da empresa anterior
-    if (outraEmpresaConectada && (cid === outraEmpresaConectada.blingClientId || (!outraEmpresaConectada.blingClientId && cid))) {
-      handleVincularConexaoExistente(outraEmpresaConectada);
       return;
     }
 
@@ -516,45 +468,17 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                                   </button>
                                 )}
                               </div>
-                            ) : (() => {
-                              const empresaConectadaRef = empresas.find(
-                                (e) => e.id !== empresa.id && e.isBlingConectado && e.blingAccessToken
-                              );
-                              if (empresaConectadaRef) {
-                                return (
-                                  <div className="flex items-center gap-1.5 flex-wrap">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleVincularConexaoExistente(empresaConectadaRef, empresa)}
-                                      className="inline-flex items-center gap-1.5 text-[11px] font-black px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 shadow-md shadow-emerald-500/20 transition-all duration-150 active:scale-95 cursor-pointer"
-                                      title={`Conectar instantaneamente ao Bling ativo (${empresaConectadaRef.nomeFantasia || empresaConectadaRef.razaoSocial}) sem deslogar ninguém!`}
-                                    >
-                                      <Sparkles className="w-3.5 h-3.5 text-slate-950" />
-                                      <span>⚡ Conectar ao mesmo Bling</span>
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleAbrirConectarBling(empresa)}
-                                      className="text-[10px] text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 underline px-1 py-0.5 cursor-pointer"
-                                      title="Conectar com outro aplicativo Bling separado"
-                                    >
-                                      Outra conta
-                                    </button>
-                                  </div>
-                                );
-                              }
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => handleAbrirConectarBling(empresa)}
-                                  className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-sm shadow-emerald-600/30 transition-all duration-150 active:scale-95 cursor-pointer"
-                                  title="Conectar aplicativo do Bling para sincronizar notas, clientes e produtos"
-                                >
-                                  <Sparkles className="w-3 h-3 text-amber-300" />
-                                  <span>⚡ Ativar Bling</span>
-                                </button>
-                              );
-                            })()}
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => handleAbrirConectarBling(empresa)}
+                                className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-sm shadow-emerald-600/30 transition-all duration-150 active:scale-95 cursor-pointer"
+                                title="Conectar aplicativo do Bling desta empresa"
+                              >
+                                <Sparkles className="w-3 h-3 text-amber-300" />
+                                <span>⚡ Ativar Bling</span>
+                              </button>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -869,27 +793,6 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
             </div>
 
             <form onSubmit={handleConfirmarConexaoBling} className="p-5 space-y-4">
-              {outraEmpresaConectada && (
-                <div className="p-3.5 rounded-xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-emerald-500/10 border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
-                  <div>
-                    <span className="text-xs font-black text-emerald-600 dark:text-[#11d493] flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5" />
-                      <span>Mesmo Bling / Multi-empresa (1 Clique)</span>
-                    </span>
-                    <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-1 leading-snug">
-                      Seus CNPJs ficam sob a mesma gestão no Bling? Vincule à conta já conectada (<strong>{outraEmpresaConectada.nomeFantasia || outraEmpresaConectada.razaoSocial}</strong>) sem deslogar ninguém!
-                    </p>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => handleVincularConexaoExistente(outraEmpresaConectada)}
-                    className="px-4 py-2.5 rounded-xl bg-[#11d493] hover:bg-[#0eb880] text-slate-950 font-extrabold text-xs shrink-0 transition shadow-md shadow-emerald-500/20 active:scale-95 cursor-pointer text-center"
-                  >
-                    ⚡ Vincular Agora
-                  </button>
-                </div>
-              )}
-
               <div className="bg-slate-50 dark:bg-[#162f27] rounded-xl p-4 border border-slate-200/90 dark:border-[#214739] space-y-3.5">
                 <div>
                   <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300 block mb-1">
