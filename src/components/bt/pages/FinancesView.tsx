@@ -10,9 +10,7 @@ import {
   CartesianGrid,
   ReferenceLine,
   ReferenceArea,
-  Legend,
 } from 'recharts';
-import { MultiSelect, type MultiSelectOption } from '../finances/MultiSelect';
 import { BankUploadModal } from '../finances/BankUploadModal';
 import { ClassifyTransactionsModal, type ClassificationRule } from '../finances/ClassifyTransactionsModal';
 import { BankPatternChatbotModal } from '../finances/BankPatternChatbotModal';
@@ -541,11 +539,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     column: string;
   } | null>(null);
 
-  // Filtros Globais do Topo (MultiSelect)
-  const [selectedBankIds, setSelectedBankIds] = useState<string[]>([]);
-  const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([]);
-  const [selectedCategoryIds, setSelectedCategoryIds] = useState<string[]>([]);
-
   // Modais Avançados do BT Business
   const [showAddPayable, setShowAddPayable] = useState(false);
   const [showAddReceivable, setShowAddReceivable] = useState(false);
@@ -815,34 +808,27 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     setAllTransactions([...bankStatementPast, ...list, ...futureModel]);
   }, [contasPagar, contasReceber, todayISO]);
 
-  // --- Opções Dinâmicas dos Filtros Globais MultiSelect ---
-  const bankOptions: MultiSelectOption[] = useMemo(() => {
+  // --- Opções Dinâmicas para os Selects das Tabelas e Modais ---
+  const bankOptions = useMemo(() => {
     const set = new Set<string>();
     allTransactions.forEach((t) => t.bankName && set.add(t.bankName));
     return Array.from(set).sort().map((name) => ({ id: name, name }));
   }, [allTransactions]);
 
-  const unitOptions: MultiSelectOption[] = useMemo(() => {
+  const unitOptions = useMemo(() => {
     const set = new Set<string>();
     allTransactions.forEach((t) => t.unit && set.add(t.unit));
     return Array.from(set).sort().map((name) => ({ id: name, name }));
   }, [allTransactions]);
 
-  const categoryOptions: MultiSelectOption[] = useMemo(() => {
+  const categoryOptions = useMemo(() => {
     const set = new Set<string>();
     allTransactions.forEach((t) => t.category && set.add(t.category));
     return Array.from(set).sort().map((name) => ({ id: name, name }));
   }, [allTransactions]);
 
-  // --- Filtro Global Base (Bancos, Unidades, Categorias) ---
-  const baseFilteredTransactions = useMemo(() => {
-    return allTransactions.filter((tx) => {
-      if (selectedBankIds.length > 0 && !selectedBankIds.includes(tx.bankName)) return false;
-      if (selectedUnitIds.length > 0 && !selectedUnitIds.includes(tx.unit)) return false;
-      if (selectedCategoryIds.length > 0 && !selectedCategoryIds.includes(tx.category)) return false;
-      return true;
-    });
-  }, [allTransactions, selectedBankIds, selectedUnitIds, selectedCategoryIds]);
+  // --- Transações Base ---
+  const baseFilteredTransactions = allTransactions;
 
   // --- Operação de Arraste da Barra Divisória (Split Resizer) ---
   useEffect(() => {
@@ -1350,39 +1336,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     filtersReceivable,
   ]);
 
-  // Totais e Contadores
-  const totals = useMemo(() => {
-    const totalPay = payablesList.reduce((acc, curr) => acc + curr.amount, 0);
-    const totalRec = receivablesList.reduce((acc, curr) => acc + curr.amount, 0);
-    return {
-      totalPayable: totalPay,
-      totalReceivable: totalRec,
-      balanceDiff: totalRec - totalPay,
-    };
-  }, [payablesList, receivablesList]);
-
-  const counts = useMemo(() => {
-    let base = baseFilteredTransactions;
-    if (pinnedFilterDate) {
-      base = base.filter((tx) => tx.date === pinnedFilterDate);
-    } else {
-      base = base.filter(
-        (tx) => tx.date >= visibleDateRange.startDate && tx.date <= visibleDateRange.endDate
-      );
-    }
-    if (pinnedFilterCategory) {
-      base = base.filter((tx) => tx.category.toLowerCase() === pinnedFilterCategory.toLowerCase());
-    }
-    if (pinnedFilterUnit) {
-      base = base.filter((tx) => tx.unit.toLowerCase() === pinnedFilterUnit.toLowerCase());
-    }
-    return {
-      forecast: base.filter((tx) => tx.status !== 'paid').length,
-      realized: base.filter((tx) => tx.status === 'paid' || tx.status === 'marked_reopen').length,
-      all: base.length,
-    };
-  }, [baseFilteredTransactions, pinnedFilterDate, visibleDateRange, pinnedFilterCategory, pinnedFilterUnit]);
-
   // Funil de cabeçalho por coluna
   const renderHeaderWithFilter = (
     table: 'payable' | 'receivable',
@@ -1472,11 +1425,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     }
     setSelectedTableItemIds(next);
   };
-
-  const hasAnyGlobalFilter =
-    selectedBankIds.length > 0 ||
-    selectedUnitIds.length > 0 ||
-    selectedCategoryIds.length > 0;
 
   return (
     <div
@@ -1627,60 +1575,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         </div>
       </div>
 
-      {/* 2. Barra de Filtros Globais Multi-Dimensão (Bancos, Unidades, Categorias) */}
-      <div className="px-4 py-1.5 bg-gray-50 dark:bg-[#10221c]/90 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between gap-3 shrink-0 flex-wrap">
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1 text-xs font-extrabold text-gray-600 dark:text-gray-300 mr-1">
-            <span className="material-symbols-outlined text-sm text-[#11d493]">tune</span>
-            <span>FILTROS GLOBAIS:</span>
-          </div>
-
-          <MultiSelect
-            label="Contas/Bancos"
-            options={bankOptions}
-            selectedIds={selectedBankIds}
-            onChange={setSelectedBankIds}
-          />
-
-          <MultiSelect
-            label="Unidades"
-            options={unitOptions}
-            selectedIds={selectedUnitIds}
-            onChange={setSelectedUnitIds}
-          />
-
-          <MultiSelect
-            label="Categorias"
-            options={categoryOptions}
-            selectedIds={selectedCategoryIds}
-            onChange={setSelectedCategoryIds}
-          />
-
-          {hasAnyGlobalFilter && (
-            <button
-              onClick={() => {
-                setSelectedBankIds([]);
-                setSelectedUnitIds([]);
-                setSelectedCategoryIds([]);
-              }}
-              className="text-[11px] text-red-500 hover:text-red-700 dark:hover:text-red-400 font-bold underline ml-1"
-            >
-              Limpar Filtros
-            </button>
-          )}
-        </div>
-
-        {/* Resumo do Período Atual */}
-        <div className="text-xs font-bold text-gray-600 dark:text-gray-300 hidden lg:flex items-center gap-3">
-          <span>
-            Total Despesas: <strong className="text-rose-500">{formatBRL(totals.totalPayable)}</strong>
-          </span>
-          <span>
-            Total Receitas: <strong className="text-emerald-500">{formatBRL(totals.totalReceivable)}</strong>
-          </span>
-        </div>
-      </div>
-
       {/* 3. Área do Gráfico com Equalizador Hierárquico SVG e Zoom Contínuo */}
       {!isChartMinimized && (
         <div
@@ -1738,8 +1632,6 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                 }}
               />
 
-              <Legend verticalAlign="top" height={24} wrapperStyle={{ fontSize: '11px', fontWeight: 'bold' }} />
-
               {/* Equalizador de Despesas */}
               <Bar
                 yAxisId="left"
@@ -1786,65 +1678,34 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             </ComposedChart>
           </ResponsiveContainer>
 
-          {/* Mini-Tooltip Leve de Hover (Aparece ao passar o mouse sobre as barras ou a bolinha de saldo) */}
+          {/* Mini-Badge Leve de Hover (Mostra apenas o valor numérico na cor da coluna/barra) */}
           {!pinnedTooltipData && hoveredChartItem && (
             <div
-              className="absolute z-[110] pointer-events-none animate-in fade-in zoom-in-95 duration-100"
+              className="absolute z-[110] pointer-events-none animate-in fade-in duration-75"
               style={{
-                left: Math.min(
-                  typeof window !== 'undefined' ? window.innerWidth - 220 : 450,
-                  Math.max(120, hoveredChartItem.pos.x)
-                ),
-                top: Math.max(10, Math.min(hoveredChartItem.pos.y - 70, 110)),
+                left: hoveredChartItem.pos.x,
+                top: Math.max(6, hoveredChartItem.pos.y - 28),
                 transform: 'translateX(-50%)',
               }}
             >
-              <div className="bg-slate-900/95 dark:bg-black/95 text-white border border-slate-700/80 shadow-2xl rounded-xl px-3 py-2 text-xs flex flex-col gap-0.5 backdrop-blur-md min-w-[190px]">
-                <div className="flex items-center justify-between gap-3 text-[10px] text-slate-400 border-b border-slate-800 pb-1">
-                  <span className="font-semibold text-slate-200">
-                    {hoveredChartItem.payload.displayDate} ({hoveredChartItem.payload.date})
-                  </span>
-                  <span
-                    className={`text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded ${
-                      hoveredChartItem.payload.date < todayISO
-                        ? 'bg-amber-950/60 text-amber-300 border border-amber-800/40'
-                        : 'bg-blue-950/60 text-blue-300 border border-blue-800/40'
-                    }`}
-                  >
-                    {hoveredChartItem.payload.date < todayISO ? 'Passado' : 'Previsão'}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 pt-1 font-bold">
-                  <span
-                    className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
-                    style={{
-                      backgroundColor:
-                        hoveredChartItem.kind === 'receivable'
-                          ? '#11d493'
-                          : hoveredChartItem.kind === 'payable'
-                          ? '#EF4444'
-                          : '#3B82F6',
-                    }}
-                  />
-                  <span className="text-slate-300 text-[11px] font-medium">{hoveredChartItem.title}:</span>
-                  <span
-                    className="font-mono text-xs tracking-tight font-extrabold ml-auto"
-                    style={{
-                      color:
-                        hoveredChartItem.kind === 'receivable'
-                          ? '#11d493'
-                          : hoveredChartItem.kind === 'payable'
-                          ? '#F87171'
-                          : '#60A5FA',
-                    }}
-                  >
-                    {formatBRL(hoveredChartItem.value)}
-                  </span>
-                </div>
-                <div className="text-[9px] text-slate-400/90 pt-0.5 flex items-center gap-1">
-                  <span>👆</span>
-                  <span>Clique para fixar e detalhar categorias</span>
-                </div>
+              <div
+                className="px-2 py-0.5 rounded-md shadow-md border text-[11px] font-mono font-black tracking-tight whitespace-nowrap bg-white/95 dark:bg-gray-900/95 backdrop-blur-sm"
+                style={{
+                  color:
+                    hoveredChartItem.kind === 'receivable'
+                      ? '#059669'
+                      : hoveredChartItem.kind === 'payable'
+                      ? '#dc2626'
+                      : '#2563eb',
+                  borderColor:
+                    hoveredChartItem.kind === 'receivable'
+                      ? '#10b981'
+                      : hoveredChartItem.kind === 'payable'
+                      ? '#ef4444'
+                      : '#3b82f6',
+                }}
+              >
+                {formatBRL(hoveredChartItem.value)}
               </div>
             </div>
           )}
@@ -1882,120 +1743,54 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         </div>
       )}
 
-      {/* 4. Barra de Controle e Abas de Exibição ("EXIBIÇÃO:") */}
-      <div className="px-4 py-2 bg-gray-100 dark:bg-gray-800/80 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between flex-wrap gap-2 shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-bold text-gray-500 dark:text-gray-400 uppercase flex items-center gap-1">
-            <span className="material-symbols-outlined text-[15px]">view_agenda</span>
-            EXIBIÇÃO:
-          </span>
-
-          <div className="flex bg-gray-200 dark:bg-gray-700/60 p-0.5 rounded-lg text-xs font-semibold gap-1">
-            <button
-              onClick={() => setTableMode('forecast')}
-              className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
-                tableMode === 'forecast'
-                  ? 'bg-white dark:bg-gray-900 text-blue-600 dark:text-blue-400 shadow-sm font-bold'
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900'
-              }`}
-            >
-              <span>🔮 Previsão (A Vencer)</span>
-              <span className="text-[10px] px-1.5 py-0.2 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 rounded-full font-bold">
-                {counts.forecast}
-              </span>
-            </button>
-
-            <button
-              onClick={() => setTableMode('realized')}
-              className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
-                tableMode === 'realized'
-                  ? 'bg-white dark:bg-gray-900 text-purple-600 dark:text-purple-400 shadow-sm font-bold'
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900'
-              }`}
-            >
-              <span>📜 Realizado (Auditado)</span>
-              <span className="text-[10px] px-1.5 py-0.2 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded-full font-bold">
-                {counts.realized}
-              </span>
-            </button>
-
-            <button
-              onClick={() => setTableMode('all')}
-              className={`px-3 py-1 rounded-md transition-all flex items-center gap-1.5 ${
-                tableMode === 'all'
-                  ? 'bg-white dark:bg-gray-900 text-emerald-600 dark:text-emerald-400 shadow-sm font-bold'
-                  : 'text-gray-600 dark:text-gray-400 hover:text-gray-900'
-              }`}
-            >
-              <span>📋 Todas</span>
-              <span className="text-[10px] px-1.5 py-0.2 bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 rounded-full font-bold">
-                {counts.all}
-              </span>
-            </button>
-          </div>
-        </div>
-
-        {/* Tags de Filtros Ativos */}
-        <div className="flex items-center gap-2 flex-wrap">
-          {pinnedFilterDate ? (
-            <div className="flex items-center gap-1.5 bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 px-2.5 py-0.5 rounded-full text-xs">
-              <span className="material-symbols-outlined text-[13px]">calendar_month</span>
-              <span>Data Selecionada: <strong>{formatFullDateBr(pinnedFilterDate)}</strong></span>
-              <span
-                className={`text-[9px] px-1.5 py-0.2 rounded font-bold uppercase ${
-                  pinnedFilterDate < todayISO
-                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
-                    : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
-                }`}
-              >
-                {pinnedFilterDate < todayISO ? 'Passado / Auditado' : 'Futuro / Previsão'}
-              </span>
+      {/* Se houver algum filtro fixado (data, categoria, unidade) via clique no gráfico, exibe barra de chips compacta */}
+      {(pinnedFilterDate || pinnedFilterCategory || pinnedFilterUnit) && (
+        <div className="px-4 py-1.5 bg-blue-50/80 dark:bg-blue-950/40 border-b border-blue-200 dark:border-blue-900/50 flex items-center gap-2 flex-wrap shrink-0 text-xs">
+          <span className="font-bold text-blue-900 dark:text-blue-200 text-[11px] uppercase">Filtro Ativo:</span>
+          {pinnedFilterDate && (
+            <div className="flex items-center gap-1.5 bg-white dark:bg-gray-900 text-blue-700 dark:text-blue-300 px-2.5 py-0.5 rounded-full border border-blue-200 dark:border-blue-800 text-xs font-semibold shadow-xs">
+              <span>📅 {formatFullDateBr(pinnedFilterDate)}</span>
               <button
                 onClick={handleClosePinnedTooltip}
-                className="hover:text-red-500 ml-1 flex items-center"
-                title="Limpar filtro da coluna e voltar ao período visível"
+                className="hover:text-red-500 ml-1 text-sm font-bold leading-none"
+                title="Limpar filtro de data"
               >
-                <span className="material-symbols-outlined text-[14px]">cancel</span>
+                ×
               </button>
             </div>
-          ) : (
-            <div className="flex items-center gap-1.5 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 px-2.5 py-0.5 rounded-full text-xs">
-              <span className="material-symbols-outlined text-[13px] text-[#11d493]">calendar_today</span>
-              <span>
-                Período Visível: <strong>{formatDateBr(visibleDateRange.startDate)} a {formatDateBr(visibleDateRange.endDate)}</strong> ({visibleDays}d)
-              </span>
-            </div>
           )}
-
           {pinnedFilterCategory && (
-            <div className="flex items-center gap-1.5 bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-800 text-purple-700 dark:text-purple-300 px-2.5 py-0.5 rounded-full text-xs">
-              <span className="material-symbols-outlined text-[13px]">category</span>
-              <span>Categoria: <strong>{pinnedFilterCategory}</strong></span>
+            <div className="flex items-center gap-1.5 bg-white dark:bg-gray-900 text-purple-700 dark:text-purple-300 px-2.5 py-0.5 rounded-full border border-purple-200 dark:border-purple-800 text-xs font-semibold shadow-xs">
+              <span>🏷️ {pinnedFilterCategory}</span>
               <button
                 onClick={() => setPinnedFilterCategory(null)}
-                className="hover:text-red-500 ml-0.5 flex items-center"
+                className="hover:text-red-500 ml-1 text-sm font-bold leading-none"
                 title="Limpar filtro de categoria"
               >
-                <span className="material-symbols-outlined text-[14px]">cancel</span>
+                ×
               </button>
             </div>
           )}
-
           {pinnedFilterUnit && (
-            <div className="flex items-center gap-1.5 bg-amber-50 dark:bg-amber-900/30 border border-amber-200 dark:border-amber-800 text-amber-700 dark:text-amber-300 px-2.5 py-0.5 rounded-full text-xs">
-              <span className="material-symbols-outlined text-[13px]">domain</span>
-              <span>Unidade: <strong>{pinnedFilterUnit}</strong></span>
+            <div className="flex items-center gap-1.5 bg-white dark:bg-gray-900 text-amber-700 dark:text-amber-300 px-2.5 py-0.5 rounded-full border border-amber-200 dark:border-amber-800 text-xs font-semibold shadow-xs">
+              <span>🏢 {pinnedFilterUnit}</span>
               <button
                 onClick={() => setPinnedFilterUnit(null)}
-                className="hover:text-red-500 ml-0.5 flex items-center"
+                className="hover:text-red-500 ml-1 text-sm font-bold leading-none"
                 title="Limpar filtro de unidade"
               >
-                <span className="material-symbols-outlined text-[14px]">cancel</span>
+                ×
               </button>
             </div>
           )}
+          <button
+            onClick={handleClosePinnedTooltip}
+            className="text-[11px] text-red-500 hover:text-red-700 dark:hover:text-red-400 underline font-bold ml-auto"
+          >
+            Limpar Filtro
+          </button>
         </div>
-      </div>
+      )}
 
       {/* 5. Divisão em Duas Colunas com Split Resizer Arrastável */}
       <div
