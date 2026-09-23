@@ -54,30 +54,73 @@ type TableMode = 'forecast' | 'realized' | 'all';
 const EXPENSE_SEGMENT_COLORS = ['#EF4444', '#F59E0B', '#FB7185', '#FACC15', '#A855F7', '#EC4899'];
 const INCOME_SEGMENT_COLORS = ['#11d493', '#10B981', '#3B82F6', '#0EA5E9', '#6366F1', '#14B8A6'];
 
-// Equalizador Hierárquico SVG
-const EqualizerBar = (props: any) => {
-  const { x, y, width, height, payload, type } = props;
+// EqualizerBar Hierárquico SVG com Interatividade (Clique para Fixar e Hover Leve)
+interface EqualizerBarProps {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  payload?: any;
+  type?: 'payable' | 'receivable';
+  onBarClick?: (payload: any, pos: { x: number; y: number }, type: 'payable' | 'receivable') => void;
+  onBarHover?: (payload: any, pos: { x: number; y: number }, type: 'payable' | 'receivable') => void;
+  onBarLeave?: () => void;
+}
+
+const EqualizerBar = (props: EqualizerBarProps) => {
+  const { x, y, width, height, payload, type, onBarClick, onBarHover, onBarLeave } = props;
   if (!payload || !width || !height) return null;
 
-  const isExpense = type === 'payable';
+  const barType: 'payable' | 'receivable' = type || 'payable';
+  const isExpense = barType === 'payable';
   const breakdown = isExpense ? payload.payableBreakdown : payload.receivableBreakdown;
   const total = isExpense ? payload.despesas : payload.receitas;
 
   const bgColor = isExpense ? '#EF4444' : '#11d493';
   const palette = isExpense ? EXPENSE_SEGMENT_COLORS : INCOME_SEGMENT_COLORS;
 
+  const startX = x || 0;
+  const startY = y || 0;
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (onBarClick) {
+      onBarClick(payload, { x: startX + (width || 0) / 2, y: startY }, barType);
+    }
+  };
+
+  const handleMouseEnter = () => {
+    if (onBarHover) {
+      onBarHover(payload, { x: startX + (width || 0) / 2, y: startY }, barType);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    if (onBarLeave) {
+      onBarLeave();
+    }
+  };
+
   if (!total || total === 0 || !breakdown || breakdown.length === 0) {
     return (
-      <rect
-        x={x}
-        y={y}
-        width={Math.max(0, width)}
-        height={Math.max(0, height)}
-        fill={bgColor}
-        opacity={0.8}
-        rx={2}
-        ry={2}
-      />
+      <g
+        className="cursor-pointer group transition-opacity hover:opacity-80"
+        onClick={handleClick}
+        onMouseDown={(e) => e.stopPropagation()}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+      >
+        <rect
+          x={startX}
+          y={startY}
+          width={Math.max(0, width)}
+          height={Math.max(0, height)}
+          fill={bgColor}
+          opacity={0.8}
+          rx={2}
+          ry={2}
+        />
+      </g>
     );
   }
 
@@ -85,10 +128,16 @@ const EqualizerBar = (props: any) => {
   const colWidth = Math.max(0, width) / numberOfCategories;
 
   return (
-    <g>
+    <g
+      className="cursor-pointer group transition-opacity hover:opacity-85"
+      onClick={handleClick}
+      onMouseDown={(e) => e.stopPropagation()}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >
       <rect
-        x={x}
-        y={y}
+        x={startX}
+        y={startY}
         width={Math.max(0, width)}
         height={Math.max(0, height)}
         fill={bgColor}
@@ -98,7 +147,7 @@ const EqualizerBar = (props: any) => {
       />
 
       {breakdown.map((catData: any, catIndex: number) => {
-        const colX = x + catIndex * colWidth;
+        const colX = startX + catIndex * colWidth;
         const divisor = total || 1;
         const colHeight = (catData.totalValue / divisor) * (height || 0);
         const colBaseY = (y || 0) + (height || 0);
@@ -176,6 +225,8 @@ interface CustomTooltipProps {
   onFilterCategory?: (category: string, date: string) => void;
   onFilterUnit?: (unit: string, date: string, category?: string) => void;
   onClose?: () => void;
+  activeCategory?: string | null;
+  activeUnit?: string | null;
 }
 
 const CustomTooltip: React.FC<CustomTooltipProps> = ({
@@ -186,6 +237,8 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({
   onFilterCategory,
   onFilterUnit,
   onClose,
+  activeCategory,
+  activeUnit,
 }) => {
   if (active && payload && payload.length > 0) {
     const data = payload[0].payload;
@@ -219,11 +272,11 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({
 
           {isInteractive ? (
             <span className="block text-[10px] text-[#11d493] font-semibold mt-0.5">
-              Clique em um item para filtrar a tabela
+              Clique em uma categoria ou unidade para filtrar o gráfico e tabela
             </span>
           ) : (
             <span className="block text-[9px] text-gray-400 font-normal mt-0.5">
-              Clique na bolinha de saldo para fixar e filtrar
+              Clique na barra ou na bolinha para fixar e filtrar
             </span>
           )}
 
@@ -233,7 +286,7 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({
                 e.stopPropagation();
                 onClose();
               }}
-              className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow-lg transition-colors"
+              className="absolute -top-1.5 -right-1.5 w-6 h-6 bg-red-500 hover:bg-red-600 text-white rounded-full flex items-center justify-center shadow-lg transition-colors cursor-pointer"
               title="Fechar e desmarcar fixação"
             >
               <span className="material-symbols-outlined text-[14px]">close</span>
@@ -251,62 +304,76 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({
 
             {data.receivableBreakdown && data.receivableBreakdown.length > 0 ? (
               <ul className="space-y-2">
-                {data.receivableBreakdown.map((item: any, idx: number) => (
-                  <li key={idx} className="flex flex-col text-gray-600 dark:text-gray-300">
-                    <div
-                      className={`flex justify-between items-center gap-1 p-1 rounded transition-colors group ${
-                        isInteractive
-                          ? 'cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-900/30'
-                          : ''
-                      }`}
-                      onClick={() => isInteractive && onFilterCategory && onFilterCategory(item.category, data.date)}
-                      title={isInteractive ? `Filtrar tabela por ${item.category}` : undefined}
-                    >
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <div
-                          className="w-2 h-2 rounded-full shrink-0"
-                          style={{
-                            backgroundColor:
-                              INCOME_SEGMENT_COLORS[idx % INCOME_SEGMENT_COLORS.length],
-                          }}
-                        />
-                        <span className="font-bold truncate text-[11px]" title={item.category}>
-                          {item.category}
+                {data.receivableBreakdown.map((item: any, idx: number) => {
+                  const isCatSelected = activeCategory && activeCategory.toLowerCase() === item.category.toLowerCase();
+                  return (
+                    <li key={idx} className="flex flex-col text-gray-600 dark:text-gray-300">
+                      <div
+                        className={`flex justify-between items-center gap-1 p-1 rounded transition-colors group ${
+                          isInteractive
+                            ? 'cursor-pointer hover:bg-emerald-50 dark:hover:bg-emerald-900/30'
+                            : ''
+                        } ${
+                          isCatSelected
+                            ? 'bg-emerald-100/90 dark:bg-emerald-900/50 ring-1 ring-emerald-500 font-bold text-emerald-800 dark:text-emerald-200'
+                            : ''
+                        }`}
+                        onClick={() => isInteractive && onFilterCategory && onFilterCategory(item.category, data.date)}
+                        title={isInteractive ? (isCatSelected ? `Clique para remover filtro de ${item.category}` : `Filtrar tabela por ${item.category}`) : undefined}
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <div
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{
+                              backgroundColor:
+                                INCOME_SEGMENT_COLORS[idx % INCOME_SEGMENT_COLORS.length],
+                            }}
+                          />
+                          <span className="font-bold truncate text-[11px]" title={item.category}>
+                            {item.category}
+                          </span>
+                        </div>
+                        <span className="font-mono font-semibold shrink-0 text-[10px]">
+                          {formatBRL(item.totalValue)}
                         </span>
                       </div>
-                      <span className="font-mono font-semibold shrink-0 text-[10px]">
-                        {formatBRL(item.totalValue)}
-                      </span>
-                    </div>
 
-                    {item.units && item.units.length > 0 && (
-                      <div className="pl-2.5 mt-0.5 border-l-2 border-emerald-200 dark:border-emerald-900/40 space-y-0.5">
-                        {item.units.map((u: any, uIdx: number) => (
-                          <div
-                            key={uIdx}
-                            className={`flex justify-between text-[10px] text-gray-400 dark:text-gray-400 py-0.5 px-1 rounded group ${
-                              isInteractive
-                                ? 'cursor-pointer hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20'
-                                : ''
-                            }`}
-                            onClick={(e) => {
-                              if (isInteractive && onFilterUnit) {
-                                e.stopPropagation();
-                                onFilterUnit(u.unitName, data.date, item.category);
-                              }
-                            }}
-                            title={isInteractive ? `Filtrar por unidade ${u.unitName}` : undefined}
-                          >
-                            <span className="truncate max-w-[85px]" title={u.unitName}>
-                              {u.unitName}
-                            </span>
-                            <span className="shrink-0 font-mono">{formatBRL(u.value)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </li>
-                ))}
+                      {item.units && item.units.length > 0 && (
+                        <div className="pl-2.5 mt-0.5 border-l-2 border-emerald-200 dark:border-emerald-900/40 space-y-0.5">
+                          {item.units.map((u: any, uIdx: number) => {
+                            const isUnitSelected = activeUnit && activeUnit.toLowerCase() === u.unitName.toLowerCase();
+                            return (
+                              <div
+                                key={uIdx}
+                                className={`flex justify-between text-[10px] text-gray-400 dark:text-gray-400 py-0.5 px-1 rounded group ${
+                                  isInteractive
+                                    ? 'cursor-pointer hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50/50 dark:hover:bg-emerald-900/20'
+                                    : ''
+                                } ${
+                                  isUnitSelected
+                                    ? 'bg-emerald-100/70 dark:bg-emerald-900/40 font-bold text-emerald-700 dark:text-emerald-300'
+                                    : ''
+                                }`}
+                                onClick={(e) => {
+                                  if (isInteractive && onFilterUnit) {
+                                    e.stopPropagation();
+                                    onFilterUnit(u.unitName, data.date, item.category);
+                                  }
+                                }}
+                                title={isInteractive ? `Filtrar por unidade ${u.unitName}` : undefined}
+                              >
+                                <span className="truncate max-w-[85px]" title={u.unitName}>
+                                  {u.unitName}
+                                </span>
+                                <span className="shrink-0 font-mono">{formatBRL(u.value)}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className="text-gray-400 italic text-[10px] py-1">Sem receitas</p>
@@ -322,62 +389,76 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({
 
             {data.payableBreakdown && data.payableBreakdown.length > 0 ? (
               <ul className="space-y-2">
-                {data.payableBreakdown.map((item: any, idx: number) => (
-                  <li key={idx} className="flex flex-col text-gray-600 dark:text-gray-300">
-                    <div
-                      className={`flex justify-between items-center gap-1 p-1 rounded transition-colors group ${
-                        isInteractive
-                          ? 'cursor-pointer hover:bg-rose-50 dark:hover:bg-rose-900/30'
-                          : ''
-                      }`}
-                      onClick={() => isInteractive && onFilterCategory && onFilterCategory(item.category, data.date)}
-                      title={isInteractive ? `Filtrar tabela por ${item.category}` : undefined}
-                    >
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <div
-                          className="w-2 h-2 rounded-full shrink-0"
-                          style={{
-                            backgroundColor:
-                              EXPENSE_SEGMENT_COLORS[idx % EXPENSE_SEGMENT_COLORS.length],
-                          }}
-                        />
-                        <span className="font-bold truncate text-[11px]" title={item.category}>
-                          {item.category}
+                {data.payableBreakdown.map((item: any, idx: number) => {
+                  const isCatSelected = activeCategory && activeCategory.toLowerCase() === item.category.toLowerCase();
+                  return (
+                    <li key={idx} className="flex flex-col text-gray-600 dark:text-gray-300">
+                      <div
+                        className={`flex justify-between items-center gap-1 p-1 rounded transition-colors group ${
+                          isInteractive
+                            ? 'cursor-pointer hover:bg-rose-50 dark:hover:bg-rose-900/30'
+                            : ''
+                        } ${
+                          isCatSelected
+                            ? 'bg-rose-100/90 dark:bg-rose-900/50 ring-1 ring-rose-500 font-bold text-rose-800 dark:text-rose-200'
+                            : ''
+                        }`}
+                        onClick={() => isInteractive && onFilterCategory && onFilterCategory(item.category, data.date)}
+                        title={isInteractive ? (isCatSelected ? `Clique para remover filtro de ${item.category}` : `Filtrar tabela por ${item.category}`) : undefined}
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <div
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{
+                              backgroundColor:
+                                EXPENSE_SEGMENT_COLORS[idx % EXPENSE_SEGMENT_COLORS.length],
+                            }}
+                          />
+                          <span className="font-bold truncate text-[11px]" title={item.category}>
+                            {item.category}
+                          </span>
+                        </div>
+                        <span className="font-mono font-semibold shrink-0 text-[10px]">
+                          {formatBRL(item.totalValue)}
                         </span>
                       </div>
-                      <span className="font-mono font-semibold shrink-0 text-[10px]">
-                        {formatBRL(item.totalValue)}
-                      </span>
-                    </div>
 
-                    {item.units && item.units.length > 0 && (
-                      <div className="pl-2.5 mt-0.5 border-l-2 border-rose-200 dark:border-rose-900/40 space-y-0.5">
-                        {item.units.map((u: any, uIdx: number) => (
-                          <div
-                            key={uIdx}
-                            className={`flex justify-between text-[10px] text-gray-400 dark:text-gray-400 py-0.5 px-1 rounded group ${
-                              isInteractive
-                                ? 'cursor-pointer hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50/50 dark:hover:bg-rose-900/20'
-                                : ''
-                            }`}
-                            onClick={(e) => {
-                              if (isInteractive && onFilterUnit) {
-                                e.stopPropagation();
-                                onFilterUnit(u.unitName, data.date, item.category);
-                              }
-                            }}
-                            title={isInteractive ? `Filtrar por unidade ${u.unitName}` : undefined}
-                          >
-                            <span className="truncate max-w-[85px]" title={u.unitName}>
-                              {u.unitName}
-                            </span>
-                            <span className="shrink-0 font-mono">{formatBRL(u.value)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </li>
-                ))}
+                      {item.units && item.units.length > 0 && (
+                        <div className="pl-2.5 mt-0.5 border-l-2 border-rose-200 dark:border-rose-900/40 space-y-0.5">
+                          {item.units.map((u: any, uIdx: number) => {
+                            const isUnitSelected = activeUnit && activeUnit.toLowerCase() === u.unitName.toLowerCase();
+                            return (
+                              <div
+                                key={uIdx}
+                                className={`flex justify-between text-[10px] text-gray-400 dark:text-gray-400 py-0.5 px-1 rounded group ${
+                                  isInteractive
+                                    ? 'cursor-pointer hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50/50 dark:hover:bg-rose-900/20'
+                                    : ''
+                                } ${
+                                  isUnitSelected
+                                    ? 'bg-rose-100/70 dark:bg-rose-900/40 font-bold text-rose-700 dark:text-rose-300'
+                                    : ''
+                                }`}
+                                onClick={(e) => {
+                                  if (isInteractive && onFilterUnit) {
+                                    e.stopPropagation();
+                                    onFilterUnit(u.unitName, data.date, item.category);
+                                  }
+                                }}
+                                title={isInteractive ? `Filtrar por unidade ${u.unitName}` : undefined}
+                              >
+                                <span className="truncate max-w-[85px]" title={u.unitName}>
+                                  {u.unitName}
+                                </span>
+                                <span className="shrink-0 font-mono">{formatBRL(u.value)}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <p className="text-gray-400 italic text-[10px] py-1">Sem despesas</p>
@@ -430,9 +511,12 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   // Pinned Tooltip / Drill-down
   const [pinnedTooltipData, setPinnedTooltipData] = useState<any>(null);
   const [pinnedTooltipPos, setPinnedTooltipPos] = useState<{ x: number; y: number } | null>(null);
-  const [hoveredDotData, setHoveredDotData] = useState<{
+  const [hoveredChartItem, setHoveredChartItem] = useState<{
     payload: any;
     pos: { x: number; y: number };
+    kind: 'receivable' | 'payable' | 'balance';
+    value: number;
+    title: string;
   } | null>(null);
   const [pinnedFilterDate, setPinnedFilterDate] = useState<string | null>(null);
   const [pinnedFilterCategory, setPinnedFilterCategory] = useState<string | null>(null);
@@ -1063,6 +1147,12 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
   // --- Handlers de Interação com Tooltip Fixado (Drill-down e Fechamento) ---
   const handlePinFilterCategory = (categoryName: string, date: string) => {
+    if (pinnedFilterCategory?.toLowerCase() === categoryName.toLowerCase()) {
+      // Toggle off se o usuário clicar na mesma categoria que já estava ativa
+      setPinnedFilterCategory(null);
+      setPinnedFilterUnit(null);
+      return;
+    }
     if (!previousFilters) {
       setPreviousFilters({
         category: pinnedFilterCategory,
@@ -1090,10 +1180,11 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     setPinnedFilterDate(date);
   };
 
-  // Clique na bolinha de saldo do dia (Fixa Tooltip, altera modo Realizado/Previsão e sincroniza data)
-  const handleDotClick = (payload: any, pos: { x: number; y: number }) => {
+  // Clique na Barra (Receita/Despesa) ou na Bolinha de Saldo (Fixa o Card, altera modo Realizado/Previsão e sincroniza data)
+  const handleOpenPinnedTooltip = (payload: any, pos: { x: number; y: number }, _kind?: 'payable' | 'receivable' | 'balance') => {
     if (!payload) return;
 
+    setHoveredChartItem(null);
     setPinnedTooltipData(payload);
     setPinnedTooltipPos({
       x: pos.x,
@@ -1120,13 +1211,31 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     }
   };
 
+  // Hover leve nas barras de receitas e despesas
+  const handleBarHover = (payload: any, pos: { x: number; y: number }, type: 'payable' | 'receivable') => {
+    if (pinnedTooltipData) return;
+    const isExpense = type === 'payable';
+    const val = isExpense ? (payload.despesas || 0) : (payload.receitas || 0);
+    setHoveredChartItem({
+      payload,
+      pos,
+      kind: type,
+      value: val,
+      title: isExpense ? 'Despesas do Dia' : 'Receitas do Dia',
+    });
+  };
+
+  const handleBarLeave = () => {
+    setHoveredChartItem(null);
+  };
+
   // Renderizador SVG personalizado da bolinha de saldo com área de clique interativa e hover exato na linha/bolinha
   const renderBalanceDot = (props: any) => {
     const { cx, cy, payload } = props;
     if (cx === undefined || cy === undefined || !payload) return null;
 
     const isPinned = pinnedFilterDate === payload.date;
-    const isHovered = hoveredDotData?.payload?.date === payload.date;
+    const isHovered = hoveredChartItem?.kind === 'balance' && hoveredChartItem?.payload?.date === payload.date;
 
     return (
       <g
@@ -1134,16 +1243,23 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         className="cursor-pointer group"
         onClick={(e) => {
           e.stopPropagation();
-          setHoveredDotData(null);
-          handleDotClick(payload, { x: cx, y: cy });
+          setHoveredChartItem(null);
+          handleOpenPinnedTooltip(payload, { x: cx, y: cy }, 'balance');
         }}
+        onMouseDown={(e) => e.stopPropagation()}
         onMouseEnter={() => {
           if (!pinnedTooltipData) {
-            setHoveredDotData({ payload, pos: { x: cx, y: cy } });
+            setHoveredChartItem({
+              payload,
+              pos: { x: cx, y: cy },
+              kind: 'balance',
+              value: payload.saldo || 0,
+              title: 'Saldo Projetado',
+            });
           }
         }}
         onMouseLeave={() => {
-          setHoveredDotData((prev) => (prev?.payload?.date === payload.date ? null : prev));
+          setHoveredChartItem((prev) => (prev?.payload?.date === payload.date ? null : prev));
         }}
       >
         {/* Halo animado quando fixado */}
@@ -1625,10 +1741,36 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
               <Legend verticalAlign="top" height={24} wrapperStyle={{ fontSize: '11px', fontWeight: 'bold' }} />
 
               {/* Equalizador de Despesas */}
-              <Bar yAxisId="left" dataKey="despesas" name="Despesas" shape={<EqualizerBar type="payable" />} maxBarSize={32} />
+              <Bar
+                yAxisId="left"
+                dataKey="despesas"
+                name="Despesas"
+                shape={
+                  <EqualizerBar
+                    type="payable"
+                    onBarClick={handleOpenPinnedTooltip}
+                    onBarHover={handleBarHover}
+                    onBarLeave={handleBarLeave}
+                  />
+                }
+                maxBarSize={32}
+              />
 
               {/* Equalizador de Receitas */}
-              <Bar yAxisId="left" dataKey="receitas" name="Receitas" shape={<EqualizerBar type="receivable" />} maxBarSize={32} />
+              <Bar
+                yAxisId="left"
+                dataKey="receitas"
+                name="Receitas"
+                shape={
+                  <EqualizerBar
+                    type="receivable"
+                    onBarClick={handleOpenPinnedTooltip}
+                    onBarHover={handleBarHover}
+                    onBarLeave={handleBarLeave}
+                  />
+                }
+                maxBarSize={32}
+              />
 
               {/* Curva de Saldo Projetado */}
               <Line
@@ -1644,25 +1786,66 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             </ComposedChart>
           </ResponsiveContainer>
 
-          {/* Card Flutuante de Hover (Aparece SOMENTE ao passar o mouse em cima da linha/bolinha de saldo) */}
-          {!pinnedTooltipData && hoveredDotData && (
+          {/* Mini-Tooltip Leve de Hover (Aparece ao passar o mouse sobre as barras ou a bolinha de saldo) */}
+          {!pinnedTooltipData && hoveredChartItem && (
             <div
               className="absolute z-[110] pointer-events-none animate-in fade-in zoom-in-95 duration-100"
               style={{
                 left: Math.min(
-                  typeof window !== 'undefined' ? window.innerWidth - 380 : 500,
-                  Math.max(180, hoveredDotData.pos.x)
+                  typeof window !== 'undefined' ? window.innerWidth - 220 : 450,
+                  Math.max(120, hoveredChartItem.pos.x)
                 ),
-                top: 15,
+                top: Math.max(10, Math.min(hoveredChartItem.pos.y - 70, 110)),
                 transform: 'translateX(-50%)',
               }}
             >
-              <CustomTooltip
-                active={true}
-                payload={[{ payload: hoveredDotData.payload }]}
-                label={hoveredDotData.payload.displayDate}
-                isInteractive={false}
-              />
+              <div className="bg-slate-900/95 dark:bg-black/95 text-white border border-slate-700/80 shadow-2xl rounded-xl px-3 py-2 text-xs flex flex-col gap-0.5 backdrop-blur-md min-w-[190px]">
+                <div className="flex items-center justify-between gap-3 text-[10px] text-slate-400 border-b border-slate-800 pb-1">
+                  <span className="font-semibold text-slate-200">
+                    {hoveredChartItem.payload.displayDate} ({hoveredChartItem.payload.date})
+                  </span>
+                  <span
+                    className={`text-[9px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded ${
+                      hoveredChartItem.payload.date < todayISO
+                        ? 'bg-amber-950/60 text-amber-300 border border-amber-800/40'
+                        : 'bg-blue-950/60 text-blue-300 border border-blue-800/40'
+                    }`}
+                  >
+                    {hoveredChartItem.payload.date < todayISO ? 'Passado' : 'Previsão'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 pt-1 font-bold">
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
+                    style={{
+                      backgroundColor:
+                        hoveredChartItem.kind === 'receivable'
+                          ? '#11d493'
+                          : hoveredChartItem.kind === 'payable'
+                          ? '#EF4444'
+                          : '#3B82F6',
+                    }}
+                  />
+                  <span className="text-slate-300 text-[11px] font-medium">{hoveredChartItem.title}:</span>
+                  <span
+                    className="font-mono text-xs tracking-tight font-extrabold ml-auto"
+                    style={{
+                      color:
+                        hoveredChartItem.kind === 'receivable'
+                          ? '#11d493'
+                          : hoveredChartItem.kind === 'payable'
+                          ? '#F87171'
+                          : '#60A5FA',
+                    }}
+                  >
+                    {formatBRL(hoveredChartItem.value)}
+                  </span>
+                </div>
+                <div className="text-[9px] text-slate-400/90 pt-0.5 flex items-center gap-1">
+                  <span>👆</span>
+                  <span>Clique para fixar e detalhar categorias</span>
+                </div>
+              </div>
             </div>
           )}
 
@@ -1688,6 +1871,8 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                 payload={[{ payload: pinnedTooltipData }]}
                 label={pinnedTooltipData.displayDate}
                 isInteractive={true}
+                activeCategory={pinnedFilterCategory}
+                activeUnit={pinnedFilterUnit}
                 onFilterCategory={handlePinFilterCategory}
                 onFilterUnit={handlePinFilterUnit}
                 onClose={handleClosePinnedTooltip}
