@@ -190,6 +190,14 @@ export async function exchangeBlingCodeForToken(
       if (serverlessRes.ok && data?.access_token) {
         const expiresAt = Date.now() + ((data.expires_in || 21600) * 1000);
 
+        // Salva isoladamente para a empresa alvo
+        if (targetEmpresaId) {
+          localStorage.setItem(`bling_token_${targetEmpresaId}`, data.access_token);
+          if (data.refresh_token) localStorage.setItem(`bling_refresh_${targetEmpresaId}`, data.refresh_token);
+          if (cId) localStorage.setItem(`bling_client_id_${targetEmpresaId}`, cId);
+          if (cSec) localStorage.setItem(`bling_client_secret_${targetEmpresaId}`, cSec);
+        }
+
         // Se for a empresa ativa ou não especificada, atualiza storage global
         const ativaAtual = localStorage.getItem('nfe_empresa_ativa_id');
         if (!targetEmpresaId || targetEmpresaId === ativaAtual) {

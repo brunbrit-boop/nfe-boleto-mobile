@@ -48,15 +48,28 @@ export const App: React.FC = () => {
           // Limpa dados de demonstração residuais caso ainda estejam no localStorage
           const limpas = parsed.map((e: EmpresaTenant) => {
             const isDemo = e.razaoSocial?.includes('BRASIL TECH') || e.cnpj === '24.912.830/0001-52';
-            // Recupera credenciais isoladas da empresa ou backfill da empresa inicial caso não tenha
-            const token = e.blingAccessToken || (e.id === 'emp_default_1' ? tokenAtual : '') || '';
-            const rToken = e.blingRefreshToken || (e.id === 'emp_default_1' ? refreshTokenAtual : undefined);
-            const cId = e.blingClientId || (e.id === 'emp_default_1' ? clientIdAtual : '') || '';
-            const cSec = e.blingClientSecret || (e.id === 'emp_default_1' ? clientSecretAtual : '') || '';
+
+            // Recupera credenciais isoladas estritamente por ID da empresa
+            const savedTok = e.blingAccessToken || localStorage.getItem(`bling_token_${e.id}`) || '';
+            const savedRef = e.blingRefreshToken || localStorage.getItem(`bling_refresh_${e.id}`) || '';
+            const savedCid = e.blingClientId || localStorage.getItem(`bling_client_id_${e.id}`) || '';
+            const savedSec = e.blingClientSecret || localStorage.getItem(`bling_client_secret_${e.id}`) || '';
+
+            // Fallback de backfill da empresa inicial caso não tenha chaves isoladas ainda
+            const token = savedTok || (e.id === 'emp_default_1' ? tokenAtual : '') || '';
+            const rToken = savedRef || (e.id === 'emp_default_1' ? refreshTokenAtual : undefined);
+            const cId = savedCid || (e.id === 'emp_default_1' ? clientIdAtual : '') || '';
+            const cSec = savedSec || (e.id === 'emp_default_1' ? clientSecretAtual : '') || '';
+
+            // Persiste o isolamento imediato por ID
+            if (token) localStorage.setItem(`bling_token_${e.id}`, token);
+            if (rToken) localStorage.setItem(`bling_refresh_${e.id}`, rToken);
+            if (cId) localStorage.setItem(`bling_client_id_${e.id}`, cId);
+            if (cSec) localStorage.setItem(`bling_client_secret_${e.id}`, cSec);
 
             // Se possui token ou refresh token, a integração permanece conectada
             const temChaveValida = Boolean(token || rToken);
-            const isConectado = temChaveValida && e.isBlingConectado !== false;
+            const isConectado = temChaveValida;
 
             return {
               ...e,
@@ -319,26 +332,31 @@ export const App: React.FC = () => {
     setBancoAtual(empresa.bancoPadrao);
 
     // Atualiza ou limpa as credenciais ativas do navegador estritamente para esta empresa
-    if (empresa.blingAccessToken) {
-      localStorage.setItem('bling_access_token', empresa.blingAccessToken);
+    const token = empresa.blingAccessToken || localStorage.getItem(`bling_token_${empresa.id}`) || '';
+    const rToken = empresa.blingRefreshToken || localStorage.getItem(`bling_refresh_${empresa.id}`) || '';
+    const cId = empresa.blingClientId || localStorage.getItem(`bling_client_id_${empresa.id}`) || '';
+    const cSec = empresa.blingClientSecret || localStorage.getItem(`bling_client_secret_${empresa.id}`) || '';
+
+    if (token) {
+      localStorage.setItem('bling_access_token', token);
     } else {
       localStorage.removeItem('bling_access_token');
     }
 
-    if (empresa.blingClientId) {
-      localStorage.setItem('bling_client_id', empresa.blingClientId);
+    if (cId) {
+      localStorage.setItem('bling_client_id', cId);
     } else {
       localStorage.removeItem('bling_client_id');
     }
 
-    if (empresa.blingClientSecret) {
-      localStorage.setItem('bling_client_secret', empresa.blingClientSecret);
+    if (cSec) {
+      localStorage.setItem('bling_client_secret', cSec);
     } else {
       localStorage.removeItem('bling_client_secret');
     }
 
-    if (empresa.blingRefreshToken) {
-      localStorage.setItem('bling_refresh_token', empresa.blingRefreshToken);
+    if (rToken) {
+      localStorage.setItem('bling_refresh_token', rToken);
     } else {
       localStorage.removeItem('bling_refresh_token');
     }
@@ -460,9 +478,14 @@ export const App: React.FC = () => {
 
           setEmpresas((prev) => {
             let found = false;
-            const atualizadas = prev.map((e) => {
+            const atualizadas: EmpresaTenant[] = prev.map((e): EmpresaTenant => {
               if (targetEmpresaId && e.id === targetEmpresaId) {
                 found = true;
+                if (res.accessToken) localStorage.setItem(`bling_token_${e.id}`, res.accessToken);
+                if (res.refreshToken) localStorage.setItem(`bling_refresh_${e.id}`, res.refreshToken);
+                if (clientId) localStorage.setItem(`bling_client_id_${e.id}`, clientId);
+                if (clientSecret) localStorage.setItem(`bling_client_secret_${e.id}`, clientSecret);
+
                 return {
                   ...e,
                   nomeFantasia: nomeDetectado || e.nomeFantasia,
@@ -480,11 +503,32 @@ export const App: React.FC = () => {
                   ultimaSincronizacao: new Date().toISOString(),
                 };
               }
-              return e;
+
+              // Preserva integralmente todas as outras empresas e seus tokens isolados
+              const otherToken = e.blingAccessToken || localStorage.getItem(`bling_token_${e.id}`) || '';
+              const otherRefresh = e.blingRefreshToken || localStorage.getItem(`bling_refresh_${e.id}`) || '';
+              const otherCid = e.blingClientId || localStorage.getItem(`bling_client_id_${e.id}`) || '';
+              const otherSec = e.blingClientSecret || localStorage.getItem(`bling_client_secret_${e.id}`) || '';
+              const otherConectado = Boolean(otherToken || otherRefresh) ? true : e.isBlingConectado;
+
+              return {
+                ...e,
+                blingAccessToken: otherToken,
+                blingRefreshToken: otherRefresh || e.blingRefreshToken,
+                blingClientId: otherCid || e.blingClientId,
+                blingClientSecret: otherSec || e.blingClientSecret,
+                isBlingConectado: otherConectado,
+                isBlingExpirado: false,
+              };
             });
 
             // Se for uma nova empresa que estava sendo adicionada
             if (!found && targetEmpresaId) {
+              if (res.accessToken) localStorage.setItem(`bling_token_${targetEmpresaId}`, res.accessToken);
+              if (res.refreshToken) localStorage.setItem(`bling_refresh_${targetEmpresaId}`, res.refreshToken);
+              if (clientId) localStorage.setItem(`bling_client_id_${targetEmpresaId}`, clientId);
+              if (clientSecret) localStorage.setItem(`bling_client_secret_${targetEmpresaId}`, clientSecret);
+
               const nova: EmpresaTenant = {
                 id: targetEmpresaId,
                 nomeFantasia: nomeDetectado || 'Empresa Bling ERP',
