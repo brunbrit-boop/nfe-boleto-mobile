@@ -320,6 +320,8 @@ export interface GrupoClientes {
   descricao?: string;
   valorPadrao: number;
   filtroPadrao?: string;
+  metaTotal?: number;
+  fatorDispersao?: number;
   grupoProdutoPadraoId?: string; // Vinculo padrao para todos do grupo
   clientes: GrupoClienteItem[];
   criadoEm: string;

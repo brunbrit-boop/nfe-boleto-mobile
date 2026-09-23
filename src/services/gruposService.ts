@@ -92,42 +92,73 @@ export function criarNovoGrupoProdutos(
   };
 }
 /**
- * Distribui uma Meta Total de Vendas entre N clientes de forma escalonada (Critério 1: Mix Comercial)
- * Cria uma gradação natural entre pedidos âncora (maiores), médios e de reposição,
- * com arredondamento comercial e soma total 100% exata ao centavo.
- * Exemplo para R$ 15.000 com 3 clientes: [7000, 5000, 3000].
+/**
+ * Distribui uma Meta Total de Vendas entre N clientes de forma escalonada com limite de dispersão:
+ * Garante que o maior valor NUNCA seja maior que o menor x fatorMaximo (padrão 1.5).
+ * Matematicamente: vMax <= vMin * fatorMaximo.
+ * Mantém arredondamento comercial (passos de R$ 50 ou R$ 10) e soma total 100% exata ao centavo.
  */
-export function distribuirMetaEscalonada(valorTotal: number, numClientes: number): number[] {
+export function distribuirMetaEscalonada(
+  valorTotal: number,
+  numClientes: number,
+  fatorMaximo: number = 1.5
+): number[] {
   if (numClientes <= 0 || valorTotal <= 0) return [];
   if (numClientes === 1) return [Math.round(valorTotal)];
 
-  // Define os fatores de peso: âncora (~1.4x da média) até reposição (~0.6x da média)
-  const maxFactor = 1.4;
-  const minFactor = 0.6;
-  const pesos: number[] = [];
+  const step = valorTotal >= 5000 ? 50 : 10;
+  const fator = Math.max(1.05, Math.min(fatorMaximo || 1.5, 3.0));
 
+  // Pesos lineares entre fator e 1.0
+  const wMax = fator;
+  const wMin = 1.0;
+  const pesos: number[] = [];
   for (let i = 0; i < numClientes; i++) {
     const ratio = i / (numClientes - 1);
-    const peso = maxFactor - ratio * (maxFactor - minFactor);
-    pesos.push(peso);
+    pesos.push(wMax - ratio * (wMax - wMin));
+  }
+  const somaPesos = pesos.reduce((a, b) => a + b, 0);
+
+  // Calcula valores arredondados para o passo comercial
+  let valores = pesos.map((p) => Math.max(step, Math.round((valorTotal * (p / somaPesos)) / step) * step));
+  let somaAtual = valores.reduce((a, b) => a + b, 0);
+  let diff = Math.round((valorTotal - somaAtual) / step);
+
+  // Distribui eventuais diferenças de arredondamento de forma equilibrada
+  let idx = 1;
+  const maxIter = 1000;
+  let iter = 0;
+  while (diff !== 0 && iter < maxIter) {
+    iter++;
+    const targetIdx = idx % numClientes;
+    if (diff > 0) {
+      valores[targetIdx] += step;
+      diff--;
+    } else if (valores[targetIdx] > step) {
+      valores[targetIdx] -= step;
+      diff++;
+    }
+    idx++;
   }
 
-  const somaPesos = pesos.reduce((acc, p) => acc + p, 0);
-  const step = valorTotal >= 5000 ? 50 : 10;
-  const valores: number[] = [];
-  let somaCalculada = 0;
+  // Ordena decrescente: valores[0] é o maior, valores[ultimo] é o menor
+  valores.sort((a, b) => b - a);
 
-  for (let i = 0; i < numClientes; i++) {
-    if (i === numClientes - 1) {
-      // O último cliente recebe a diferença exata para fechar o montante com 100% de precisão
-      const restante = Math.max(step, Number((valorTotal - somaCalculada).toFixed(2)));
-      valores.push(restante);
-    } else {
-      const valorBruto = (valorTotal * pesos[i]) / somaPesos;
-      const valorArredondado = Math.max(step, Math.round(valorBruto / step) * step);
-      valores.push(valorArredondado);
-      somaCalculada += valorArredondado;
-    }
+  // Trava rigorosa: garante que valores[0] <= valores[last] * fator
+  let ajusteIter = 0;
+  while (valores[0] > valores[valores.length - 1] * fator && ajusteIter < 200) {
+    ajusteIter++;
+    valores[0] -= step;
+    valores[valores.length - 1] += step;
+    valores.sort((a, b) => b - a);
+  }
+
+  // Ajuste residual final de fechamento da soma
+  const somaFinal = valores.reduce((a, b) => a + b, 0);
+  const diffFinal = Number((valorTotal - somaFinal).toFixed(2));
+  if (diffFinal !== 0 && valores.length > 1) {
+    const midIdx = Math.floor(valores.length / 2);
+    valores[midIdx] = Number((valores[midIdx] + diffFinal).toFixed(2));
   }
 
   return valores;

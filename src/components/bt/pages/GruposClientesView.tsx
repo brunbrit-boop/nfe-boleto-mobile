@@ -105,6 +105,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     return 15000;
   });
   const [feedbackMetaDistribuida, setFeedbackMetaDistribuida] = useState<string | null>(null);
+  const [fatorDispersao, setFatorDispersao] = useState<number>(grupoAtivo?.fatorDispersao || 1.5);
   const [isGerandoLote, setIsGerandoLote] = useState<boolean>(false);
   const [progressoLote, setProgressoLote] = useState<{ atual: number; total: number }>({ atual: 0, total: 0 });
 
@@ -172,6 +173,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     if (grupoAtivo) {
       setValorMassa(grupoAtivo.valorPadrao || 5000);
       setFiltroMassa(grupoAtivo.filtroPadrao || '');
+      setFatorDispersao(grupoAtivo.fatorDispersao || 1.5);
       const soma = grupoAtivo.clientes.reduce((acc, c) => acc + (c.valorAlvo || 5000), 0);
       if (soma > 0) {
         setMetaTotalGrupo(soma);
@@ -179,16 +181,19 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     }
   }, [grupoAtivoId]);
 
-  // Distribuição de Meta Total Escalonada (Critério 1: Mix Comercial)
+  // Distribuição de Meta Total Escalonada com Trava: Maior <= Menor * 1.5
   const handleDistribuirMetaEscalonada = () => {
     if (!grupoAtivo || grupoAtivo.clientes.length === 0) return;
     const meta = Number(metaTotalGrupo);
     if (meta <= 0) return;
 
-    const valoresDistribuidos = distribuirMetaEscalonada(meta, grupoAtivo.clientes.length);
+    const razao = Math.max(1.05, Math.min(Number(fatorDispersao) || 1.5, 3.0));
+    const valoresDistribuidos = distribuirMetaEscalonada(meta, grupoAtivo.clientes.length, razao);
 
     const atualizado: GrupoClientes = {
       ...grupoAtivo,
+      metaTotal: meta,
+      fatorDispersao: razao,
       clientes: grupoAtivo.clientes.map((c, idx) => ({
         ...c,
         valorAlvo: valoresDistribuidos[idx] || c.valorAlvo,
@@ -198,11 +203,14 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
 
     atualizarGrupo(atualizado);
 
-    const resumo = valoresDistribuidos.map((v) => formatCurrency(v)).join(' / ');
+    const vMax = Math.max(...valoresDistribuidos);
+    const vMin = Math.min(...valoresDistribuidos);
+    const razaoReal = vMin > 0 ? (vMax / vMin).toFixed(2) : '1.00';
+
     setFeedbackMetaDistribuida(
-      `Meta de ${formatCurrency(meta)} distribuída com sucesso entre os ${grupoAtivo.clientes.length} clientes (${resumo}). Clique em "⚡ Gerar Orçamentos com IA (Todos)" para compor os produtos!`
+      `Meta de ${formatCurrency(meta)} distribuída com sucesso entre os ${grupoAtivo.clientes.length} clientes! Maior pedido: ${formatCurrency(vMax)} | Menor pedido: ${formatCurrency(vMin)} (Razão: ${razaoReal}x ≤ ${razao}x). Clique em "⚡ Gerar Orçamentos com IA (Todos)" para compor os produtos!`
     );
-    setTimeout(() => setFeedbackMetaDistribuida(null), 9000);
+    setTimeout(() => setFeedbackMetaDistribuida(null), 10000);
   };
 
   // Ações em Massa
@@ -1016,8 +1024,8 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
           </button>
         </div>
 
-        {/* Bloco Destaque: Distribuição de Meta Total do Grupo (Critério 1 - Mix Comercial Escalonado) */}
-        <div className="bg-slate-800/90 p-3.5 sm:p-4 rounded-xl border border-amber-500/30 shadow-inner flex flex-col md:flex-row md:items-center justify-between gap-3">
+        {/* Bloco Destaque: Distribuição de Meta Total do Grupo (Trava: Maior <= Menor * 1.5) */}
+        <div className="bg-slate-800/90 p-3.5 sm:p-4 rounded-xl border border-amber-500/30 shadow-inner flex flex-col xl:flex-row xl:items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30">
               <Target className="w-5 h-5" />
@@ -1025,37 +1033,87 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
             <div>
               <div className="flex items-center flex-wrap gap-2">
                 <span className="text-xs sm:text-sm font-black text-white">Meta de Faturamento Total do Grupo</span>
-                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  Critério 1: Mix Escalonado
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                  <span>Trava:</span>
+                  <span className="text-white font-mono">Maior ≤ {fatorDispersao}x Menor</span>
                 </span>
               </div>
               <p className="text-[11px] text-slate-400 mt-0.5">
-                A IA espalha esse valor entre os orçamentos (pedidos âncora, médios e menores) somando exatamente a meta.
+                A IA distribui o valor entre os clientes de forma escalonada, garantindo que o maior orçamento nunca ultrapasse {fatorDispersao}x o menor.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 w-full md:w-auto shrink-0">
-            <div className="relative flex-1 md:w-44">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-amber-400">R$</span>
-              <input
-                type="number"
-                value={metaTotalGrupo}
-                onChange={(e) => setMetaTotalGrupo(Number(e.target.value))}
-                className="w-full bg-slate-900 text-white font-mono font-black text-xs pl-8 pr-2 py-2 rounded-xl border border-amber-500/40 focus:outline-none focus:border-amber-400 shadow-sm"
-                placeholder="15000"
-              />
+          <div className="flex flex-wrap items-center gap-2.5 w-full xl:w-auto shrink-0">
+            {/* Campo da Meta Total */}
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold text-slate-400 mb-1">Meta Total</span>
+              <div className="relative w-36 sm:w-40">
+                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-amber-400">R$</span>
+                <input
+                  type="number"
+                  value={metaTotalGrupo}
+                  onChange={(e) => setMetaTotalGrupo(Number(e.target.value))}
+                  className="w-full bg-slate-900 text-white font-mono font-black text-xs pl-8 pr-2 py-2 rounded-xl border border-amber-500/40 focus:outline-none focus:border-amber-400 shadow-sm"
+                  placeholder="15000"
+                />
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={handleDistribuirMetaEscalonada}
-              disabled={!grupoAtivo || grupoAtivo.clientes.length === 0}
-              className="px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-950 transition active:scale-95 disabled:opacity-50 shadow-md shadow-amber-500/20 cursor-pointer flex items-center gap-1.5 shrink-0"
-              title="Calcular e distribuir valores escalonados para cada cliente do grupo"
-            >
-              <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
-              <span>Distribuir Meta com IA</span>
-            </button>
+
+            {/* Campo do Fator de Dispersão */}
+            <div className="flex flex-col">
+              <span className="text-[10px] font-bold text-slate-400 mb-1">Dispersão Máxima</span>
+              <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700 h-[34px]">
+                <input
+                  type="number"
+                  step="0.1"
+                  min="1.05"
+                  max="3.0"
+                  value={fatorDispersao}
+                  onChange={(e) => setFatorDispersao(Number(e.target.value))}
+                  className="w-12 bg-transparent text-white font-mono font-black text-xs text-center focus:outline-none"
+                  title="Fator de limite da proporção entre o maior e o menor pedido"
+                />
+                <span className="text-[11px] font-bold text-slate-400 pr-1">x</span>
+                <div className="flex items-center gap-0.5 pl-1 border-l border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setFatorDispersao(1.2)}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition cursor-pointer ${
+                      fatorDispersao === 1.2 ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
+                    }`}
+                    title="Dispersão suave: 1.2x"
+                  >
+                    1.2x
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFatorDispersao(1.5)}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition cursor-pointer ${
+                      fatorDispersao === 1.5 ? 'bg-amber-400 text-slate-950 font-black' : 'text-slate-400 hover:text-white'
+                    }`}
+                    title="Padrão: Maior <= Menor x 1.5"
+                  >
+                    1.5x
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Botão Distribuir */}
+            <div className="flex flex-col justify-end">
+              <span className="text-[10px] text-transparent mb-1 select-none">.</span>
+              <button
+                type="button"
+                onClick={handleDistribuirMetaEscalonada}
+                disabled={!grupoAtivo || grupoAtivo.clientes.length === 0}
+                className="px-4 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-slate-950 transition active:scale-95 disabled:opacity-50 shadow-md shadow-amber-500/20 cursor-pointer flex items-center gap-1.5 shrink-0 h-[34px]"
+                title={`Distribuir ${formatCurrency(metaTotalGrupo)} com trava de dispersão máxima de ${fatorDispersao}x`}
+              >
+                <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
+                <span>Distribuir Meta com IA</span>
+              </button>
+            </div>
           </div>
         </div>
 
