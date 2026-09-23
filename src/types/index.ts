@@ -307,6 +307,9 @@ export interface GrupoClienteItem {
   valorAlvo: number;
   filtroFoco?: string;
   grupoProdutoId?: string; // Vinculo opcional com um grupo de produtos especifico
+  parcelasCount?: number;
+  primeiroVencimento?: string; // YYYY-MM-DD
+  intervaloDias?: number;
   status: 'pendente' | 'gerando' | 'gerado' | 'erro';
   ofertaGerada?: any; // OfertaGeradaResult
   nfeEmitida?: NFeData;
@@ -322,6 +325,9 @@ export interface GrupoClientes {
   filtroPadrao?: string;
   metaTotal?: number;
   fatorDispersao?: number;
+  parcelasPadrao?: number;
+  primeiroVencimentoPadrao?: string;
+  intervaloDiasPadrao?: number;
   grupoProdutoPadraoId?: string; // Vinculo padrao para todos do grupo
   clientes: GrupoClienteItem[];
   criadoEm: string;

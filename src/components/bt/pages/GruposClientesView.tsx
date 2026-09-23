@@ -109,6 +109,18 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
   const [isGerandoLote, setIsGerandoLote] = useState<boolean>(false);
   const [progressoLote, setProgressoLote] = useState<{ atual: number; total: number }>({ atual: 0, total: 0 });
 
+  // Controles de Condição de Pagamento / Parcelamento em Massa
+  const [parcelasMassa, setParcelasMassa] = useState<number>(grupoAtivo?.parcelasPadrao || 1);
+  const [primeiroVencMassa, setPrimeiroVencMassa] = useState<string>(() => {
+    if (grupoAtivo?.primeiroVencimentoPadrao) return grupoAtivo.primeiroVencimentoPadrao;
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    return d.toISOString().split('T')[0];
+  });
+  const [intervaloDiasMassa, setIntervaloDiasMassa] = useState<number>(grupoAtivo?.intervaloDiasPadrao || 30);
+  const [isEmitindoLote, setIsEmitindoLote] = useState<boolean>(false);
+  const [progressoEmissaoLote, setProgressoEmissaoLote] = useState<{ atual: number; total: number }>({ atual: 0, total: 0 });
+
   // Modais
   const [isNovoGrupoModalOpen, setIsNovoGrupoModalOpen] = useState(false);
   const [nomeNovoGrupo, setNomeNovoGrupo] = useState('');
@@ -174,6 +186,11 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       setValorMassa(grupoAtivo.valorPadrao || 5000);
       setFiltroMassa(grupoAtivo.filtroPadrao || '');
       setFatorDispersao(grupoAtivo.fatorDispersao || 1.5);
+      setParcelasMassa(grupoAtivo.parcelasPadrao || 1);
+      if (grupoAtivo.primeiroVencimentoPadrao) {
+        setPrimeiroVencMassa(grupoAtivo.primeiroVencimentoPadrao);
+      }
+      setIntervaloDiasMassa(grupoAtivo.intervaloDiasPadrao || 30);
       const soma = grupoAtivo.clientes.reduce((acc, c) => acc + (c.valorAlvo || 5000), 0);
       if (soma > 0) {
         setMetaTotalGrupo(soma);
@@ -232,6 +249,58 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       ...grupoAtivo,
       filtroPadrao: filtro,
       clientes: grupoAtivo.clientes.map((c) => ({ ...c, filtroFoco: filtro })),
+    };
+    atualizarGrupo(atualizado);
+  };
+
+  // Aplicar Condições de Pagamento Padrão para Todos no Grupo
+  const handleAplicarCondicoesParaTodos = () => {
+    if (!grupoAtivo) return;
+    const atualizado: GrupoClientes = {
+      ...grupoAtivo,
+      parcelasPadrao: parcelasMassa,
+      primeiroVencimentoPadrao: primeiroVencMassa,
+      intervaloDiasPadrao: intervaloDiasMassa,
+      clientes: grupoAtivo.clientes.map((c) => ({
+        ...c,
+        parcelasCount: parcelasMassa,
+        primeiroVencimento: primeiroVencMassa,
+        intervaloDias: intervaloDiasMassa,
+      })),
+    };
+    atualizarGrupo(atualizado);
+  };
+
+  // Alterar Condição de Pagamento Individualmente na Linha do Cliente
+  const handleUpdateItemParcelas = (clienteId: number, parcelas: number) => {
+    if (!grupoAtivo) return;
+    const atualizado: GrupoClientes = {
+      ...grupoAtivo,
+      clientes: grupoAtivo.clientes.map((c) =>
+        c.clienteId === clienteId ? { ...c, parcelasCount: parcelas } : c
+      ),
+    };
+    atualizarGrupo(atualizado);
+  };
+
+  const handleUpdateItemPrimeiroVenc = (clienteId: number, dataVenc: string) => {
+    if (!grupoAtivo) return;
+    const atualizado: GrupoClientes = {
+      ...grupoAtivo,
+      clientes: grupoAtivo.clientes.map((c) =>
+        c.clienteId === clienteId ? { ...c, primeiroVencimento: dataVenc } : c
+      ),
+    };
+    atualizarGrupo(atualizado);
+  };
+
+  const handleUpdateItemIntervalo = (clienteId: number, intervalo: number) => {
+    if (!grupoAtivo) return;
+    const atualizado: GrupoClientes = {
+      ...grupoAtivo,
+      clientes: grupoAtivo.clientes.map((c) =>
+        c.clienteId === clienteId ? { ...c, intervaloDias: intervalo } : c
+      ),
     };
     atualizarGrupo(atualizado);
   };
@@ -418,6 +487,67 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       }
     } finally {
       clearTimeout(safetyTimer);
+      setItemEmitindoNFeId(null);
+    }
+  };
+
+  // Grava rascunho de todas as NF-es do grupo pendentes no Bling em Lote
+  const handleEmitirTodasLote = async () => {
+    if (!grupoAtivo || isEmitindoLote) return;
+    const pendentes = grupoAtivo.clientes.filter((c) => c.ofertaGerada && !c.nfeEmitida);
+    if (pendentes.length === 0) {
+      alert('Nenhum orçamento pendente para emissão. Gere orçamentos com IA primeiro!');
+      return;
+    }
+
+    setIsEmitindoLote(true);
+    setProgressoEmissaoLote({ atual: 0, total: pendentes.length });
+
+    try {
+      let grupoEmProcessamento = { ...grupoAtivo };
+      for (let i = 0; i < pendentes.length; i++) {
+        const item = pendentes[i];
+        setProgressoEmissaoLote({ atual: i + 1, total: pendentes.length });
+        setItemEmitindoNFeId(item.clienteId);
+
+        try {
+          const res = await emitirNFeItemGrupo(item, empresa, company, bancoAtual);
+          if (res.sucesso && res.nfe) {
+            grupoEmProcessamento = {
+              ...grupoEmProcessamento,
+              clientes: grupoEmProcessamento.clientes.map((c) =>
+                c.clienteId === item.clienteId ? { ...c, nfeEmitida: res.nfe, erro: undefined } : c
+              ),
+            };
+            atualizarGrupo(grupoEmProcessamento);
+            if (onEmitirNFe) {
+              onEmitirNFe(res.nfe);
+            }
+          } else {
+            grupoEmProcessamento = {
+              ...grupoEmProcessamento,
+              clientes: grupoEmProcessamento.clientes.map((c) =>
+                c.clienteId === item.clienteId ? { ...c, erro: res.erro || 'Falha no Bling' } : c
+              ),
+            };
+            atualizarGrupo(grupoEmProcessamento);
+          }
+        } catch (err: any) {
+          grupoEmProcessamento = {
+            ...grupoEmProcessamento,
+            clientes: grupoEmProcessamento.clientes.map((c) =>
+              c.clienteId === item.clienteId ? { ...c, erro: err.message || 'Erro' } : c
+            ),
+          };
+          atualizarGrupo(grupoEmProcessamento);
+        }
+
+        setItemEmitindoNFeId(null);
+        // Intervalo de 600ms entre as chamadas para respeitar o rate-limit do Bling API v3
+        await new Promise((r) => setTimeout(r, 600));
+      }
+    } finally {
+      setIsEmitindoLote(false);
       setItemEmitindoNFeId(null);
     }
   };
@@ -1003,25 +1133,49 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
             </p>
           </div>
 
-          {/* Botão Mestre de Geração em Lote */}
-          <button
-            type="button"
-            onClick={handleGerarTodosLote}
-            disabled={isGerandoLote || !grupoAtivo || grupoAtivo.clientes.length === 0}
-            className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-black text-xs sm:text-sm bg-gradient-to-r from-[#11d493] to-emerald-500 hover:from-[#0eb880] hover:to-emerald-600 text-slate-950 shadow-md shadow-emerald-500/20 transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-          >
-            {isGerandoLote ? (
-              <>
-                <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
-                <span>Gerando ({progressoLote.atual}/{progressoLote.total})...</span>
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4 fill-slate-950" />
-                <span>⚡ Gerar Orçamentos com IA (Todos)</span>
-              </>
+          {/* Botões Mestres de Ação em Lote */}
+          <div className="flex items-center gap-2.5 flex-wrap">
+            <button
+              type="button"
+              onClick={handleGerarTodosLote}
+              disabled={isGerandoLote || isEmitindoLote || !grupoAtivo || grupoAtivo.clientes.length === 0}
+              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-black text-xs sm:text-sm bg-gradient-to-r from-[#11d493] to-emerald-500 hover:from-[#0eb880] hover:to-emerald-600 text-slate-950 shadow-md shadow-emerald-500/20 transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              {isGerandoLote ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
+                  <span>Gerando ({progressoLote.atual}/{progressoLote.total})...</span>
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4 fill-slate-950" />
+                  <span>⚡ Gerar Orçamentos com IA (Todos)</span>
+                </>
+              )}
+            </button>
+
+            {grupoAtivo?.clientes.some((c) => c.ofertaGerada && !c.nfeEmitida) && (
+              <button
+                type="button"
+                onClick={handleEmitirTodasLote}
+                disabled={isGerandoLote || isEmitindoLote}
+                className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-black text-xs sm:text-sm bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white shadow-md shadow-blue-500/25 transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                title="Grava o rascunho de NF-e e gera as parcelas no Bling para todos os clientes que já possuem orçamento gerado"
+              >
+                {isEmitindoLote ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-white" />
+                    <span>Gravando Bling ({progressoEmissaoLote.atual}/{progressoEmissaoLote.total})...</span>
+                  </>
+                ) : (
+                  <>
+                    <FileText className="w-4 h-4" />
+                    <span>🚀 Gravar Todas NF-e no Bling</span>
+                  </>
+                )}
+              </button>
             )}
-          </button>
+          </div>
         </div>
 
         {/* Bloco Destaque: Distribuição de Meta Total do Grupo (Trava: Maior <= Menor * 1.5) */}
@@ -1197,6 +1351,88 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
             </select>
           </div>
         </div>
+
+        {/* Linha de Condição de Pagamento em Massa (Parcelas, 1º Vencimento, Intervalo) */}
+        <div className="bg-slate-800/80 p-3 sm:p-3.5 rounded-xl border border-slate-700/60 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-[#11d493] flex items-center justify-center shrink-0 border border-emerald-500/20">
+              <CreditCard className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black text-white">Condição de Pagamento do Lote</span>
+                <span className="text-[10px] px-2 py-0.2 rounded-full font-bold bg-[#11d493]/15 text-[#11d493]">
+                  Em Massa
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400">
+                Defina o padrão de parcelamento para aplicar a todos com 1 clique (você também pode personalizar cada cliente na tabela abaixo).
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* Parcelas */}
+            <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-700">
+              <span className="text-[10px] font-bold text-slate-400">Parcelas:</span>
+              <select
+                value={parcelasMassa}
+                onChange={(e) => setParcelasMassa(Number(e.target.value))}
+                className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
+              >
+                <option value={1} className="bg-slate-900">1x (À vista)</option>
+                <option value={2} className="bg-slate-900">2x</option>
+                <option value={3} className="bg-slate-900">3x</option>
+                <option value={4} className="bg-slate-900">4x</option>
+                <option value={5} className="bg-slate-900">5x</option>
+                <option value={6} className="bg-slate-900">6x</option>
+                <option value={7} className="bg-slate-900">7x</option>
+                <option value={8} className="bg-slate-900">8x</option>
+                <option value={9} className="bg-slate-900">9x</option>
+                <option value={10} className="bg-slate-900">10x</option>
+                <option value={12} className="bg-slate-900">12x</option>
+              </select>
+            </div>
+
+            {/* 1º Vencimento */}
+            <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-700">
+              <span className="text-[10px] font-bold text-slate-400">1º Venc.:</span>
+              <input
+                type="date"
+                value={primeiroVencMassa}
+                onChange={(e) => setPrimeiroVencMassa(e.target.value)}
+                className="bg-transparent text-white font-mono text-xs focus:outline-none cursor-pointer"
+              />
+            </div>
+
+            {/* Intervalo */}
+            <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-700">
+              <span className="text-[10px] font-bold text-slate-400">Intervalo:</span>
+              <select
+                value={intervaloDiasMassa}
+                onChange={(e) => setIntervaloDiasMassa(Number(e.target.value))}
+                className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
+              >
+                <option value={15} className="bg-slate-900">15 dias</option>
+                <option value={21} className="bg-slate-900">21 dias</option>
+                <option value={28} className="bg-slate-900">28 dias</option>
+                <option value={30} className="bg-slate-900">30 dias</option>
+                <option value={45} className="bg-slate-900">45 dias</option>
+                <option value={60} className="bg-slate-900">60 dias</option>
+              </select>
+            </div>
+
+            {/* Botão Aplicar a Todos */}
+            <button
+              type="button"
+              onClick={handleAplicarCondicoesParaTodos}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-[#11d493] hover:bg-[#0eb880] text-slate-950 transition active:scale-95 cursor-pointer shadow-sm flex items-center gap-1.5"
+              title="Aplica este parcelamento e vencimento a todos os clientes do grupo"
+            >
+              <span>Aplicar Condição a Todos</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Tabela Interativa de Produção */}
@@ -1225,9 +1461,10 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
               <thead>
                 <tr className="border-b border-slate-200 dark:border-[#1a382e] bg-slate-50/70 dark:bg-[#162f27]/40 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
                   <th className="py-3.5 px-4">Cliente</th>
-                  <th className="py-3.5 px-3 w-40">Valor Alvo (R$)</th>
-                  <th className="py-3.5 px-3 w-56">Foco / Linha de Produtos</th>
-                  <th className="py-3.5 px-4 min-w-[200px]">Status IA</th>
+                  <th className="py-3.5 px-3 w-36">Valor Alvo (R$)</th>
+                  <th className="py-3.5 px-3 w-48">Foco / Linha de Produtos</th>
+                  <th className="py-3.5 px-3 min-w-[210px]">Condição / Pagamento</th>
+                  <th className="py-3.5 px-4 min-w-[180px]">Status IA</th>
                   <th className="py-3.5 px-4 text-right w-44">Ações</th>
                 </tr>
               </thead>
@@ -1313,6 +1550,78 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                               className="w-full bg-slate-50 dark:bg-[#162f27]/40 border border-slate-200 dark:border-[#214739] rounded-lg py-1 px-2 text-[10px] text-slate-700 dark:text-slate-300 placeholder:text-slate-400 focus:outline-none focus:border-[#11d493]"
                             />
                           )}
+                        </div>
+                      </td>
+
+                      {/* Condição / Pagamento (Parcelas, 1º Vencimento, Intervalo) */}
+                      <td className="py-3 px-3">
+                        <div className="space-y-1.5 min-w-[200px]">
+                          {/* Linha 1: Parcelas + Intervalo */}
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <div>
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Parcelas</span>
+                              <select
+                                value={item.parcelasCount || 1}
+                                onChange={(e) => handleUpdateItemParcelas(item.clienteId, Number(e.target.value))}
+                                className="w-full bg-slate-50 dark:bg-[#162f27]/60 border border-slate-200 dark:border-[#214739] rounded-lg py-1 px-1.5 text-[11px] font-bold text-slate-800 dark:text-white focus:outline-none focus:border-[#11d493] cursor-pointer"
+                              >
+                                <option value={1}>1x (À vista)</option>
+                                <option value={2}>2x</option>
+                                <option value={3}>3x</option>
+                                <option value={4}>4x</option>
+                                <option value={5}>5x</option>
+                                <option value={6}>6x</option>
+                                <option value={7}>7x</option>
+                                <option value={8}>8x</option>
+                                <option value={9}>9x</option>
+                                <option value={10}>10x</option>
+                                <option value={12}>12x</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Intervalo</span>
+                              <select
+                                value={item.intervaloDias || 30}
+                                onChange={(e) => handleUpdateItemIntervalo(item.clienteId, Number(e.target.value))}
+                                className="w-full bg-slate-50 dark:bg-[#162f27]/60 border border-slate-200 dark:border-[#214739] rounded-lg py-1 px-1.5 text-[11px] font-bold text-slate-800 dark:text-white focus:outline-none focus:border-[#11d493] cursor-pointer"
+                              >
+                                <option value={15}>15 dias</option>
+                                <option value={21}>21 dias</option>
+                                <option value={28}>28 dias</option>
+                                <option value={30}>30 dias</option>
+                                <option value={45}>45 dias</option>
+                                <option value={60}>60 dias</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Linha 2: 1º Vencimento */}
+                          <div>
+                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">1º Vencimento</span>
+                            <input
+                              type="date"
+                              value={item.primeiroVencimento || primeiroVencMassa}
+                              onChange={(e) => handleUpdateItemPrimeiroVenc(item.clienteId, e.target.value)}
+                              className="w-full bg-slate-50 dark:bg-[#162f27]/60 border border-slate-200 dark:border-[#214739] rounded-lg py-1 px-2 text-[10px] font-mono font-medium text-slate-800 dark:text-white focus:outline-none focus:border-[#11d493] cursor-pointer"
+                            />
+                          </div>
+
+                          {/* Linha 3: Preview de Valor da Parcela */}
+                          {(() => {
+                            const vTotal = item.ofertaGerada?.valorTotal || item.valorAlvo || 0;
+                            const qtdParc = item.parcelasCount || 1;
+                            if (qtdParc > 1 && vTotal > 0) {
+                              const vParc = (vTotal / qtdParc).toFixed(2);
+                              return (
+                                <p className="text-[10px] text-emerald-600 dark:text-[#11d493] font-semibold flex items-center gap-1">
+                                  <span>💳</span>
+                                  <span>{qtdParc}x de {formatCurrency(Number(vParc))}</span>
+                                </p>
+                              );
+                            }
+                            return null;
+                          })()}
                         </div>
                       </td>
 
@@ -1454,6 +1763,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                     </td>
                     <td className="py-3.5 px-3 text-slate-400 text-[11px]">
                       Soma das metas distribuídas
+                    </td>
+                    <td className="py-3.5 px-3 text-slate-400 text-[11px]">
+                      Parcelas configuradas
                     </td>
                     <td className="py-3.5 px-4 font-mono font-black text-emerald-600 dark:text-[#11d493]" colSpan={2}>
                       Total Orçado: {formatCurrency(

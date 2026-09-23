@@ -348,9 +348,25 @@ export async function emitirNFeItemGrupo(
 
   const token = empresa.blingAccessToken?.trim();
   const valorTotal = item.ofertaGerada.valorTotal;
-  const numParcelas = 3;
 
-  const parcelasCalculadas = calcularDivisaoParcelas(valorTotal, numParcelas, bancoAtual, 15);
+  // Condição de pagamento personalizada do cliente (ou padrão)
+  const numParcelas = Math.max(1, Math.min(item.parcelasCount || 1, 48));
+  const intervaloDias = Math.max(1, item.intervaloDias || 30);
+  const primeiroVenc = item.primeiroVencimento; // YYYY-MM-DD
+
+  let baseDate: Date | undefined;
+  if (primeiroVenc && /^\d{4}-\d{2}-\d{2}$/.test(primeiroVenc)) {
+    const [ano, mes, dia] = primeiroVenc.split('-').map(Number);
+    baseDate = new Date(ano, mes - 1, dia);
+  }
+
+  const parcelasCalculadas = calcularDivisaoParcelas(
+    valorTotal,
+    numParcelas,
+    bancoAtual,
+    intervaloDias,
+    baseDate
+  );
 
   const novaNFe: NFeData = {
     numeroNFe: String(Math.floor(1000 + Math.random() * 9000)),
@@ -376,7 +392,7 @@ export async function emitirNFeItemGrupo(
     quantidadeParcelas: numParcelas,
     parcelas: parcelasCalculadas,
     banco: bancoAtual,
-    informacoesComplementares: `Orçamento gerado por IA para o grupo de clientes. Condição: ${numParcelas}x parcelas quinzenais.`,
+    informacoesComplementares: `Orçamento gerado por IA para o grupo de clientes. Condição: ${numParcelas}x (${intervaloDias}d).`,
   };
 
   // Verifica se a empresa possui token Bling conectado para emissão do rascunho
@@ -403,7 +419,8 @@ export async function emitirNFeItemGrupo(
       itens: item.ofertaGerada.itens,
       parcelasCount: numParcelas,
       banco: bancoAtual,
-      intervaloDias: 15,
+      intervaloDias: intervaloDias,
+      primeiroVencimento: primeiroVenc,
     });
 
     if (!resBling.sucesso) {
