@@ -904,7 +904,7 @@ export const App: React.FC = () => {
         clientes={clientes}
         fornecedores={fornecedores}
         carregandoBling={isLoadingBling}
-        onRecarregarBling={() => carregarDadosBling(empresaAtiva?.blingAccessToken, empresaAtiva?.id, bancoAtual)}
+        onRecarregarBling={() => carregarDadosBling(empresaAtiva?.blingAccessToken, empresaAtiva?.id, bancoAtual, true)}
         messages={messages}
         isListening={isListening}
         isSpeaking={isSpeaking}

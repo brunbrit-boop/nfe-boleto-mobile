@@ -477,14 +477,11 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({
 export const FinancesView: React.FC<FinancesViewProps> = ({
   contasPagar = [],
   contasReceber = [],
-  onRefreshBling: _onRefreshBling,
-  carregando: _carregando = false,
+  onRefreshBling,
+  carregando = false,
   onViewBoletoReceber,
   empresaNome,
 }) => {
-  // Suppress unused warnings
-  void _onRefreshBling;
-  void _carregando;
   void onViewBoletoReceber;
   // --- Estados de Controle Visual e Temporal ---
   const [visibleDays, setVisibleDays] = useState<number>(30);
@@ -553,14 +550,14 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   // --- Base de Transações com Simulação em Estado Local ---
   const [allTransactions, setAllTransactions] = useState<FinanceTransaction[]>([]);
 
-  // Inicializa e sincroniza transações do Bling + Extratos Bancários do Passado
+  // Inicializa e sincroniza transações reais do Bling ERP
   useEffect(() => {
     const list: FinanceTransaction[] = [];
 
-    // 1. FUTURO: Contas a Receber Bling
+    // 1. Contas a Receber Reais do Bling
     contasReceber.forEach((cr: BlingContaReceber) => {
       const dateISO = cr.vencimento || cr.dataEmissao || todayISO;
-      const isPaid = cr.situacao === 2 || dateISO < todayISO;
+      const isPaid = cr.situacao === 2;
       list.push({
         id: `rec-bling-${cr.id}`,
         date: dateISO,
@@ -574,9 +571,9 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         amount: Number(cr.valor) || 0,
         type: 'receivable',
         status: isPaid ? 'paid' : 'open',
-        originType: isPaid ? 'bank_statement' : 'bling_erp',
-        companyName: empresaNome || 'TechCorp Global',
-        bankName: 'Banco Inter',
+        originType: 'bling_erp',
+        companyName: empresaNome || 'Minha Empresa',
+        bankName: 'Bling ERP',
         method: cr.pixCopiaECola ? 'PIX' : cr.linkBoleto ? 'Boleto' : 'Bolepix',
         unit: 'Matriz',
         numeroDocumento: cr.numeroDocumento,
@@ -584,10 +581,10 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
       });
     });
 
-    // 2. FUTURO: Contas a Pagar Bling
+    // 2. Contas a Pagar Reais do Bling
     contasPagar.forEach((cp: BlingContaPagar) => {
       const dateISO = cp.vencimento || cp.dataEmissao || todayISO;
-      const isPaid = cp.situacao === 2 || dateISO < todayISO;
+      const isPaid = cp.situacao === 2;
       list.push({
         id: `pay-bling-${cp.id}`,
         date: dateISO,
@@ -601,209 +598,24 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         amount: Number(cp.valor) || 0,
         type: 'payable',
         status: isPaid ? 'paid' : 'open',
-        originType: isPaid ? 'bank_statement' : 'bling_erp',
-        companyName: empresaNome || 'TechCorp Global',
-        bankName: 'Banco Inter',
-        method: cp.formaPagamento?.descricao || 'Boleto 30d',
+        originType: 'bling_erp',
+        companyName: empresaNome || 'Minha Empresa',
+        bankName: 'Bling ERP',
+        method: cp.formaPagamento?.descricao || 'Boleto',
         unit: 'Matriz',
         numeroDocumento: cp.numeroDocumento,
         originalBlingPagar: cp,
       });
     });
 
-    // 3. PASSADO: Extrato Bancário Auditado (Histórico Realizado)
-    const today = new Date();
-    const getOffsetDate = (offset: number) => {
-      const d = new Date(today);
-      d.setDate(d.getDate() + offset);
-      return d.toISOString().split('T')[0];
-    };
-
-    const bankStatementPast: FinanceTransaction[] = [
-      {
-        id: 'ext-p1',
-        date: getOffsetDate(-14),
-        displayDate: formatDateBr(getOffsetDate(-14)),
-        description: 'DEB AUT ENEL DISTRIB SP',
-        category: 'Utilidades',
-        entity: 'Enel SP',
-        amount: 1420.5,
-        type: 'payable',
-        status: 'paid',
-        originType: 'bank_statement',
-        companyName: 'Matriz SP',
-        bankName: 'Itaú',
-        method: 'Débito Automático',
-        unit: 'Galpão 01',
-      },
-      {
-        id: 'ext-r1',
-        date: getOffsetDate(-12),
-        displayDate: formatDateBr(getOffsetDate(-12)),
-        description: 'PIX RECEBIDO MERCADO BOM PRECO',
-        category: 'Vendas & Faturamento',
-        entity: 'Mercado Bom Preço',
-        amount: 8650.0,
-        type: 'receivable',
-        status: 'paid',
-        originType: 'bank_statement',
-        companyName: 'Matriz SP',
-        bankName: 'Banco Inter',
-        method: 'PIX',
-        unit: 'Loja Centro',
-      },
-      {
-        id: 'ext-p2',
-        date: getOffsetDate(-10),
-        displayDate: formatDateBr(getOffsetDate(-10)),
-        description: 'PAGTO TIT EGILOX INDUSTRIA',
-        category: 'Matéria Prima',
-        entity: 'Egilox Indústria',
-        amount: 4890.0,
-        type: 'payable',
-        status: 'paid',
-        originType: 'bank_statement',
-        companyName: 'Matriz SP',
-        bankName: 'Banco Inter',
-        method: 'Boleto',
-        unit: 'Fábrica',
-      },
-      {
-        id: 'ext-r2',
-        date: getOffsetDate(-8),
-        displayDate: formatDateBr(getOffsetDate(-8)),
-        description: 'TED RECEBIMENTO SILVA DISTRIBUIDORA',
-        category: 'Vendas & Faturamento',
-        entity: 'Silva Distribuidora',
-        amount: 5200.0,
-        type: 'receivable',
-        status: 'paid',
-        originType: 'bank_statement',
-        companyName: 'Filial PR',
-        bankName: 'Banco do Brasil',
-        method: 'TED',
-        unit: 'Filial Sul',
-      },
-      {
-        id: 'ext-p3',
-        date: getOffsetDate(-6),
-        displayDate: formatDateBr(getOffsetDate(-6)),
-        description: 'PGTO ALUGUEL IMOVEIS CENTRAL',
-        category: 'Aluguel',
-        entity: 'Imóveis Central',
-        amount: 3200.0,
-        type: 'payable',
-        status: 'paid',
-        originType: 'bank_statement',
-        companyName: 'Matriz SP',
-        bankName: 'Itaú',
-        method: 'Transferência',
-        unit: 'Matriz',
-      },
-      {
-        id: 'ext-r3',
-        date: getOffsetDate(-4),
-        displayDate: formatDateBr(getOffsetDate(-4)),
-        description: 'LIQUIDACAO BOLETO #4091 CLIENTE VIP',
-        category: 'Serviços',
-        entity: 'Cliente VIP Corp',
-        amount: 3900.0,
-        type: 'receivable',
-        status: 'paid',
-        originType: 'bank_statement',
-        companyName: 'Matriz SP',
-        bankName: 'Banco Inter',
-        method: 'Bolepix',
-        unit: 'Matriz',
-      },
-      {
-        id: 'ext-p4',
-        date: getOffsetDate(-2),
-        displayDate: formatDateBr(getOffsetDate(-2)),
-        description: 'FOLHA PAGTO ADIANTAMENTO QUINZENA',
-        category: 'RH / Folha',
-        entity: 'Folha de Pagamento',
-        amount: 7400.0,
-        type: 'payable',
-        status: 'paid',
-        originType: 'bank_statement',
-        companyName: 'Matriz SP',
-        bankName: 'Banco Inter',
-        method: 'PIX Lote',
-        unit: 'Matriz',
-      },
-    ];
-
-    // Previsões complementares
-    const futureModel: FinanceTransaction[] = [
-      {
-        id: 'fut-p1',
-        date: getOffsetDate(2),
-        displayDate: formatDateBr(getOffsetDate(2)),
-        description: 'Fornecedor Embalagens Plásticas',
-        category: 'Matéria Prima',
-        entity: 'PlastPack Embalagens',
-        amount: 2100.0,
-        type: 'payable',
-        status: 'open',
-        originType: 'bling_erp',
-        companyName: 'Matriz SP',
-        bankName: 'Banco Inter',
-        method: 'Boleto 15d',
-        unit: 'Fábrica',
-      },
-      {
-        id: 'fut-r1',
-        date: getOffsetDate(3),
-        displayDate: formatDateBr(getOffsetDate(3)),
-        description: 'Faturamento Pedido Venda #1089',
-        category: 'Vendas & Faturamento',
-        entity: 'Supermercado Central',
-        amount: 7800.0,
-        type: 'receivable',
-        status: 'open',
-        originType: 'bling_erp',
-        companyName: 'Matriz SP',
-        bankName: 'Banco Inter',
-        method: 'Bolepix',
-        unit: 'Loja Centro',
-      },
-      {
-        id: 'fut-p2',
-        date: getOffsetDate(6),
-        displayDate: formatDateBr(getOffsetDate(6)),
-        description: 'DAS Simples Nacional Guia Mensal',
-        category: 'Tributos',
-        entity: 'Receita Federal',
-        amount: 3450.0,
-        type: 'payable',
-        status: 'open',
-        originType: 'bling_erp',
-        companyName: 'Matriz SP',
-        bankName: 'Itaú',
-        method: 'Boleto Governo',
-        unit: 'Fiscal',
-      },
-      {
-        id: 'fut-r2',
-        date: getOffsetDate(9),
-        displayDate: formatDateBr(getOffsetDate(9)),
-        description: 'Contrato Mensalidade Manutenção',
-        category: 'Serviços',
-        entity: 'Tech Soluções Ltda',
-        amount: 6200.0,
-        type: 'receivable',
-        status: 'open',
-        originType: 'bling_erp',
-        companyName: 'Filial PR',
-        bankName: 'Banco do Brasil',
-        method: 'Boleto 30d',
-        unit: 'Filial Sul',
-      },
-    ];
-
-    setAllTransactions([...bankStatementPast, ...list, ...futureModel]);
-  }, [contasPagar, contasReceber, todayISO]);
+    // Mantém exclusivamente as contas reais do Bling + extratos manuais que o usuário porventura importou
+    setAllTransactions((prev) => {
+      const userUploaded = prev.filter(
+        (t) => t.originType === 'bank_statement' && !t.id.startsWith('ext-')
+      );
+      return [...userUploaded, ...list];
+    });
+  }, [contasPagar, contasReceber, todayISO, empresaNome]);
 
   // --- Opções Dinâmicas para os Selects das Tabelas e Modais ---
   const bankOptions = useMemo(() => {
@@ -1085,7 +897,11 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
       }
     });
 
-    let runningBalance = 24500;
+    const sortedDays = Array.from(daysMap.keys()).sort();
+    const firstDate = sortedDays[0] || '';
+    let runningBalance = baseFilteredTransactions
+      .filter((tx) => firstDate && tx.date < firstDate)
+      .reduce((acc, tx) => acc + (tx.type === 'receivable' ? tx.amount : -tx.amount), 0);
     const dataPoints: any[] = [];
 
     const convertGroupsToArray = (
@@ -1441,6 +1257,21 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
         {/* Botões de Ação do BT Business */}
         <div className="flex items-center gap-1.5 flex-wrap">
+          {/* Botão Sincronizar Bling */}
+          {onRefreshBling && (
+            <button
+              onClick={onRefreshBling}
+              disabled={carregando}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60 rounded-lg text-xs font-bold transition-all shadow-xs border border-emerald-200/80 dark:border-emerald-800/60 disabled:opacity-50"
+              title="Buscar contas a pagar e receber atualizadas do Bling agora"
+            >
+              <span className={`material-symbols-outlined text-base ${carregando ? 'animate-spin' : ''}`}>
+                sync
+              </span>
+              <span>{carregando ? 'Sincronizando...' : 'Sincronizar Bling'}</span>
+            </button>
+          )}
+
           {/* Botão Uploads de Extratos */}
           <button
             onClick={() => setShowUploadModal(true)}
