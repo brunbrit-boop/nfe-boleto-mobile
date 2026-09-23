@@ -44,10 +44,11 @@ export const App: React.FC = () => {
           // Limpa dados de demonstração residuais caso ainda estejam no localStorage
           const limpas = parsed.map((e: EmpresaTenant) => {
             const isDemo = e.razaoSocial?.includes('BRASIL TECH') || e.cnpj === '24.912.830/0001-52';
-            const token = e.blingAccessToken || tokenAtual;
-            const expAt = e.blingTokenExpiresAt;
-            const isExpirado = Boolean(e.isBlingExpirado || (expAt && Date.now() > expAt && !e.blingRefreshToken));
-            const isConectado = Boolean(token) && !isExpirado && e.isBlingConectado !== false;
+            const token = e.blingAccessToken || '';
+            // Se possui token ou refresh token, a integração permanece conectada
+            const temChaveValida = Boolean(token || e.blingRefreshToken);
+            const isExpirado = Boolean(e.isBlingExpirado && !e.blingRefreshToken);
+            const isConectado = temChaveValida && !isExpirado && e.isBlingConectado !== false;
 
             return {
               ...e,
@@ -159,7 +160,7 @@ export const App: React.FC = () => {
     if (!token) return;
 
     try {
-      const dados = await obterDadosEmpresaBling(token);
+      const dados = await obterDadosEmpresaBling(token, empresaId);
       if (dados.success && (dados.razaoSocial || dados.cnpj || dados.nomeFantasia)) {
         const nomeFinal = dados.nomeFantasia || dados.razaoSocial || 'Empresa Bling';
         const razaoFinal = dados.razaoSocial || nomeFinal;
@@ -176,6 +177,7 @@ export const App: React.FC = () => {
                 cidade: dados.cidade || e.cidade,
                 uf: dados.uf || e.uf,
                 isBlingConectado: true,
+                isBlingExpirado: false,
                 ultimaSincronizacao: new Date().toISOString(),
               };
             }
@@ -201,15 +203,15 @@ export const App: React.FC = () => {
     }
   };
 
-  // Efeito ao carregar: sincroniza imediatamente os dados reais das empresas ativas e válidas
+  // Sincronização sob demanda apenas para a empresa ativa (evita chamadas concorrentes contra o Bling)
   useEffect(() => {
-    empresas.forEach((emp) => {
-      // Só sincroniza se a empresa tiver token próprio e NÃO estiver expirada
-      if (emp.blingAccessToken && emp.blingAccessToken.trim() && emp.isBlingConectado && !emp.isBlingExpirado) {
-        sincronizarEmpresaDoBling(emp.id, emp.blingAccessToken.trim());
+    if (empresaAtivaId) {
+      const ativa = empresas.find((e) => e.id === empresaAtivaId);
+      if (ativa?.blingAccessToken && !ativa.isBlingExpirado && !ativa.cnpj) {
+        sincronizarEmpresaDoBling(ativa.id, ativa.blingAccessToken.trim());
       }
-    });
-  }, []);
+    }
+  }, [empresaAtivaId]);
 
   // Listener para sincronização em background e atualizações de cache
   useEffect(() => {

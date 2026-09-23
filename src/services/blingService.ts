@@ -122,6 +122,7 @@ export interface BlingApiOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: any;
   customToken?: string;
+  empresaId?: string;
 }
 
 export function extrairMensagemErroBling(data: any, status: number): string {
@@ -285,7 +286,10 @@ export async function tentarAutoRenovarToken(tokenAtual?: string, empresaIdParam
   return promessaRenovacaoEmAndamento;
 }
 
-async function fetchComTimeout(url: string, options: RequestInit, timeoutMs: number = 20000): Promise<Response> {
+/**
+ * Função utilitária para fetch com timeout controlado
+ */
+export async function fetchComTimeout(url: string, options: RequestInit = {}, timeoutMs: number = 20000): Promise<Response> {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -308,6 +312,7 @@ export async function callBlingApi(
   let customToken: string | undefined;
   let method: string = 'GET';
   let body: any = undefined;
+  let empresaId: string | undefined = undefined;
 
   if (typeof optionsOrToken === 'string') {
     customToken = optionsOrToken;
@@ -315,6 +320,7 @@ export async function callBlingApi(
     customToken = optionsOrToken.customToken;
     method = optionsOrToken.method || 'GET';
     body = optionsOrToken.body;
+    empresaId = optionsOrToken.empresaId;
   }
 
   const rawToken = customToken !== undefined ? customToken : getStoredBlingToken();
@@ -328,7 +334,7 @@ export async function callBlingApi(
     const rawExpiresAt = localStorage.getItem('bling_expires_at');
     const expiresAtNum = rawExpiresAt ? Number(rawExpiresAt) : undefined;
     if (isTokenExpirando(expiresAtNum, 15)) {
-      const renovado = await tentarAutoRenovarToken(token);
+      const renovado = await tentarAutoRenovarToken(token, empresaId);
       if (renovado) {
         token = renovado;
       }
@@ -359,14 +365,16 @@ export async function callBlingApi(
 
     // Se retornou 401 ou token expirado, tenta renovar e reexecutar a requisição
     if (!isRetry && (response.status === 401 || (data?.error && String(data.error.message || data.error.description || '').toLowerCase().includes('token')))) {
-      const renovado = await tentarAutoRenovarToken(token);
+      const renovado = await tentarAutoRenovarToken(token, empresaId);
       if (renovado) {
         const nextOptions: BlingApiOptions = typeof optionsOrToken === 'object'
-          ? { ...optionsOrToken, customToken: renovado }
-          : { customToken: renovado, method: method as any, body };
+          ? { ...optionsOrToken, customToken: renovado, empresaId }
+          : { customToken: renovado, method: method as any, body, empresaId };
         return callBlingApi(endpoint, nextOptions, true);
       } else {
-        marcarEmpresaComoExpirada(token);
+        if (empresaId) {
+          marcarEmpresaComoExpirada(token, empresaId);
+        }
         throw new Error('Token do Bling expirado ou inválido (a validade do token é de 6 horas). Por favor, reconecte a empresa na tela inicial.');
       }
     }
@@ -400,14 +408,16 @@ export async function callBlingApi(
       const vData = await vRes.json().catch(() => null);
 
       if (!isRetry && (vRes.status === 401 || (vData?.error && String(vData.error.message || vData.error.description || '').toLowerCase().includes('token')))) {
-        const renovado = await tentarAutoRenovarToken(token);
+        const renovado = await tentarAutoRenovarToken(token, empresaId);
         if (renovado) {
           const nextOptions: BlingApiOptions = typeof optionsOrToken === 'object'
-            ? { ...optionsOrToken, customToken: renovado }
-            : { customToken: renovado, method: method as any, body };
+            ? { ...optionsOrToken, customToken: renovado, empresaId }
+            : { customToken: renovado, method: method as any, body, empresaId };
           return callBlingApi(endpoint, nextOptions, true);
         } else {
-          marcarEmpresaComoExpirada(token);
+          if (empresaId) {
+            marcarEmpresaComoExpirada(token, empresaId);
+          }
           throw new Error('Token do Bling expirado ou inválido (a validade do token é de 6 horas). Por favor, reconecte a empresa na tela inicial.');
         }
       }
@@ -439,14 +449,16 @@ export async function callBlingApi(
   const directData = await directRes.json().catch(() => null);
 
   if (!isRetry && (directRes.status === 401 || (directData?.error && String(directData.error.message || directData.error.description || '').toLowerCase().includes('token')))) {
-    const renovado = await tentarAutoRenovarToken(token);
+    const renovado = await tentarAutoRenovarToken(token, empresaId);
     if (renovado) {
       const nextOptions: BlingApiOptions = typeof optionsOrToken === 'object'
-        ? { ...optionsOrToken, customToken: renovado }
-        : { customToken: renovado, method: method as any, body };
+        ? { ...optionsOrToken, customToken: renovado, empresaId }
+        : { customToken: renovado, method: method as any, body, empresaId };
       return callBlingApi(endpoint, nextOptions, true);
     } else {
-      marcarEmpresaComoExpirada(token);
+      if (empresaId) {
+        marcarEmpresaComoExpirada(token, empresaId);
+      }
       throw new Error('Token do Bling expirado ou inválido (a validade do token é de 6 horas). Por favor, reconecte a empresa na tela inicial.');
     }
   }
@@ -688,7 +700,7 @@ export async function gravarEsbocoNFeNoBling(
 /**
  * Extrai os dados cadastrais da empresa através do token do Bling (Razão Social, Nome Fantasia, CNPJ, Cidade, UF)
  */
-export async function obterDadosEmpresaBling(token: string): Promise<{
+export async function obterDadosEmpresaBling(token: string, empresaId?: string): Promise<{
   success: boolean;
   razaoSocial: string;
   nomeFantasia: string;
@@ -718,7 +730,7 @@ export async function obterDadosEmpresaBling(token: string): Promise<{
     // Retorna: { data: { id, nome, cnpj, email, dataContrato } }
     let dataEmpresa: any = null;
     try {
-      const res = await callBlingApi('/empresas/me/dados-basicos', cleanToken);
+      const res = await callBlingApi('/empresas/me/dados-basicos', { customToken: cleanToken, empresaId });
       if (res && res.data) {
         dataEmpresa = res.data;
       } else if (res && (res.nome || res.cnpj)) {
@@ -741,7 +753,7 @@ export async function obterDadosEmpresaBling(token: string): Promise<{
     // 2. Se não encontrou, tenta rota alternativa /empresas
     if (!dataEmpresa) {
       try {
-        const resEmp = await callBlingApi('/empresas', cleanToken);
+        const resEmp = await callBlingApi('/empresas', { customToken: cleanToken, empresaId });
         if (resEmp && resEmp.data) {
           dataEmpresa = Array.isArray(resEmp.data) ? resEmp.data[0] : resEmp.data;
         }

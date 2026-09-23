@@ -84,10 +84,12 @@ export const AddEmpresaModal: React.FC<AddEmpresaModalProps> = ({
     lista.push(preCadastro);
     localStorage.setItem('nfe_empresas_list', JSON.stringify(lista));
 
-    // Salva referências para o retorno do OAuth
+    // Salva referências pendentes isoladas por empresa para não contaminar a empresa ativa
     localStorage.setItem('bling_oauth_pending_empresa_id', empresaId);
-    localStorage.setItem('bling_client_id', cid);
-    localStorage.setItem('bling_client_secret', sec);
+    localStorage.setItem(
+      `bling_pending_${empresaId}`,
+      JSON.stringify({ clientId: cid, clientSecret: sec })
+    );
 
     // Redireciona para o OAuth oficial do Bling com o state amarrado à empresa
     const redirectUrl = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${cid}&state=${empresaId}`;
