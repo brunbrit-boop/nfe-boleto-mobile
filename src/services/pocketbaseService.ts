@@ -20,10 +20,12 @@ export function setPocketBaseUrl(url: string): void {
  */
 export async function salvarContasReceberNoBanco(
   empresaId: string,
-  contas: BlingContaReceber[]
-): Promise<{ sucesso: boolean; totalSalvas: number }> {
+  contas: BlingContaReceber[],
+  reconciliarExclusoes: boolean = true
+): Promise<{ sucesso: boolean; totalSalvas: number; totalExcluidas: number }> {
   const baseUrl = getPocketBaseUrl();
   let totalSalvas = 0;
+  let totalExcluidas = 0;
 
   for (const cr of contas) {
     const chaveUnica = `${empresaId}_${cr.id}`;
@@ -44,7 +46,7 @@ export async function salvarContasReceberNoBanco(
           ? (cr.categoria as any).descricao
           : cr.categoria || 'Vendas',
       historico: cr.historico || '',
-      forma_pagamento: cr.formaPagamento?.descricao || '',
+      forma_pagamento: (cr as any).formaPagamento?.descricao || '',
       nosso_numero: cr.nossoNumero || '',
       linha_digitavel: cr.linhaDigitavel || '',
       codigo_barras: cr.codigoBarras || '',
@@ -80,18 +82,46 @@ export async function salvarContasReceberNoBanco(
     }
   }
 
-  return { sucesso: true, totalSalvas };
+  // Reconciliação: remove do banco do RDP as contas que foram excluídas no Bling
+  if (reconciliarExclusoes) {
+    try {
+      const idsBlingAtivos = new Set(contas.map((c) => String(c.id)));
+      const listRes = await fetch(
+        `${baseUrl}/api/collections/contas_receber/records?filter=(empresa_id='${encodeURIComponent(empresaId)}')&perPage=500`
+      );
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        const recordsNoBanco = listData.items || [];
+        for (const rec of recordsNoBanco) {
+          if (rec.id_bling && !idsBlingAtivos.has(String(rec.id_bling))) {
+            const delRes = await fetch(`${baseUrl}/api/collections/contas_receber/records/${rec.id}`, {
+              method: 'DELETE',
+            });
+            if (delRes.ok || delRes.status === 204) {
+              totalExcluidas++;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Erro ao reconciliar contas a receber excluídas no PocketBase:', err);
+    }
+  }
+
+  return { sucesso: true, totalSalvas, totalExcluidas };
 }
 
 /**
- * Salva as contas a pagar de uma empresa no banco de dados do RDP (Upsert)
+ * Salva as contas a pagar de uma empresa no banco de dados do RDP (Upsert + Remoção de Excluídas)
  */
 export async function salvarContasPagarNoBanco(
   empresaId: string,
-  contas: BlingContaPagar[]
-): Promise<{ sucesso: boolean; totalSalvas: number }> {
+  contas: BlingContaPagar[],
+  reconciliarExclusoes: boolean = true
+): Promise<{ sucesso: boolean; totalSalvas: number; totalExcluidas: number }> {
   const baseUrl = getPocketBaseUrl();
   let totalSalvas = 0;
+  let totalExcluidas = 0;
 
   for (const cp of contas) {
     const chaveUnica = `${empresaId}_${cp.id}`;
@@ -144,7 +174,33 @@ export async function salvarContasPagarNoBanco(
     }
   }
 
-  return { sucesso: true, totalSalvas };
+  // Reconciliação: remove do banco do RDP as contas que foram excluídas no Bling
+  if (reconciliarExclusoes) {
+    try {
+      const idsBlingAtivos = new Set(contas.map((c) => String(c.id)));
+      const listRes = await fetch(
+        `${baseUrl}/api/collections/contas_pagar/records?filter=(empresa_id='${encodeURIComponent(empresaId)}')&perPage=500`
+      );
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        const recordsNoBanco = listData.items || [];
+        for (const rec of recordsNoBanco) {
+          if (rec.id_bling && !idsBlingAtivos.has(String(rec.id_bling))) {
+            const delRes = await fetch(`${baseUrl}/api/collections/contas_pagar/records/${rec.id}`, {
+              method: 'DELETE',
+            });
+            if (delRes.ok || delRes.status === 204) {
+              totalExcluidas++;
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Erro ao reconciliar contas a pagar excluídas no PocketBase:', err);
+    }
+  }
+
+  return { sucesso: true, totalSalvas, totalExcluidas };
 }
 
 /**
