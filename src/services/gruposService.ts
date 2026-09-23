@@ -5,7 +5,7 @@
 
 import type { GrupoClientes, GrupoClienteItem, GrupoProdutos, BlingCliente, CompanyProfile, EmpresaTenant, NFeData, BankProvider } from '../types';
 import type { CatalogoProduto, OfertaGeradaResult } from '../utils/salesOptimizer';
-import { gerarOfertaComGeminiOuLocal } from './geminiService';
+import { gerarOfertaComGeminiOuLocal, isCerebroIAConectado } from './geminiService';
 import { CATALOGO_PRODUTOS_PADRAO } from '../utils/salesOptimizer';
 import { sleep, gravarEsbocoNFeNoBling } from './blingService';
 import { formatCurrency, gerarChaveAcessoNFe, calcularDivisaoParcelas } from '../utils/financeEngine';
@@ -247,6 +247,10 @@ export async function gerarOfertaParaItem(
     catalogoEfetivo = CATALOGO_PRODUTOS_PADRAO;
   }
 
+  if (!isCerebroIAConectado()) {
+    throw new Error('Cérebro IA desconectado! Configure a Chave de API Google Gemini antes de gerar a proposta comercial.');
+  }
+
   return await gerarOfertaComGeminiOuLocal(item.valorAlvo, margemMax, catalogoEfetivo, diretriz);
 }
 
@@ -259,6 +263,10 @@ export async function executarGeracaoEmLote(
   onProgress?: (clienteId: number, status: 'gerando' | 'gerado' | 'erro', oferta?: OfertaGeradaResult, erro?: string) => void,
   shouldCancel?: () => boolean
 ): Promise<GrupoClientes> {
+  if (!isCerebroIAConectado()) {
+    throw new Error('Cérebro IA desconectado! Conecte a Chave de API Google Gemini nas configurações antes de iniciar a geração em lote.');
+  }
+
   const grupoAtualizado: GrupoClientes = {
     ...grupo,
     atualizadoEm: new Date().toISOString(),

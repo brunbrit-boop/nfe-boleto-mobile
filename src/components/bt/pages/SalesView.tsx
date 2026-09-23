@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { BlingCliente, EmpresaTenant, BankProvider, NFeData, CompanyProfile, Installment } from '../../../types';
 import {
-  gerarOfertaComIA,
   converterPedidoParaNFeRascunho,
   CATALOGO_PRODUTOS_PADRAO,
   type PedidoItemVenda,
@@ -11,6 +10,7 @@ import {
 import {
   gerarOfertaComGeminiOuLocal,
   getStoredGeminiApiKey,
+  isCerebroIAConectado,
 } from '../../../services/geminiService';
 import {
   Sparkles,
@@ -175,11 +175,20 @@ export const SalesView: React.FC<SalesViewProps> = ({
 
   const clienteSelecionado = clientes.find((c) => c.id === Number(selectedClienteId)) || clientes[0] || null;
 
-  // Gera oferta inteligente com IA (Google Gemini ou Motor Local com margem de até 5%)
+  // Gera oferta inteligente estritamente com Inteligência Artificial (Google Gemini)
   const handleGerarOferta = async () => {
     const valorAlvo = parseFloat(valorAlvoInput.replace(/\D/g, '')) || 0;
     if (valorAlvo <= 0) {
       alert('Por favor, informe um valor alvo válido para a venda.');
+      return;
+    }
+
+    // TRAVA DE SEGURANÇA: Sem cérebro, sem proposta
+    if (!isCerebroIAConectado()) {
+      if (onOpenApiKeys) {
+        onOpenApiKeys();
+      }
+      alert('⚠️ Cérebro de IA Desconectado!\n\nPara garantir que nenhum cliente receba um orçamento com produtos aleatórios ou sem coerência técnica, conecte sua chave do Google Gemini antes de gerar propostas inteligentes.');
       return;
     }
 
@@ -197,15 +206,9 @@ export const SalesView: React.FC<SalesViewProps> = ({
       );
       setResultadoOferta(res);
       setItensPedido(res.itens);
-    } catch {
-      const fallback = gerarOfertaComIA(
-        valorAlvo,
-        0.05,
-        catalogoParaOferta,
-        diretrizComercial.trim() || undefined
-      );
-      setResultadoOferta(fallback);
-      setItensPedido(fallback.itens);
+    } catch (err: any) {
+      setResultadoOferta(null);
+      alert(`⚠️ Não foi possível gerar a proposta com IA:\n\n${err?.message || 'Falha de comunicação com o Google Gemini. Nenhum produto foi gerado para evitar itens aleatórios.'}`);
     } finally {
       setIsGenerating(false);
     }
@@ -388,6 +391,22 @@ export const SalesView: React.FC<SalesViewProps> = ({
               Gere propostas de vendas ideais baseadas no valor alvo pretendido e prepare a NF-e sem transmissão imediata.
             </p>
           </div>
+
+          {/* Status do Cérebro IA (Google Gemini) */}
+          <button
+            type="button"
+            onClick={onOpenApiKeys}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer w-fit ${
+              hasGeminiKey
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20 animate-pulse'
+            }`}
+            title={hasGeminiKey ? 'Cérebro Google Gemini Conectado' : 'Clique para configurar a Chave de API Gemini'}
+          >
+            <span className={`w-2 h-2 rounded-full ${hasGeminiKey ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>{hasGeminiKey ? 'Cérebro IA Ativo (Gemini)' : 'IA Desconectada • Conectar Chave'}</span>
+          </button>
         </div>
 
         {/* Seletor de Modo: Orçamento Individual vs Grupos & Lote */}
@@ -447,6 +466,7 @@ export const SalesView: React.FC<SalesViewProps> = ({
             onViewDanfe={onViewDanfe}
             onViewBoleto={onViewBoleto}
             onEmitirNFe={onEmitirNFe}
+            onOpenApiKeys={onOpenApiKeys}
           />
         ) : (
           <>

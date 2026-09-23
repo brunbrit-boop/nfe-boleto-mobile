@@ -31,6 +31,7 @@ import type {
 } from '../../../types';
 import type { CatalogoProduto, OfertaGeradaResult } from '../../../utils/salesOptimizer';
 import { formatCurrency } from '../../../utils/financeEngine';
+import { isCerebroIAConectado } from '../../../services/geminiService';
 import {
   obterGruposCacheLocal,
   salvarGruposCacheLocal,
@@ -52,6 +53,7 @@ interface GruposClientesViewProps {
   onViewDanfe?: (nfe: NFeData) => void;
   onViewBoleto?: (parcela: Installment, nfe: NFeData) => void;
   onEmitirNFe?: (nfe: NFeData) => void;
+  onOpenApiKeys?: () => void;
 }
 
 export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
@@ -63,7 +65,20 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
   onViewDanfe,
   onViewBoleto,
   onEmitirNFe,
+  onOpenApiKeys,
 }) => {
+  const [hasGeminiKey, setHasGeminiKey] = useState<boolean>(() => isCerebroIAConectado());
+
+  useEffect(() => {
+    const handleKeyChange = () => setHasGeminiKey(isCerebroIAConectado());
+    window.addEventListener('gemini_key_updated', handleKeyChange);
+    window.addEventListener('storage', handleKeyChange);
+    return () => {
+      window.removeEventListener('gemini_key_updated', handleKeyChange);
+      window.removeEventListener('storage', handleKeyChange);
+    };
+  }, []);
+
   // Lista de grupos salvos no cache local para esta empresa
   const [grupos, setGrupos] = useState<GrupoClientes[]>(() => {
     const salvos = obterGruposCacheLocal(empresa.id);
@@ -251,6 +266,14 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     const item = grupoAtivo.clientes.find((c) => c.clienteId === clienteId);
     if (!item) return;
 
+    if (!isCerebroIAConectado()) {
+      alert(
+        '⚠️ Cérebro IA Desconectado!\n\nPara garantir propostas comerciais inteligentes e não enviar orçamentos aleatórios aos clientes, a Chave de API do Google Gemini é estritamente necessária.\n\nPor favor, conecte a chave de API nas Configurações.'
+      );
+      onOpenApiKeys?.();
+      return;
+    }
+
     // Marca como gerando
     let atualizado: GrupoClientes = {
       ...grupoAtivo,
@@ -282,6 +305,14 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
   // Executa Geração em Lote de Todo o Grupo com IA
   const handleGerarTodosLote = async () => {
     if (!grupoAtivo || grupoAtivo.clientes.length === 0 || isGerandoLote) return;
+
+    if (!isCerebroIAConectado()) {
+      alert(
+        '⚠️ Cérebro IA Desconectado!\n\nPara gerar propostas em lote com inteligência comercial, conecte a Chave de API do Google Gemini nas Configurações.'
+      );
+      onOpenApiKeys?.();
+      return;
+    }
 
     setIsGerandoLote(true);
     setProgressoLote({ atual: 0, total: grupoAtivo.clientes.length });
@@ -658,42 +689,60 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
 
   return (
     <div className="space-y-5 animate-in fade-in duration-200">
-      {/* Navegação entre Grupos de Clientes e Grupos de Produtos */}
-      <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-white dark:bg-[#10221c] border border-slate-200 dark:border-[#1a382e] shadow-sm w-fit">
-        <button
-          type="button"
-          onClick={() => setSubAbaAtiva('clientes')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
-            subAbaAtiva === 'clientes'
-              ? 'bg-[#11d493] text-slate-950 shadow-md shadow-emerald-500/20'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>Grupos de Clientes & Vendas IA</span>
-          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold ${
-            subAbaAtiva === 'clientes' ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-100 dark:bg-[#162f27] text-slate-400'
-          }`}>
-            {grupos.length}
-          </span>
-        </button>
+      {/* Navegação entre Grupos de Clientes e Grupos de Produtos + Status IA */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2 p-1.5 rounded-2xl bg-white dark:bg-[#10221c] border border-slate-200 dark:border-[#1a382e] shadow-sm w-fit">
+          <button
+            type="button"
+            onClick={() => setSubAbaAtiva('clientes')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              subAbaAtiva === 'clientes'
+                ? 'bg-[#11d493] text-slate-950 shadow-md shadow-emerald-500/20'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>Grupos de Clientes & Vendas IA</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold ${
+              subAbaAtiva === 'clientes' ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-100 dark:bg-[#162f27] text-slate-400'
+            }`}>
+              {grupos.length}
+            </span>
+          </button>
 
+          <button
+            type="button"
+            onClick={() => setSubAbaAtiva('produtos')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
+              subAbaAtiva === 'produtos'
+                ? 'bg-[#11d493] text-slate-950 shadow-md shadow-emerald-500/20'
+                : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Package className="w-4 h-4" />
+            <span>Grupos de Produtos (Kits & Combos)</span>
+            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold ${
+              subAbaAtiva === 'produtos' ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-100 dark:bg-[#162f27] text-slate-400'
+            }`}>
+              {gruposProdutos.length}
+            </span>
+          </button>
+        </div>
+
+        {/* Status do Cérebro IA (Google Gemini) */}
         <button
           type="button"
-          onClick={() => setSubAbaAtiva('produtos')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-black transition-all cursor-pointer ${
-            subAbaAtiva === 'produtos'
-              ? 'bg-[#11d493] text-slate-950 shadow-md shadow-emerald-500/20'
-              : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+          onClick={onOpenApiKeys}
+          className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer w-fit ${
+            hasGeminiKey
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/20'
+              : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-400 hover:bg-rose-500/20 animate-pulse'
           }`}
+          title={hasGeminiKey ? 'Cérebro Google Gemini Conectado' : 'Clique para configurar a Chave de API Gemini'}
         >
-          <Package className="w-4 h-4" />
-          <span>Grupos de Produtos (Kits & Combos)</span>
-          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono font-bold ${
-            subAbaAtiva === 'produtos' ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-100 dark:bg-[#162f27] text-slate-400'
-          }`}>
-            {gruposProdutos.length}
-          </span>
+          <span className={`w-2 h-2 rounded-full ${hasGeminiKey ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>{hasGeminiKey ? 'Cérebro IA Ativo (Gemini)' : 'IA Desconectada • Conectar Chave'}</span>
         </button>
       </div>
 

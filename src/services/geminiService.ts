@@ -1,5 +1,5 @@
 import type { CatalogoProduto, OfertaGeradaResult, PedidoItemVenda } from '../utils/salesOptimizer';
-import { CATALOGO_PRODUTOS_PADRAO, gerarOfertaComIA } from '../utils/salesOptimizer';
+import { CATALOGO_PRODUTOS_PADRAO } from '../utils/salesOptimizer';
 
 const GEMINI_MODELS = ['gemini-3.6-flash', 'gemini-3.7-flash', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-1.5-flash'];
 
@@ -93,25 +93,29 @@ export async function testarChaveGemini(
 }
 
 /**
+ * Verifica se a chave de Inteligência Artificial do Google Gemini está configurada
+ */
+export function isCerebroIAConectado(): boolean {
+  return Boolean(getStoredGeminiApiKey().trim());
+}
+
+/**
  * Gera proposta comercial inteligente utilizando Google Gemini API
- * Se a chave não estiver configurada ou falhar, recorre graciosamente ao motor local.
+ * TRAVA DE SEGURANÇA: NUNCA gera itens por matemática cega sem a IA ativa.
  */
 export async function gerarOfertaComGeminiOuLocal(
   valorAlvo: number,
   margemMax: number = 0.05,
   catalogo: CatalogoProduto[] = CATALOGO_PRODUTOS_PADRAO,
   diretrizComercial?: string
-): Promise<OfertaGeradaResult & { motor: 'gemini' | 'local' }> {
-  const apiKey = getStoredGeminiApiKey();
+): Promise<OfertaGeradaResult & { motor: 'gemini' }> {
+  const apiKey = getStoredGeminiApiKey().trim();
 
-  // Sem chave configurada: usa motor algorítmico local
+  // TRAVA DE SEGURANÇA: Sem chave de IA configurada, JAMAIS gera orçamento
   if (!apiKey) {
-    const localRes = gerarOfertaComIA(valorAlvo, margemMax, catalogo, diretrizComercial);
-    return {
-      ...localRes,
-      motor: 'local',
-      razaoExplicativa: `[Motor Local] ${localRes.razaoExplicativa} (Para respostas com raciocínio semântico, configure sua chave do Google Gemini no ícone do sistema).`,
-    };
+    throw new Error(
+      'Cérebro de Inteligência Artificial desconectado. Conecte sua chave do Google Gemini para gerar propostas comerciais inteligentes com segurança.'
+    );
   }
 
   const limiteMaximo = Number((valorAlvo * (1 + margemMax)).toFixed(2));
@@ -232,16 +236,13 @@ Retorne ESTRITAMENTE um objeto JSON válido (sem blocos markdown) com a seguinte
           motor: 'gemini',
         };
       }
-    } catch {
-      // Tenta próximo modelo ou fallback
+    } catch (err: any) {
+      console.warn(`Tentativa com ${model} falhou:`, err);
     }
   }
 
-  // Fallback seguro caso a chamada falhe
-  const fallback = gerarOfertaComIA(valorAlvo, margemMax, catalogo, diretrizComercial);
-  return {
-    ...fallback,
-    motor: 'local',
-    razaoExplicativa: `[Motor Local Fallback] ${fallback.razaoExplicativa}`,
-  };
+  // TRAVA DE SEGURANÇA: Se todos os modelos falharem, NUNCA recorre ao motor matemático aleatório
+  throw new Error(
+    'Não foi possível obter a resposta do Google Gemini. O orçamento foi bloqueado com segurança para evitar o envio de produtos aleatórios ao cliente. Verifique sua conexão e tente novamente.'
+  );
 }
