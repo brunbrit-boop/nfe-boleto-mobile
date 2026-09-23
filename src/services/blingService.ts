@@ -173,7 +173,7 @@ let timestampUltimaTentativaRenovacao = 0;
  * Tenta renovar o token de uma empresa ou do sistema caso esteja expirado
  * Possui trava anti-concorrência e cooldown para evitar HTTP 429 (Too Many Requests)
  */
-export async function tentarAutoRenovarToken(tokenAtual?: string): Promise<string | null> {
+export async function tentarAutoRenovarToken(tokenAtual?: string, empresaIdParam?: string): Promise<string | null> {
   if (promessaRenovacaoEmAndamento) {
     return promessaRenovacaoEmAndamento;
   }
@@ -187,39 +187,50 @@ export async function tentarAutoRenovarToken(tokenAtual?: string): Promise<strin
 
   promessaRenovacaoEmAndamento = (async () => {
     try {
-      let refreshToken = localStorage.getItem('bling_refresh_token') || '';
-      let clientId = localStorage.getItem('bling_client_id') || '';
-      let clientSecret = localStorage.getItem('bling_client_secret') || '';
-      let empresaIdAlvo: string | null = null;
+      let refreshToken = '';
+      let clientId = '';
+      let clientSecret = '';
+      let empresaIdAlvo: string | null = empresaIdParam || null;
 
       const cleanTokenAtual = (tokenAtual || '').trim().replace(/^Bearer\s+/i, '');
+      const ativaAtual = localStorage.getItem('nfe_empresa_ativa_id');
 
       const rawList = localStorage.getItem('nfe_empresas_list');
       if (rawList) {
         try {
           const empresas: any[] = JSON.parse(rawList);
           const emp = empresas.find((e: any) => {
+            if (empresaIdParam && e.id === empresaIdParam) return true;
             const empToken = (e.blingAccessToken || '').trim().replace(/^Bearer\s+/i, '');
             return cleanTokenAtual && empToken === cleanTokenAtual;
-          }) || empresas.find((e: any) => e.blingRefreshToken);
+          }) || (cleanTokenAtual ? null : empresas.find((e: any) => e.id === ativaAtual));
 
           if (emp) {
             empresaIdAlvo = emp.id;
             if (emp.blingRefreshToken) {
               refreshToken = emp.blingRefreshToken;
             }
-            clientId = emp.blingClientId || clientId;
-            clientSecret = emp.blingClientSecret || clientSecret;
+            clientId = emp.blingClientId || '';
+            clientSecret = emp.blingClientSecret || '';
           }
         } catch {}
       }
 
+      // Se não encontrou a empresa específica pelo token fornecido, tenta o storage global apenas se não houver conflito
+      if (!refreshToken && (!cleanTokenAtual || cleanTokenAtual === (localStorage.getItem('bling_access_token') || '').trim())) {
+        refreshToken = localStorage.getItem('bling_refresh_token') || '';
+        clientId = clientId || localStorage.getItem('bling_client_id') || '';
+        clientSecret = clientSecret || localStorage.getItem('bling_client_secret') || '';
+      }
+
       if (!refreshToken) {
-        marcarEmpresaComoExpirada(cleanTokenAtual, empresaIdAlvo);
+        if (empresaIdAlvo) {
+          marcarEmpresaComoExpirada(cleanTokenAtual, empresaIdAlvo);
+        }
         return null;
       }
 
-      const res = await renovarTokenBling(refreshToken, clientId, clientSecret);
+      const res = await renovarTokenBling(refreshToken, clientId, clientSecret, empresaIdAlvo || undefined);
       if (res.success && res.accessToken) {
         if (rawList) {
           try {
@@ -244,19 +255,24 @@ export async function tentarAutoRenovarToken(tokenAtual?: string): Promise<strin
           } catch {}
         }
 
-        localStorage.setItem('bling_access_token', res.accessToken);
-        if (res.refreshToken) {
-          localStorage.setItem('bling_refresh_token', res.refreshToken);
-        }
-        if (res.expiresAt) {
-          localStorage.setItem('bling_expires_at', String(res.expiresAt));
+        // Apenas atualiza storage global se a empresa renovada for a atualmente ativa
+        if (!empresaIdAlvo || empresaIdAlvo === ativaAtual) {
+          localStorage.setItem('bling_access_token', res.accessToken);
+          if (res.refreshToken) {
+            localStorage.setItem('bling_refresh_token', res.refreshToken);
+          }
+          if (res.expiresAt) {
+            localStorage.setItem('bling_expires_at', String(res.expiresAt));
+          }
         }
 
-        console.log('✅ Token do Bling auto-renovado com sucesso!');
+        console.log('✅ Token do Bling auto-renovado com sucesso para empresa:', empresaIdAlvo || 'ativa');
         return res.accessToken;
       } else {
         console.warn('Falha na renovação do token do Bling:', res.error);
-        marcarEmpresaComoExpirada(cleanTokenAtual, empresaIdAlvo);
+        if (empresaIdAlvo) {
+          marcarEmpresaComoExpirada(cleanTokenAtual, empresaIdAlvo);
+        }
       }
     } catch (err) {
       console.warn('Falha na auto-renovação de token do Bling:', err);

@@ -396,13 +396,28 @@ export const App: React.FC = () => {
         } catch {}
       }
 
+      // Recupera credenciais isoladas da empresa que estava pendente de conexão
+      let pendingCreds: { clientId?: string; clientSecret?: string } = {};
+      if (targetEmpresaId) {
+        const rawPending = localStorage.getItem(`bling_pending_${targetEmpresaId}`);
+        if (rawPending) {
+          try {
+            pendingCreds = JSON.parse(rawPending);
+          } catch {}
+        }
+      }
+
       const existingTarget = listaEmpresas.find((e) => e.id === targetEmpresaId) || empresas.find((e) => e.id === targetEmpresaId);
 
-      const clientSecret = existingTarget?.blingClientSecret || localStorage.getItem('bling_client_secret') || '';
-      const clientId = existingTarget?.blingClientId || localStorage.getItem('bling_client_id') || '';
+      const clientSecret = pendingCreds.clientSecret || existingTarget?.blingClientSecret || localStorage.getItem('bling_client_secret') || '';
+      const clientId = pendingCreds.clientId || existingTarget?.blingClientId || localStorage.getItem('bling_client_id') || '';
 
       console.log('Trocando código de autorização por token de acesso no Bling para a empresa:', targetEmpresaId);
-      exchangeBlingCodeForToken(code, clientId, clientSecret).then(async (res) => {
+      exchangeBlingCodeForToken(code, clientId, clientSecret, targetEmpresaId || undefined).then(async (res) => {
+        if (targetEmpresaId) {
+          localStorage.removeItem(`bling_pending_${targetEmpresaId}`);
+        }
+
         if (res.success && res.accessToken) {
           console.log('Conta do Bling conectada com sucesso! Token gerado:', res.accessToken.slice(0, 10));
 
@@ -433,6 +448,7 @@ export const App: React.FC = () => {
                   blingClientSecret: clientSecret,
                   blingTokenExpiresAt: res.expiresAt || (Date.now() + 21600 * 1000),
                   isBlingConectado: true,
+                  isBlingExpirado: false,
                   ultimaSincronizacao: new Date().toISOString(),
                 };
               }
@@ -459,26 +475,28 @@ export const App: React.FC = () => {
                 blingClientSecret: clientSecret,
                 blingTokenExpiresAt: res.expiresAt || (Date.now() + 21600 * 1000),
                 isBlingConectado: true,
+                isBlingExpirado: false,
                 ultimaSincronizacao: new Date().toISOString(),
               };
               atualizadas.push(nova);
             }
 
             localStorage.setItem('nfe_empresas_list', JSON.stringify(atualizadas));
+
+            // Seleciona a empresa recém-conectada e atualiza o estado com isolamento
+            const recemConectada = atualizadas.find((e) => e.id === targetEmpresaId);
+            if (recemConectada) {
+              handleSelectEmpresa(recemConectada);
+              carregarDadosBling(res.accessToken, recemConectada.id, undefined, true);
+            }
+
             return atualizadas;
           });
-
-          // Seleciona a empresa conectada e inicia sincronização completa
-          const idParaAtivar = targetEmpresaId || empresaAtivaId;
-          if (idParaAtivar) {
-            setEmpresaAtivaId(idParaAtivar);
-            carregarDadosBling(res.accessToken, idParaAtivar, undefined, true);
-          }
 
           alert(`🎉 Sucesso! A conta do Bling da empresa "${nomeDetectado || 'Empresa Bling'}" foi conectada com sucesso sem alterar as outras!`);
         } else {
           console.error(`Erro ao autenticar: ${res.error}`);
-          alert(`Aviso ao autenticar no Bling: ${res.error}`);
+          alert(`⚠️ Aviso ao autenticar no Bling:\n\n${res.error}\n\nDica: Se você possui duas contas diferentes no Bling, faça logout da conta atual no Bling antes de autorizar a segunda empresa.`);
         }
       });
       window.history.replaceState({}, document.title, window.location.pathname);

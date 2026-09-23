@@ -158,7 +158,8 @@ export async function testBlingConnection(token?: string): Promise<{ success: bo
 export async function exchangeBlingCodeForToken(
   code: string,
   clientId: string = BLING_DEFAULT_CLIENT_ID,
-  clientSecret: string = ''
+  clientSecret: string = '',
+  targetEmpresaId?: string
 ): Promise<{ success: boolean; accessToken?: string; refreshToken?: string; expiresAt?: number; error?: string }> {
   try {
     const cSec = clientSecret || localStorage.getItem('bling_client_secret') || BLING_DEFAULT_CLIENT_SECRET;
@@ -169,43 +170,60 @@ export async function exchangeBlingCodeForToken(
       };
     }
 
-    // Tenta primeiro via Vercel Serverless Function (/api/bling-token) para evitar problemas de CORS
+    const cId = clientId || localStorage.getItem('bling_client_id') || BLING_DEFAULT_CLIENT_ID;
+
+    // Tenta primeiro via Vercel Serverless Function (/api/bling-token)
     try {
       const serverlessRes = await fetch('/api/bling-token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           code,
-          clientId,
+          clientId: cId,
           clientSecret: cSec,
           redirectUri: getBlingCallbackUrl(),
         }),
       });
 
-      if (serverlessRes.ok) {
-        const data = await serverlessRes.json();
-        const expiresAt = Date.now() + (data.expires_in * 1000);
-        saveBlingConfig({
-          clientId,
-          clientSecret: cSec,
-          accessToken: data.access_token,
-          refreshToken: data.refresh_token,
-          expiresAt,
-          isConnected: true,
-        });
-        localStorage.setItem('bling_access_token', data.access_token);
+      const data = await serverlessRes.json().catch(() => null);
+
+      if (serverlessRes.ok && data?.access_token) {
+        const expiresAt = Date.now() + ((data.expires_in || 21600) * 1000);
+
+        // Se for a empresa ativa ou não especificada, atualiza storage global
+        const ativaAtual = localStorage.getItem('nfe_empresa_ativa_id');
+        if (!targetEmpresaId || targetEmpresaId === ativaAtual) {
+          saveBlingConfig({
+            clientId: cId,
+            clientSecret: cSec,
+            accessToken: data.access_token,
+            refreshToken: data.refresh_token,
+            expiresAt,
+            isConnected: true,
+          });
+          localStorage.setItem('bling_access_token', data.access_token);
+        }
+
         return { 
           success: true, 
           accessToken: data.access_token,
           refreshToken: data.refresh_token,
           expiresAt,
         };
+      } else if (serverlessRes.status !== 404 && data) {
+        // Se o servidor respondeu (mesmo com 400 ou 401), não tentar fetch direto no navegador pois causa CORS
+        const msg = data.error || data.message || `Erro HTTP ${serverlessRes.status} do Bling`;
+        return {
+          success: false,
+          error: msg,
+        };
       }
-    } catch {
-      // Fallback para chamada direta se rodando fora da Vercel
+    } catch (err: any) {
+      console.warn('Falha ao contatar /api/bling-token:', err);
     }
 
-    const basicAuth = btoa(`${clientId}:${cSec}`);
+    // Fallback apenas se /api/bling-token não responder (ex: offline absoluto)
+    const basicAuth = btoa(`${cId}:${cSec}`);
     const redirectUri = getBlingCallbackUrl();
 
     const response = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
@@ -224,16 +242,19 @@ export async function exchangeBlingCodeForToken(
 
     if (response.ok) {
       const data = await response.json();
-      const expiresAt = Date.now() + (data.expires_in * 1000);
-      saveBlingConfig({
-        clientId,
-        clientSecret: cSec,
-        accessToken: data.access_token,
-        refreshToken: data.refresh_token,
-        expiresAt,
-        isConnected: true,
-      });
-      localStorage.setItem('bling_access_token', data.access_token);
+      const expiresAt = Date.now() + ((data.expires_in || 21600) * 1000);
+      const ativaAtual = localStorage.getItem('nfe_empresa_ativa_id');
+      if (!targetEmpresaId || targetEmpresaId === ativaAtual) {
+        saveBlingConfig({
+          clientId: cId,
+          clientSecret: cSec,
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token,
+          expiresAt,
+          isConnected: true,
+        });
+        localStorage.setItem('bling_access_token', data.access_token);
+      }
       return { 
         success: true, 
         accessToken: data.access_token,
@@ -265,7 +286,8 @@ export function isTokenExpirando(expiresAt?: number, margemMinutos: number = 15)
 export async function renovarTokenBling(
   refreshToken: string,
   clientId: string = BLING_DEFAULT_CLIENT_ID,
-  clientSecret: string = ''
+  clientSecret: string = '',
+  empresaIdAlvo?: string
 ): Promise<{ success: boolean; accessToken?: string; refreshToken?: string; expiresAt?: number; error?: string }> {
   try {
     const cSec = clientSecret || localStorage.getItem('bling_client_secret') || BLING_DEFAULT_CLIENT_SECRET;
@@ -289,33 +311,42 @@ export async function renovarTokenBling(
         }),
       });
 
-      if (serverlessRes.ok) {
-        const data = await serverlessRes.json();
+      const data = await serverlessRes.json().catch(() => null);
+
+      if (serverlessRes.ok && data?.access_token) {
         const expiresAt = Date.now() + ((data.expires_in || 21600) * 1000);
-        saveBlingConfig({
-          clientId: cId,
-          clientSecret: cSec,
-          accessToken: data.access_token,
-          refreshToken: data.refresh_token || cleanRefreshToken,
-          expiresAt,
-          isConnected: true,
-        });
-        localStorage.setItem('bling_access_token', data.access_token);
-        if (data.refresh_token) {
-          localStorage.setItem('bling_refresh_token', data.refresh_token);
+        const ativaAtual = localStorage.getItem('nfe_empresa_ativa_id');
+
+        if (!empresaIdAlvo || empresaIdAlvo === ativaAtual) {
+          saveBlingConfig({
+            clientId: cId,
+            clientSecret: cSec,
+            accessToken: data.access_token,
+            refreshToken: data.refresh_token || cleanRefreshToken,
+            expiresAt,
+            isConnected: true,
+          });
+          localStorage.setItem('bling_access_token', data.access_token);
+          if (data.refresh_token) {
+            localStorage.setItem('bling_refresh_token', data.refresh_token);
+          }
         }
+
         return {
           success: true,
           accessToken: data.access_token,
           refreshToken: data.refresh_token || cleanRefreshToken,
           expiresAt,
         };
-      } else {
-        const errData = await serverlessRes.json().catch(() => null);
-        console.warn('Erro retornado na renovação via serverless:', errData);
+      } else if (serverlessRes.status !== 404 && data) {
+        // Servidor respondeu com erro, não tentar fetch direto no navegador
+        return {
+          success: false,
+          error: data.error || data.message || `Erro HTTP ${serverlessRes.status} do Bling na renovação`,
+        };
       }
     } catch {
-      // Fallback para chamada direta
+      // Fallback apenas se endpoint offline
     }
 
     // 2. Chamada direta ao Bling (fallback)
@@ -336,17 +367,20 @@ export async function renovarTokenBling(
     if (response.ok) {
       const data = await response.json();
       const expiresAt = Date.now() + ((data.expires_in || 21600) * 1000);
-      saveBlingConfig({
-        clientId: cId,
-        clientSecret: cSec,
-        accessToken: data.access_token,
-        refreshToken: data.refresh_token || cleanRefreshToken,
-        expiresAt,
-        isConnected: true,
-      });
-      localStorage.setItem('bling_access_token', data.access_token);
-      if (data.refresh_token) {
-        localStorage.setItem('bling_refresh_token', data.refresh_token);
+      const ativaAtual = localStorage.getItem('nfe_empresa_ativa_id');
+      if (!empresaIdAlvo || empresaIdAlvo === ativaAtual) {
+        saveBlingConfig({
+          clientId: cId,
+          clientSecret: cSec,
+          accessToken: data.access_token,
+          refreshToken: data.refresh_token || cleanRefreshToken,
+          expiresAt,
+          isConnected: true,
+        });
+        localStorage.setItem('bling_access_token', data.access_token);
+        if (data.refresh_token) {
+          localStorage.setItem('bling_refresh_token', data.refresh_token);
+        }
       }
       return {
         success: true,

@@ -169,9 +169,12 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
       } catch {}
     }
 
+    // Salva credenciais isoladas por ID da empresa para não contaminar a empresa ativa
     localStorage.setItem('bling_oauth_pending_empresa_id', empresaParaAtivarBling.id);
-    localStorage.setItem('bling_client_id', cid);
-    localStorage.setItem('bling_client_secret', sec);
+    localStorage.setItem(
+      `bling_pending_${empresaParaAtivarBling.id}`,
+      JSON.stringify({ clientId: cid, clientSecret: sec })
+    );
 
     window.location.href = `https://www.bling.com.br/Api/v3/oauth/authorize?response_type=code&client_id=${cid}&state=${empresaParaAtivarBling.id}`;
   };

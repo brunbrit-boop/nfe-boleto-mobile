@@ -46,7 +46,9 @@ export default async function handler(req: any, res: any) {
       }
       params.append('grant_type', 'authorization_code');
       params.append('code', code);
-      if (redirectUri) {
+      // No Bling API v3, redirect_uri é opcional no POST token se já cadastrado no app.
+      // Se enviado e não bater estritamente com a URL do app no Bling (ex: localhost vs vercel), causa HTTP 400.
+      if (redirectUri && !redirectUri.includes('localhost')) {
         params.append('redirect_uri', redirectUri);
       }
     }
@@ -63,35 +65,24 @@ export default async function handler(req: any, res: any) {
 
     let data: any = await response.json().catch(() => null);
 
-    // Se falhou no authorization_code com redirect_uri, tenta novamente sem redirect_uri
-    if (!response.ok && grant_type === 'authorization_code' && redirectUri) {
-      const fallbackParams = new URLSearchParams();
-      fallbackParams.append('grant_type', 'authorization_code');
-      fallbackParams.append('code', code);
-
-      const fallbackRes = await fetch('https://www.bling.com.br/Api/v3/oauth/token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Authorization': `Basic ${basicAuth}`,
-          'Accept': '1.0',
-        },
-        body: fallbackParams.toString(),
-      });
-
-      const fallbackData: any = await fallbackRes.json().catch(() => null);
-      if (fallbackRes.ok && fallbackData) {
-        response = fallbackRes;
-        data = fallbackData;
-      }
-    }
-
     if (!response.ok) {
       const errObj: any = data || {};
-      const errorMsg = errObj?.error_description || errObj?.error?.message || errObj?.error || errObj?.mensagem || 'Erro retornado pelo Bling ao processar token';
+      let errorMsg = errObj?.error_description || errObj?.error?.message || errObj?.error || errObj?.mensagem;
+      if (typeof errorMsg !== 'string') {
+        errorMsg = errObj?.error?.description || 'Erro retornado pelo Bling ao processar token';
+      }
+
+      // Tratamento amigável para mensagens comuns do Bling
+      if (errObj?.error === 'invalid_grant' || String(errorMsg).includes('invalid_grant')) {
+        errorMsg = 'Código de autorização inválido ou expirado. Dica: Se você possui mais de uma conta no Bling, certifique-se de estar conectado no Bling com a conta correspondente ao Client ID desta empresa.';
+      } else if (errObj?.error === 'invalid_client' || String(errorMsg).includes('invalid_client')) {
+        errorMsg = 'Client ID ou Client Secret incorretos no cadastro do aplicativo Bling desta empresa.';
+      }
+
       return res.status(response.status).json({
         error: errorMsg,
         details: data,
+        statusBling: response.status,
       });
     }
 
