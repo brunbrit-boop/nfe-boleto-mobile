@@ -1899,7 +1899,7 @@ export async function carregarProdutosBling(
         descricao: String(p.nome || p.descricao || 'Produto Bling'),
         precoUnitario: preco > 0 ? preco : 10.0,
         unidade: String(p.unidade || 'UN').slice(0, 6),
-        ncm: String(p.tributacao?.ncm || p.ncm || '25232910').replace(/\D/g, '') || '25232910',
+        ncm: String(p.tributacao?.ncm || p.ncm || '').replace(/\D/g, ''),
         cfop: '5102',
         categoria: String(p.categoria?.descricao || (filtrarConstrucao ? 'Material de Construção' : 'Geral')),
       };

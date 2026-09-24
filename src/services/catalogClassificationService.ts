@@ -105,37 +105,42 @@ function normalizarTexto(txt: string): string {
 }
 
 /**
- * Classifica um produto instantaneamente via heurística de NCM e palavras-chave
+ * Classifica um produto instantaneamente via heurística de palavras-chave e NCM
+ * REGRA CRÍTICA: Palavras-chave da descrição têm prioridade MÁXIMA porque a API do Bling
+ * costuma retornar produtos sem o campo NCM discriminado (ou com fallback).
  */
 export function classificarProdutoPorHeuristica(produto: CatalogoProduto): string {
   const descNorm = normalizarTexto(`${produto.descricao} ${produto.codigo}`);
   const ncmLimpo = (produto.ncm || '').replace(/\D/g, '');
 
-  // 1. Verifica NCMs específicos primeiro
-  for (const nicho of NICHOS_COMERCIAIS_PADRAO) {
-    if (nicho.prefixosNcm) {
-      for (const prefixo of nicho.prefixosNcm) {
-        if (ncmLimpo.startsWith(prefixo)) {
-          // Validação secundária por palavras-chave se for um NCM genérico
-          if (nicho.id === 'cabos_condutores') {
-            if (descNorm.includes('cabo') || descNorm.includes('fio') || descNorm.includes('flexivel') || descNorm.includes('cordao')) {
-              return nicho.nome;
-            }
-          } else {
-            return nicho.nome;
-          }
-        }
-      }
-    }
-  }
-
-  // 2. Busca pelas palavras-chave em ordem de especificidade
+  // 1. Busca pelas palavras-chave da descrição em ordem de especificidade
   for (const nicho of NICHOS_COMERCIAIS_PADRAO) {
     if (nicho.id === 'geral_acessorios') continue;
     for (const kw of nicho.palavrasChave) {
       const kwNorm = normalizarTexto(kw);
       if (descNorm.includes(kwNorm)) {
         return nicho.nome;
+      }
+    }
+  }
+
+  // 2. Se não encontrou por palavra-chave direta, verifica NCMs reais e válidos
+  // Ignora o NCM 25232910 genérico se a descrição não contiver termos de cimento
+  if (ncmLimpo && ncmLimpo !== '25232910') {
+    for (const nicho of NICHOS_COMERCIAIS_PADRAO) {
+      if (nicho.prefixosNcm) {
+        for (const prefixo of nicho.prefixosNcm) {
+          if (ncmLimpo.startsWith(prefixo)) {
+            // NCM 3917: Conduítes e eletrodutos vs Tubos de esgoto/água
+            if (prefixo === '3917' && nicho.id === 'eletrica_protecao') {
+              if (descNorm.includes('eletroduto') || descNorm.includes('conduite')) {
+                return nicho.nome;
+              }
+            } else {
+              return nicho.nome;
+            }
+          }
+        }
       }
     }
   }
