@@ -191,6 +191,10 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
   const [diretrizesGrupoTemp, setDiretrizesGrupoTemp] = useState<string>(() => grupoAtivo?.diretrizesGrupo || '');
   const [feedbackSalvarDiretrizes, setFeedbackSalvarDiretrizes] = useState<string | null>(null);
 
+  // Seleção de Clientes na Tabela para Operações em Lote / Fila
+  const [clientesSelecionadosTabela, setClientesSelecionadosTabela] = useState<number[]>([]);
+  const [itemGerandoIndividualId, setItemGerandoIndividualId] = useState<number | null>(null);
+
   // Atualiza cache de grupos de produtos
   const atualizarGruposProdutos = (novos: GrupoProdutos[]) => {
     setGruposProdutos(novos);
@@ -252,6 +256,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       setIsEditandoNomeGrupo(false);
       setNovoNomeGrupoTemp(grupoAtivo.nome || '');
       setDiretrizesGrupoTemp(grupoAtivo.diretrizesGrupo || '');
+      setClientesSelecionadosTabela([]);
       const soma = grupoAtivo.clientes.reduce((acc, c) => acc + (c.valorAlvo || 5000), 0);
       if (soma > 0) {
         setMetaTotalGrupo(soma);
@@ -427,9 +432,38 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     cancelarGeracaoRef.current = true;
   };
 
-  // Executa IA para um item individual
-  const handleGerarItemIndividual = async (clienteId: number) => {
+  // Seleção de Clientes da Tabela para Operações em Fila
+  const todosClientesTabelaSelecionados = useMemo(() => {
+    if (!grupoAtivo || grupoAtivo.clientes.length === 0) return false;
+    return grupoAtivo.clientes.every((c) => clientesSelecionadosTabela.includes(c.clienteId));
+  }, [grupoAtivo, clientesSelecionadosTabela]);
+
+  const algunsClientesTabelaSelecionados = useMemo(() => {
+    if (!grupoAtivo || grupoAtivo.clientes.length === 0) return false;
+    return (
+      clientesSelecionadosTabela.length > 0 &&
+      clientesSelecionadosTabela.length < grupoAtivo.clientes.length
+    );
+  }, [grupoAtivo, clientesSelecionadosTabela]);
+
+  const handleToggleTodosClientesTabela = () => {
     if (!grupoAtivo) return;
+    if (todosClientesTabelaSelecionados) {
+      setClientesSelecionadosTabela([]);
+    } else {
+      setClientesSelecionadosTabela(grupoAtivo.clientes.map((c) => c.clienteId));
+    }
+  };
+
+  const handleToggleClienteTabela = (clienteId: number) => {
+    setClientesSelecionadosTabela((prev) =>
+      prev.includes(clienteId) ? prev.filter((id) => id !== clienteId) : [...prev, clienteId]
+    );
+  };
+
+  // Executa IA para um item individual (com proteção contra requisições concorrentes)
+  const handleGerarItemIndividual = async (clienteId: number) => {
+    if (!grupoAtivo || isGerandoLote || itemGerandoIndividualId !== null) return;
     const item = grupoAtivo.clientes.find((c) => c.clienteId === clienteId);
     if (!item) return;
 
@@ -440,6 +474,8 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       onOpenApiKeys?.();
       return;
     }
+
+    setItemGerandoIndividualId(clienteId);
 
     // Marca como gerando
     let atualizado: GrupoClientes = {
@@ -473,8 +509,94 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
           c.clienteId === clienteId ? { ...c, status: 'erro', erro: err.message || 'Falha ao gerar.' } : c
         ),
       };
+    } finally {
+      setItemGerandoIndividualId(null);
     }
     atualizarGrupo(atualizado);
+  };
+
+  // Executa Geração em Fila Segura (1 a 1) para Clientes Selecionados via Checkbox
+  const handleGerarSelecionadosLote = async () => {
+    if (!grupoAtivo || clientesSelecionadosTabela.length === 0 || isGerandoLote || itemGerandoIndividualId !== null) return;
+
+    if (!isCerebroIAConectado()) {
+      alert(
+        '⚠️ Cérebro IA Desconectado!\n\nPara gerar propostas em lote com inteligência comercial, conecte a Chave de API do Google Gemini nas Configurações.'
+      );
+      onOpenApiKeys?.();
+      return;
+    }
+
+    const selecionadosSet = new Set(clientesSelecionadosTabela);
+    const itensParaGerar = grupoAtivo.clientes.filter((c) => selecionadosSet.has(c.clienteId));
+    if (itensParaGerar.length === 0) return;
+
+    cancelarGeracaoRef.current = false;
+    setIsGerandoLote(true);
+    setProgressoLote({ atual: 0, total: itensParaGerar.length });
+
+    const diretrizesGerais = obterDiretrizesGeraisEmpresa(empresa.id);
+
+    try {
+      let grupoEmProcessamento = { ...grupoAtivo };
+      for (let i = 0; i < itensParaGerar.length; i++) {
+        if (cancelarGeracaoRef.current) break;
+
+        const item = itensParaGerar[i];
+        setProgressoLote({ atual: i + 1, total: itensParaGerar.length });
+
+        grupoEmProcessamento = {
+          ...grupoEmProcessamento,
+          clientes: grupoEmProcessamento.clientes.map((c) =>
+            c.clienteId === item.clienteId ? { ...c, status: 'gerando' } : c
+          ),
+        };
+        atualizarGrupo(grupoEmProcessamento);
+
+        try {
+          const oferta = await gerarOfertaParaItem(
+            item,
+            catalogoProdutos,
+            0.05,
+            gruposProdutos,
+            diretrizesGerais,
+            grupoAtivo.diretrizesGrupo
+          );
+          grupoEmProcessamento = {
+            ...grupoEmProcessamento,
+            clientes: grupoEmProcessamento.clientes.map((c) =>
+              c.clienteId === item.clienteId
+                ? { ...c, status: 'gerado', ofertaGerada: oferta, erro: undefined }
+                : c
+            ),
+          };
+        } catch (err: any) {
+          grupoEmProcessamento = {
+            ...grupoEmProcessamento,
+            clientes: grupoEmProcessamento.clientes.map((c) =>
+              c.clienteId === item.clienteId
+                ? { ...c, status: 'erro', erro: err.message || 'Falha na IA' }
+                : c
+            ),
+          };
+        }
+        atualizarGrupo(grupoEmProcessamento);
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    } finally {
+      if (cancelarGeracaoRef.current && grupoAtivo) {
+        const revertido: GrupoClientes = {
+          ...grupoAtivo,
+          clientes: grupoAtivo.clientes.map((c) =>
+            c.status === 'gerando' ? { ...c, status: 'pendente' as const } : c
+          ),
+        };
+        atualizarGrupo(revertido);
+      }
+      setIsGerandoLote(false);
+      cancelarGeracaoRef.current = false;
+      setClientesSelecionadosTabela([]);
+    }
   };
 
   // Executa Geração em Lote de Todo o Grupo com IA (com suporte a PAUSA/CANCELAMENTO em tempo real)
@@ -1685,9 +1807,61 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
           </div>
         ) : (
           <div className="overflow-x-auto">
+            {/* Barra Contextual de Ações para Clientes Selecionados */}
+            {clientesSelecionadosTabela.length > 0 && (
+              <div className="bg-gradient-to-r from-amber-500/15 via-emerald-500/15 to-teal-500/15 border-b border-amber-500/30 px-4 py-2.5 flex items-center justify-between gap-3 animate-in fade-in flex-wrap">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping" />
+                  <span className="text-xs font-black text-slate-900 dark:text-white">
+                    {clientesSelecionadosTabela.length} cliente{clientesSelecionadosTabela.length > 1 ? 's' : ''} selecionado{clientesSelecionadosTabela.length > 1 ? 's' : ''}
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400 hidden sm:inline">
+                    • Meta acumulada: {formatCurrency(
+                      grupoAtivo?.clientes
+                        .filter((c) => clientesSelecionadosTabela.includes(c.clienteId))
+                        .reduce((acc, c) => acc + (c.valorAlvo || 0), 0) || 0
+                    )}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setClientesSelecionadosTabela([])}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-800 transition cursor-pointer"
+                  >
+                    Desmarcar Todos
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleGerarSelecionadosLote}
+                    disabled={isGerandoLote || itemGerandoIndividualId !== null}
+                    className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-black bg-gradient-to-r from-amber-400 to-[#11d493] text-slate-950 hover:brightness-110 shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer disabled:opacity-50"
+                    title="Gera os orçamentos dos clientes marcados em fila única segura (sem travar a IA)"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
+                    <span>⚡ Refazer Selecionados ({clientesSelecionadosTabela.length}) em Fila</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-[#1a382e] bg-slate-50/70 dark:bg-[#162f27]/40 text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                  <th className="py-3.5 px-3 w-10 text-center">
+                    <input
+                      type="checkbox"
+                      checked={todosClientesTabelaSelecionados}
+                      ref={(el) => {
+                        if (el) el.indeterminate = algunsClientesTabelaSelecionados;
+                      }}
+                      onChange={handleToggleTodosClientesTabela}
+                      className="w-4 h-4 rounded text-[#11d493] focus:ring-[#11d493] cursor-pointer"
+                      title="Selecionar / Desmarcar todos os clientes deste grupo"
+                    />
+                  </th>
                   <th className="py-3.5 px-4">Cliente</th>
                   <th className="py-3.5 px-3 w-36">Valor Alvo (R$)</th>
                   <th className="py-3.5 px-3 w-48">Foco / Linha de Produtos</th>
@@ -1698,15 +1872,30 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-[#1a382e]/80 text-xs">
                 {grupoAtivo?.clientes.map((item) => {
-                  const isGerando = item.status === 'gerando';
+                  const isSelecionado = clientesSelecionadosTabela.includes(item.clienteId);
+                  const isGerando = item.status === 'gerando' || itemGerandoIndividualId === item.clienteId;
                   const isGerado = item.status === 'gerado';
                   const isErro = item.status === 'erro';
 
                   return (
                     <tr
                       key={item.clienteId}
-                      className="hover:bg-slate-50/60 dark:hover:bg-[#162f27]/20 transition-colors group"
+                      className={`transition-colors group ${
+                        isSelecionado
+                          ? 'bg-amber-500/10 dark:bg-amber-500/10'
+                          : 'hover:bg-slate-50/60 dark:hover:bg-[#162f27]/20'
+                      }`}
                     >
+                      {/* Checkbox de Seleção */}
+                      <td className="py-3 px-3 w-10 text-center">
+                        <input
+                          type="checkbox"
+                          checked={isSelecionado}
+                          onChange={() => handleToggleClienteTabela(item.clienteId)}
+                          className="w-4 h-4 rounded text-[#11d493] focus:ring-[#11d493] cursor-pointer"
+                        />
+                      </td>
+
                       {/* Cliente */}
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-2.5">
@@ -1896,11 +2085,11 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                               <button
                                 type="button"
                                 onClick={() => handleGerarItemIndividual(item.clienteId)}
-                                disabled={isGerandoLote || isGerando}
+                                disabled={isGerandoLote || isGerando || itemGerandoIndividualId !== null}
                                 className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-amber-500 dark:text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/25 transition active:scale-95 cursor-pointer disabled:opacity-40"
                                 title="Refazer orçamento deste cliente com a IA (gera novo mix comercial)"
                               >
-                                <RefreshCw className="w-3 h-3" />
+                                <RefreshCw className={`w-3 h-3 ${itemGerandoIndividualId === item.clienteId ? 'animate-spin' : ''}`} />
                                 <span>Refazer</span>
                               </button>
                             </div>
@@ -1990,8 +2179,8 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                             <button
                               type="button"
                               onClick={() => handleGerarItemIndividual(item.clienteId)}
-                              disabled={isGerando}
-                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-[#11d493] font-bold text-[11px] border border-emerald-500/20 transition active:scale-95 cursor-pointer disabled:opacity-50"
+                              disabled={isGerando || itemGerandoIndividualId !== null || isGerandoLote}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-[#11d493] font-bold text-[11px] border border-emerald-500/20 transition active:scale-95 cursor-pointer disabled:opacity-40"
                               title="Gerar orçamento deste cliente agora"
                             >
                               <Play className="w-3 h-3" />
@@ -2016,7 +2205,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
               {grupoAtivo && grupoAtivo.clientes.length > 0 && (
                 <tfoot>
                   <tr className="bg-slate-50 dark:bg-[#162f27]/80 border-t-2 border-slate-200 dark:border-[#1a382e] font-bold text-xs">
-                    <td className="py-3.5 px-4 text-slate-800 dark:text-slate-200">
+                    <td className="py-3.5 px-4 text-slate-800 dark:text-slate-200" colSpan={2}>
                       Total ({grupoAtivo.clientes.length} clientes no lote)
                     </td>
                     <td className="py-3.5 px-3 font-mono font-black text-amber-500 dark:text-amber-400">
