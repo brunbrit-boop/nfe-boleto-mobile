@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import type { EmpresaTenant } from '../../../types';
 import type { CatalogoProduto } from '../../../utils/salesOptimizer';
 import {
@@ -13,6 +13,7 @@ import {
   NICHOS_COMERCIAIS_PADRAO,
   classificarCatalogoCompleto,
 } from '../../../services/catalogClassificationService';
+import { isCerebroIAConectado } from '../../../services/geminiService';
 import { formatCurrency } from '../../../utils/financeEngine';
 import {
   Search,
@@ -30,6 +31,7 @@ import {
   HardHat,
   Sparkles,
   Layers,
+  Upload,
 } from 'lucide-react';
 
 interface ProductsViewProps {
@@ -202,11 +204,121 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
     if (onProdutosAtualizados) onProdutosAtualizados(filtrados);
   };
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Importação direta de Planilha CSV do Bling
+  const handleImportarCsvBling = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target?.result as string;
+        if (!text) return;
+
+        const linhas = text.split(/\r?\n/);
+        if (linhas.length < 2) {
+          alert('Arquivo CSV vazio ou sem dados suficientes.');
+          return;
+        }
+
+        const novosProdutos: CatalogoProduto[] = [];
+        for (let i = 1; i < linhas.length; i++) {
+          const linha = linhas[i].trim();
+          if (!linha) continue;
+
+          const colunas: string[] = [];
+          let dentroAspas = false;
+          let campoAtual = '';
+
+          for (let c = 0; c < linha.length; c++) {
+            const char = linha[c];
+            if (char === '"') {
+              dentroAspas = !dentroAspas;
+            } else if (char === ',' && !dentroAspas) {
+              colunas.push(campoAtual.trim().replace(/^"|"$/g, ''));
+              campoAtual = '';
+            } else {
+              campoAtual += char;
+            }
+          }
+          colunas.push(campoAtual.trim().replace(/^"|"$/g, ''));
+
+          const codigo = colunas[1] || '';
+          const descricao = colunas[2] || '';
+          const unidade = colunas[3] || 'UN';
+          const ncm = (colunas[4] || '').replace(/\D/g, '') || '25232910';
+          const precoStr = (colunas[6] || '0').replace(',', '.');
+          const preco = parseFloat(precoStr) || 0;
+
+          if (descricao) {
+            novosProdutos.push({
+              id: `csv_${Date.now()}_${i}`,
+              codigo: codigo || `SKU-${i}`,
+              descricao,
+              unidade: unidade.toUpperCase(),
+              ncm,
+              precoUnitario: preco,
+              cfop: '5102',
+              categoria: 'Geral & Acessórios',
+            });
+          }
+        }
+
+        if (novosProdutos.length === 0) {
+          alert('Nenhum produto válido foi identificado na planilha CSV.');
+          return;
+        }
+
+        const substituir = confirm(
+          `Foram lidos ${novosProdutos.length} produtos da planilha CSV do Bling!\n\nDeseja SUBSTITUIR o catálogo atual desta empresa por estes ${novosProdutos.length} produtos? (Clique em "OK" para substituir ou "Cancelar" para mesclar com os produtos existentes)`
+        );
+
+        const atualizados = substituir ? novosProdutos : [...novosProdutos, ...produtos];
+        setProdutos(atualizados);
+        salvarProdutosCacheLocal(empresa.id, atualizados);
+        if (onProdutosAtualizados) onProdutosAtualizados(atualizados);
+
+        setFeedbackMsg({
+          tipo: 'sucesso',
+          texto: `🎉 ${novosProdutos.length} produtos importados da planilha com sucesso! Agora clique em "🤖 Varrer e Classificar com IA" para organizá-los em nichos.`,
+        });
+        setTimeout(() => setFeedbackMsg(null), 9000);
+      } catch (err: any) {
+        alert('Erro ao processar planilha CSV: ' + err.message);
+      } finally {
+        if (e.target) e.target.value = '';
+      }
+    };
+
+    reader.readAsText(file, 'ISO-8859-1');
+  };
+
   // Executa Varredura e Classificação do Catálogo com IA
   const handleClassificarCatalogoComIA = async () => {
-    if (produtos.length === 0 || isClassificando) return;
+    if (isClassificando) return;
+
+    if (produtos.length === 0) {
+      setFeedbackMsg({
+        tipo: 'erro',
+        texto: 'Seu catálogo está vazio nesta empresa! Sincronize com o Bling ou clique em "Importar CSV (Bling)" antes de classificar.',
+      });
+      setTimeout(() => setFeedbackMsg(null), 7000);
+      return;
+    }
+
+    if (!isCerebroIAConectado()) {
+      setFeedbackMsg({
+        tipo: 'erro',
+        texto: 'Cérebro IA desconectado! Por favor, cadastre sua Chave de API Google Gemini nas Configurações da IA antes de usar a varredura inteligente.',
+      });
+      setTimeout(() => setFeedbackMsg(null), 8000);
+      return;
+    }
+
     setIsClassificando(true);
-    setProgressoClassificacao({ atual: 0, total: produtos.length, cat: 'Iniciando varredura...' });
+    setProgressoClassificacao({ atual: 0, total: produtos.length, cat: 'Iniciando varredura com Inteligência Artificial...' });
 
     try {
       const res = await classificarCatalogoCompleto(produtos, (atual, total, cat) => {
@@ -223,17 +335,17 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
 
       setFeedbackMsg({
         tipo: 'sucesso',
-        texto: `✨ Varredura Concluída! ${res.totalClassificados} produtos organizados em ${totalNichosComProdutos} nichos comerciais inteligentes.`,
+        texto: `✨ Varredura Concluída com Sucesso! ${res.totalClassificados} produtos organizados em ${totalNichosComProdutos} nichos comerciais (${res.heuristicaClassificados} por NCM/regras e ${res.iaClassificados} refinados diretamente pelo Google Gemini).`,
       });
     } catch (err: any) {
       setFeedbackMsg({
         tipo: 'erro',
-        texto: err.message || 'Falha ao classificar catálogo.',
+        texto: err.message || 'Falha ao classificar catálogo com IA.',
       });
     } finally {
       setIsClassificando(false);
       setProgressoClassificacao(null);
-      setTimeout(() => setFeedbackMsg(null), 8000);
+      setTimeout(() => setFeedbackMsg(null), 9000);
     }
   };
 
@@ -317,15 +429,36 @@ export const ProductsView: React.FC<ProductsViewProps> = ({
 
           {/* Ações Primárias */}
           <div className="flex items-center flex-wrap gap-2 shrink-0">
+            {/* Input oculto para importação de CSV do Bling */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleImportarCsvBling}
+              className="hidden"
+            />
+
             {/* Botão Mágico: Varrer e Classificar Catálogo com IA */}
             <button
               onClick={handleClassificarCatalogoComIA}
-              disabled={isClassificando || produtos.length === 0}
+              disabled={isClassificando}
               className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-400 via-emerald-400 to-[#11d493] text-slate-950 font-black text-xs shadow-md shadow-amber-500/20 hover:brightness-110 transition flex items-center gap-2 active:scale-95 disabled:opacity-50 cursor-pointer"
               title="Varrer o catálogo com IA e classificar automaticamente os produtos nos nichos comerciais inteligentes"
             >
               <Sparkles className={`w-3.5 h-3.5 fill-slate-950 ${isClassificando ? 'animate-spin' : ''}`} />
               <span>{isClassificando ? 'Classificando com IA...' : '🤖 Varrer e Classificar com IA'}</span>
+            </button>
+
+            {/* Importar Planilha CSV do Bling */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isLoading || isClassificando}
+              className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-[#162f27] dark:hover:bg-[#1f4337] text-slate-800 dark:text-white font-bold text-xs border border-slate-200 dark:border-[#214739] transition flex items-center gap-1.5 cursor-pointer shadow-sm"
+              title="Importar catálogo diretamente da planilha CSV exportada do Bling"
+            >
+              <Upload className="w-3.5 h-3.5 text-emerald-500" />
+              <span>Importar CSV (Bling)</span>
             </button>
 
             {/* Toggle Inteligente: Filtro de Material de Construção */}

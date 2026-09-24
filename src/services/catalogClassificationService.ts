@@ -1,5 +1,5 @@
 import type { CatalogoProduto } from '../utils/salesOptimizer';
-import { getStoredGeminiApiKey } from './geminiService';
+import { getStoredGeminiApiKey, isCerebroIAConectado, GEMINI_MODELS } from './geminiService';
 
 export interface NichoComercialDef {
   id: string;
@@ -155,49 +155,78 @@ export async function classificarCatalogoCompleto(
   produtosAtualizados: CatalogoProduto[];
   resumoCategorias: { nome: string; count: number; valorTotal: number; icone: string; corBadge: string }[];
   totalClassificados: number;
+  iaClassificados: number;
+  heuristicaClassificados: number;
 }> {
   if (!produtos || produtos.length === 0) {
-    return { produtosAtualizados: [], resumoCategorias: [], totalClassificados: 0 };
+    return {
+      produtosAtualizados: [],
+      resumoCategorias: [],
+      totalClassificados: 0,
+      iaClassificados: 0,
+      heuristicaClassificados: 0,
+    };
+  }
+
+  const apiKey = getStoredGeminiApiKey().trim();
+  if (!apiKey || !isCerebroIAConectado()) {
+    throw new Error(
+      'Cérebro IA desconectado! Por favor, cadastre sua Chave de API Google Gemini nas Configurações da IA antes de usar o botão de varredura inteligente.'
+    );
   }
 
   const atualizados: CatalogoProduto[] = [];
   const pendentesIA: { index: number; prod: CatalogoProduto }[] = [];
+  let heuristicaCount = 0;
+  let iaCount = 0;
 
-  // Passo 1: Classificação heurística de alta precisão
+  // Passo 1: Classificação heurística inicial (NCMs e palavras-chave estruturadas)
   for (let i = 0; i < produtos.length; i++) {
     const p = produtos[i];
     const catHeuristica = classificarProdutoPorHeuristica(p);
 
     if (catHeuristica !== 'Geral & Acessórios') {
       atualizados.push({ ...p, categoria: catHeuristica });
+      heuristicaCount++;
     } else {
       atualizados.push({ ...p, categoria: 'Geral & Acessórios' });
       pendentesIA.push({ index: i, prod: p });
     }
 
-    if (onProgress && i % 50 === 0) {
-      onProgress(i, produtos.length, catHeuristica);
+    if (onProgress && (i % 25 === 0 || i === produtos.length - 1)) {
+      onProgress(i + 1, produtos.length, `Analisando NCMs e códigos (${i + 1}/${produtos.length})...`);
     }
   }
 
-  // Passo 2: Se houver pendentes e a IA estiver conectada, usa Gemini para refinar itens ambíguos
-  const apiKey = getStoredGeminiApiKey().trim();
-  if (apiKey && pendentesIA.length > 0) {
-    const lotesTamanho = 40;
+  // Passo 2: Se houver itens pendentes/ambíguos, aciona a IA Gemini em lotes otimizados
+  if (pendentesIA.length > 0) {
+    const lotesTamanho = 35;
     const nomesCategorias = NICHOS_COMERCIAIS_PADRAO.map((n) => n.nome).filter((nome) => nome !== 'Geral & Acessórios');
+    const totalLotes = Math.ceil(pendentesIA.length / lotesTamanho);
 
-    for (let i = 0; i < pendentesIA.length; i += lotesTamanho) {
-      const lote = pendentesIA.slice(i, i + lotesTamanho);
+    for (let loteIdx = 0; loteIdx < totalLotes; loteIdx++) {
+      const inicio = loteIdx * lotesTamanho;
+      const lote = pendentesIA.slice(inicio, inicio + lotesTamanho);
+
+      if (onProgress) {
+        onProgress(
+          Math.min(produtos.length, heuristicaCount + inicio + lote.length),
+          produtos.length,
+          `🤖 Google Gemini analisando lote ${loteIdx + 1}/${totalLotes} (${lote.length} itens)...`
+        );
+      }
+
       const descricoes = lote.map((it) => ({
         id: it.prod.id,
         desc: it.prod.descricao,
         ncm: it.prod.ncm,
       }));
 
-      try {
-        const prompt = `Classifique cada produto de material de construção em EXATAMENTE UMA das seguintes categorias:
+      const prompt = `Você é um classificador especialista de produtos e materiais de construção civil para revendas e depósitos.
+Classifique cada produto em EXATAMENTE UMA das seguintes categorias oficiais:
 ${nomesCategorias.map((c) => `- "${c}"`).join('\n')}
-Se o produto realmente não pertencer a nenhuma, use "Geral & Acessórios".
+
+Se o produto realmente for miudeza ou indefinível, use "Geral & Acessórios".
 
 PRODUTOS (JSON):
 ${JSON.stringify(descricoes)}
@@ -209,37 +238,52 @@ Retorne ESTRITAMENTE um JSON com esta estrutura:
   ]
 }`;
 
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`;
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            generationConfig: {
-              temperature: 0.1,
-              responseMimeType: 'application/json',
-            },
-          }),
-        });
+      // Tenta a chamada com a cadeia de modelos Gemini disponíveis
+      let sucessoLote = false;
+      for (const model of GEMINI_MODELS) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+          const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              generationConfig: {
+                temperature: 0.1,
+                responseMimeType: 'application/json',
+              },
+            }),
+          });
 
-        if (res.ok) {
+          if (!res.ok) continue;
+
           const data = await res.json();
           const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (raw) {
-            const parsed = JSON.parse(raw.replace(/```json/g, '').replace(/```/g, '').trim());
-            if (Array.isArray(parsed?.classificacoes)) {
-              for (const c of parsed.classificacoes) {
-                const alvo = lote.find((item) => item.prod.id === c.id);
-                if (alvo && c.categoria && nomesCategorias.includes(c.categoria)) {
-                  atualizados[alvo.index].categoria = c.categoria;
-                }
+          if (!raw) continue;
+
+          const parsed = JSON.parse(raw.replace(/```json/g, '').replace(/```/g, '').trim());
+          if (Array.isArray(parsed?.classificacoes)) {
+            for (const c of parsed.classificacoes) {
+              const alvo = lote.find((item) => item.prod.id === c.id);
+              if (alvo && c.categoria && nomesCategorias.includes(c.categoria)) {
+                atualizados[alvo.index].categoria = c.categoria;
+                iaCount++;
               }
             }
+            sucessoLote = true;
+            break;
           }
+        } catch (errModel) {
+          console.warn(`Tentativa de classificação com ${model} falhou:`, errModel);
         }
-      } catch (err) {
-        console.warn('Erro na classificação de lote com IA:', err);
       }
+
+      if (!sucessoLote) {
+        console.warn(`Lote ${loteIdx + 1} mantido com classificação padrão.`);
+      }
+
+      // Pequena pausa para animação suave do progresso
+      await new Promise((resolve) => setTimeout(resolve, 80));
     }
   }
 
@@ -267,5 +311,7 @@ Retorne ESTRITAMENTE um JSON com esta estrutura:
     produtosAtualizados: atualizados,
     resumoCategorias,
     totalClassificados: atualizados.length,
+    iaClassificados: iaCount,
+    heuristicaClassificados: heuristicaCount,
   };
 }
