@@ -1703,8 +1703,9 @@ export async function carregarContasReceberBling(
         valor: val,
         valorFormatado: formatCurrency(val),
         saldo: Number(r.saldo ?? val),
-        historico: r.historico || 'Venda de Mercadorias Bling',
-        categoria: r.categoria?.descricao || 'Vendas',
+        historico: r.historico || r.observacoes || r.observacao || r.detalhes || '',
+        observacoes: r.observacoes || r.observacao || r.historico || '',
+        categoria: r.categoria?.descricao || r.categoria || 'Vendas',
         situacao: r.situacao || 1,
         contato: {
           id: r.contato?.id || 1,
@@ -1715,8 +1716,18 @@ export async function carregarContasReceberBling(
         linhaDigitavel,
         codigoBarras,
         pixCopiaECola: gerarPixCopiaECola(val, `CR${r.id}`),
-        formaPagamento: r.formaPagamento ? { id: r.formaPagamento.id, descricao: r.formaPagamento.descricao } : undefined,
-        contaFinanceira: r.contaContabil ? { id: r.contaContabil.id, descricao: r.contaContabil.descricao } : (r.contaFinanceira ? { id: r.contaFinanceira.id, descricao: r.contaFinanceira.descricao } : (r.portador ? { id: r.portador.id, descricao: r.portador.nome || r.portador.descricao } : undefined)),
+        formaPagamento: r.formaPagamento ? { id: r.formaPagamento.id, descricao: r.formaPagamento.descricao || r.formaPagamento.nome } : undefined,
+        contaFinanceira: r.contaContabil
+          ? { id: r.contaContabil.id, descricao: r.contaContabil.descricao || r.contaContabil.nome }
+          : (r.contaFinanceira
+              ? { id: r.contaFinanceira.id, descricao: r.contaFinanceira.descricao || r.contaFinanceira.nome }
+              : (r.portador
+                  ? { id: r.portador.id, descricao: r.portador.nome || r.portador.descricao }
+                  : (r.banco
+                      ? { id: r.banco.id, descricao: r.banco.nome || r.banco.descricao }
+                      : (r.caixa
+                          ? { id: r.caixa.id, descricao: r.caixa.nome || r.caixa.descricao }
+                          : undefined)))),
       };
     });
 

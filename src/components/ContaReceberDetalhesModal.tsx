@@ -3,7 +3,6 @@ import {
   X,
   Calendar,
   Building2,
-  Wallet,
   CreditCard,
   Tag,
   FileText,
@@ -11,7 +10,9 @@ import {
   Check,
   Barcode,
   Share2,
-  Clock
+  Clock,
+  Landmark,
+  AlignLeft,
 } from 'lucide-react';
 import type { BlingContaReceber } from '../types';
 
@@ -39,6 +40,21 @@ export const ContaReceberDetalhesModal: React.FC<ContaReceberDetalhesModalProps>
   const valorFormatado = conta.valorFormatado || new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(conta.valor) || 0);
   const vencFormatado = conta.vencimentoFormatado || (conta.vencimento ? conta.vencimento.split('-').reverse().join('/') : '-');
   const categoriaFormatada = typeof conta.categoria === 'object' && conta.categoria !== null ? (conta.categoria as any).descricao : (conta.categoria || 'Vendas');
+
+  const contaFinanceiraNome =
+    conta.contaFinanceira?.descricao ||
+    (conta as any).contaContabil?.descricao ||
+    (conta as any).portador?.descricao ||
+    (conta as any).portador?.nome ||
+    (conta as any).banco?.descricao ||
+    'Não informada no Bling';
+
+  const detalhamentoTexto =
+    conta.historico ||
+    conta.observacoes ||
+    (conta as any).detalhes ||
+    (conta as any).observacao ||
+    '';
 
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -141,26 +157,46 @@ export const ContaReceberDetalhesModal: React.FC<ContaReceberDetalhesModalProps>
             )}
           </div>
 
-          {/* Grid de Informações Financeiras do Bling */}
-          <div className="grid grid-cols-2 gap-2.5">
-            {/* Conta Financeira (Banco) */}
-            <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1 mb-1">
-                <Wallet className="w-3 h-3 text-blue-500" />
-                <span>Conta Financeira</span>
+          {/* 1. Conta Financeira / Contábil (Banco ou Caixa de Destino) */}
+          <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/90 to-indigo-50/60 dark:from-blue-950/40 dark:to-indigo-950/20 border border-blue-200/90 dark:border-blue-900/60 flex items-center justify-between gap-3 shadow-xs">
+            <div className="flex items-center gap-3 min-w-0">
+              <span className="p-2.5 rounded-xl bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300 shrink-0">
+                <Landmark className="w-5 h-5" />
               </span>
-              <div className="text-xs font-black text-slate-900 dark:text-white truncate">
-                {conta.contaFinanceira?.descricao || 'Não definida'}
+              <div className="min-w-0">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-blue-800 dark:text-blue-300 block">
+                  Conta Financeira / Contábil
+                </span>
+                <span className="text-sm font-black text-slate-900 dark:text-white truncate block">
+                  {contaFinanceiraNome}
+                </span>
               </div>
             </div>
+            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-blue-100/90 text-blue-800 dark:bg-blue-900/60 dark:text-blue-300 border border-blue-200 dark:border-blue-800 shrink-0">
+              Banco / Caixa
+            </span>
+          </div>
 
+          {/* 2. Detalhamento ou Observação Textual da Conta */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800 space-y-1.5 shadow-xs">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+              <AlignLeft className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
+              <span>Detalhamento / Observação</span>
+            </span>
+            <p className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed font-medium bg-white dark:bg-slate-950/60 p-3 rounded-xl border border-slate-200/60 dark:border-slate-800/80 whitespace-pre-wrap">
+              {detalhamentoTexto || 'Nenhum detalhamento ou observação informada no Bling ERP.'}
+            </p>
+          </div>
+
+          {/* 3. Outros Metadados Financeiros do Bling */}
+          <div className="grid grid-cols-3 gap-2">
             {/* Forma de Pagamento */}
             <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1 mb-1">
                 <CreditCard className="w-3 h-3 text-purple-500" />
-                <span>Forma Pagamento</span>
+                <span>Forma Pgto</span>
               </span>
-              <div className="text-xs font-black text-slate-900 dark:text-white truncate">
+              <div className="text-xs font-black text-slate-900 dark:text-white truncate" title={conta.formaPagamento?.descricao || 'Nenhuma'}>
                 {conta.formaPagamento?.descricao || 'Nenhuma'}
               </div>
             </div>
@@ -171,7 +207,7 @@ export const ContaReceberDetalhesModal: React.FC<ContaReceberDetalhesModalProps>
                 <Tag className="w-3 h-3 text-amber-500" />
                 <span>Categoria</span>
               </span>
-              <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
+              <div className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate" title={categoriaFormatada}>
                 {categoriaFormatada}
               </div>
             </div>
@@ -180,25 +216,13 @@ export const ContaReceberDetalhesModal: React.FC<ContaReceberDetalhesModalProps>
             <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800">
               <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1 mb-1">
                 <Clock className="w-3 h-3 text-emerald-500" />
-                <span>Data Emissão</span>
+                <span>Emissão</span>
               </span>
-              <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+              <div className="text-xs font-bold text-slate-800 dark:text-slate-200">
                 {conta.dataEmissao || conta.vencimentoFormatado}
               </div>
             </div>
           </div>
-
-          {/* Histórico / Descrição */}
-          {conta.historico && (
-            <div className="p-3 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800">
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 block mb-1">
-                Histórico
-              </span>
-              <p className="text-xs text-slate-700 dark:text-slate-300 leading-relaxed font-medium">
-                {conta.historico}
-              </p>
-            </div>
-          )}
 
           {/* Dados de Boleto e Pix */}
           {conta.linhaDigitavel && (

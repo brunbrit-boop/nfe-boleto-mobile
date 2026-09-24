@@ -272,6 +272,7 @@ export interface BlingContaReceber {
   valorFormatado: string;
   saldo: number;
   historico?: string;
+  observacoes?: string;
   categoria?: string;
   situacao: 1 | 2 | 3; // 1 = Em aberto, 2 = Recebida/Liquidada, 3 = Cancelada
   contato: {
