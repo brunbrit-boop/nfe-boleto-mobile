@@ -506,6 +506,13 @@ export interface BlingFormaPagamento {
   destino?: number;
 }
 
+export interface BlingContaFinanceira {
+  id: number;
+  descricao: string;
+  tipo?: string;
+  aliasIntegracao?: string;
+}
+
 export interface GravarEsbocoBlingParams {
   empresaToken?: string;
   cliente: BlingCliente;
@@ -513,6 +520,7 @@ export interface GravarEsbocoBlingParams {
   parcelasCount?: number;
   banco?: BankProvider;
   idFormaPagamentoBling?: number;
+  idContaFinanceira?: number;
   primeiroVencimento?: string;
   intervaloDias?: number;
   diasSemanaPermitidos?: number[];
@@ -568,6 +576,62 @@ export async function buscarFormasPagamentoBling(
 }
 
 /**
+ * Busca as Contas Financeiras (caixas e bancos) cadastradas no Bling ERP
+ * Endpoint oficial da API v3 do Bling: GET /contas-contabeis
+ */
+export async function buscarContasFinanceirasBling(
+  token?: string,
+  empresaId?: string
+): Promise<BlingContaFinanceira[]> {
+  try {
+    const res = await callBlingApi('/contas-contabeis?ocultarInvisiveis=true', {
+      method: 'GET',
+      customToken: token,
+      empresaId,
+    });
+    if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+      if (empresaId) {
+        try {
+          localStorage.setItem(`bling_contas_financeiras_${empresaId}`, JSON.stringify(res.data));
+        } catch {}
+      }
+      return res.data;
+    }
+  } catch (err) {
+    console.warn('[Bling] Não foi possível carregar contas financeiras da API (/contas-contabeis):', err);
+  }
+
+  // Tenta rota sem query params como fallback
+  try {
+    const res = await callBlingApi('/contas-contabeis', {
+      method: 'GET',
+      customToken: token,
+      empresaId,
+    });
+    if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+      if (empresaId) {
+        try {
+          localStorage.setItem(`bling_contas_financeiras_${empresaId}`, JSON.stringify(res.data));
+        } catch {}
+      }
+      return res.data;
+    }
+  } catch {}
+
+  // Fallback para cache local se disponível
+  if (empresaId) {
+    try {
+      const cached = localStorage.getItem(`bling_contas_financeiras_${empresaId}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+  }
+  return [];
+}
+
+/**
  * Grava ou Atualiza um Esboço de Nota Fiscal no Bling (Vendas > Notas Fiscais / Notas de Saída)
  * Se idNotaBlingExistente for informado, executa PUT /nfe/{id} para atualizar em vez de duplicar.
  * Cria o rascunho com status 'Pendente / Em digitação', sem transmissão imediata à SEFAZ.
@@ -581,6 +645,7 @@ export async function gravarEsbocoNFeNoBling(
     itens,
     parcelasCount = 1,
     idFormaPagamentoBling,
+    idContaFinanceira,
     primeiroVencimento,
     intervaloDias = 15,
     diasSemanaPermitidos,
@@ -702,6 +767,9 @@ export async function gravarEsbocoNFeNoBling(
     };
     if (idFormaPagamentoBling) {
       itemParcela.formaPagamento = { id: idFormaPagamentoBling };
+    }
+    if (idContaFinanceira) {
+      itemParcela.contaContabil = { id: idContaFinanceira };
     }
     parcelasPayload.push(itemParcela);
 

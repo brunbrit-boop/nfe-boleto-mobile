@@ -329,6 +329,7 @@ export interface GrupoClienteItem {
   itensMax?: number;
   banco?: BankProvider;
   idFormaPagamentoBling?: number;
+  idContaFinanceiraBling?: number;
   status: 'pendente' | 'gerando' | 'gerado' | 'erro';
   ofertaGerada?: any; // OfertaGeradaResult
   nfeEmitida?: NFeData;
@@ -359,6 +360,8 @@ export interface GrupoClientes {
   bancoPadrao?: BankProvider; // Banco emissor vinculado a este grupo
   idFormaPagamentoBling?: number; // ID oficial da forma de pagamento no Bling para previsão de entrada
   nomeFormaPagamentoBling?: string; // Nome da forma de pagamento no Bling
+  idContaFinanceiraBling?: number; // ID oficial da Conta Financeira (caixa/banco) no Bling
+  nomeContaFinanceiraBling?: string; // Descrição da Conta Financeira no Bling
   clientes: GrupoClienteItem[];
   criadoEm: string;
   atualizadoEm: string;

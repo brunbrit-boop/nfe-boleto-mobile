@@ -260,7 +260,9 @@ export function criarNovoGrupo(
   filtroPadrao: string = '',
   bancoPadrao: BankProvider = 'itau',
   idFormaPagamentoBling?: number,
-  nomeFormaPagamentoBling?: string
+  nomeFormaPagamentoBling?: string,
+  idContaFinanceiraBling?: number,
+  nomeContaFinanceiraBling?: string
 ): GrupoClientes {
   const agora = new Date().toISOString();
   const grupoId = `grupo_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -284,6 +286,7 @@ export function criarNovoGrupo(
     intervaloDias: 30,
     banco: bancoPadrao,
     idFormaPagamentoBling: idFormaPagamentoBling,
+    idContaFinanceiraBling: idContaFinanceiraBling,
     status: 'pendente',
   }));
 
@@ -299,6 +302,8 @@ export function criarNovoGrupo(
     bancoPadrao,
     idFormaPagamentoBling,
     nomeFormaPagamentoBling,
+    idContaFinanceiraBling,
+    nomeContaFinanceiraBling,
     clientes: itensClientes,
     criadoEm: agora,
     atualizadoEm: agora,
@@ -534,7 +539,8 @@ export async function emitirNFeItemGrupo(
   company: CompanyProfile,
   bancoAtual: BankProvider,
   nomeGrupo?: string,
-  formaPagamentoBlingId?: number
+  formaPagamentoBlingId?: number,
+  contaFinanceiraBlingId?: number
 ): Promise<{ sucesso: boolean; nfe?: NFeData; idNotaBling?: number | string; erro?: string }> {
   if (!item.ofertaGerada || !item.ofertaGerada.itens || item.ofertaGerada.itens.length === 0) {
     return { sucesso: false, erro: 'Este cliente ainda não possui orçamento gerado pela IA.' };
@@ -549,6 +555,7 @@ export async function emitirNFeItemGrupo(
   const diasSemanaPermitidos = item.diasSemana;
   const bancoEfetivo = item.banco || bancoAtual;
   const idFormaPagEfetivo = item.idFormaPagamentoBling || formaPagamentoBlingId;
+  const idContaFinEfetivo = item.idContaFinanceiraBling || contaFinanceiraBlingId;
 
   let baseDate: Date | undefined;
   if (primeiroVenc && /^\d{4}-\d{2}-\d{2}$/.test(primeiroVenc)) {
@@ -628,6 +635,7 @@ export async function emitirNFeItemGrupo(
       parcelasCount: numParcelas,
       banco: bancoEfetivo,
       idFormaPagamentoBling: idFormaPagEfetivo,
+      idContaFinanceira: idContaFinEfetivo,
       intervaloDias: intervaloDias,
       primeiroVencimento: primeiroVenc,
       diasSemanaPermitidos: diasSemanaPermitidos,
