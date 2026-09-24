@@ -21,6 +21,10 @@ import {
   getPocketBaseUrl,
 } from '../../../services/pocketbaseService';
 import { ContaReceberDetalhesModal } from '../../ContaReceberDetalhesModal';
+import {
+  atualizarContaReceberBling,
+  atualizarContaPagarBling,
+} from '../../../services/blingService';
 
 export interface FinanceTransaction {
   id: string;
@@ -565,6 +569,86 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   const [pbOnline, setPbOnline] = useState<boolean | null>(null);
   const [selectedContaReceberModal, setSelectedContaReceberModal] = useState<BlingContaReceber | null>(null);
 
+  // --- Controle de Alterações Pendentes para Envio ao Bling ERP ---
+  const [pendentesEnvio, setPendentesEnvio] = useState<Set<string>>(new Set());
+  const [enviandoDados, setEnviandoDados] = useState<boolean>(false);
+  const [envioFeedback, setEnvioFeedback] = useState<{ tipo: 'sucesso' | 'erro'; mensagem: string } | null>(null);
+
+  // Salva observação alterada no modal diretamente no estado e marca como pendente
+  const handleSalvarObservacaoReceber = (idConta: number, novoTexto: string) => {
+    setAllTransactions((prev) =>
+      prev.map((t) => {
+        const idClean = t.id.replace('rec-bling-', '').split('-').pop();
+        if (Number(idClean) === idConta || t.originalBlingReceber?.id === idConta) {
+          setPendentesEnvio((pend) => new Set(pend).add(t.id));
+          return {
+            ...t,
+            description: novoTexto,
+            originalBlingReceber: t.originalBlingReceber
+              ? { ...t.originalBlingReceber, historico: novoTexto }
+              : t.originalBlingReceber,
+          };
+        }
+        return t;
+      })
+    );
+  };
+
+  // Dispara o envio em lote das alterações pendentes para a API do Bling ERP
+  const handleEnviarDadosBling = async () => {
+    if (pendentesEnvio.size === 0) return;
+    setEnviandoDados(true);
+    setEnvioFeedback(null);
+
+    const alvos = allTransactions.filter((t) => pendentesEnvio.has(t.id) && t.originType === 'bling_erp');
+    let sucessoCount = 0;
+    let erroCount = 0;
+
+    for (const tx of alvos) {
+      const idClean = Number(tx.id.replace('rec-bling-', '').replace('pay-bling-', '').split('-').pop());
+      if (!idClean) continue;
+
+      if (tx.type === 'receivable') {
+        const res = await atualizarContaReceberBling(idClean, {
+          vencimento: tx.date,
+          historico: tx.description,
+        });
+        if (res.sucesso) sucessoCount++;
+        else erroCount++;
+      } else if (tx.type === 'payable') {
+        const res = await atualizarContaPagarBling(idClean, {
+          vencimento: tx.date,
+          historico: tx.description,
+        });
+        if (res.sucesso) sucessoCount++;
+        else erroCount++;
+      }
+      // Pequena pausa de 360ms entre requisições para respeitar o limite de 3 req/s da API do Bling
+      await new Promise((r) => setTimeout(r, 360));
+    }
+
+    setEnviandoDados(false);
+    if (sucessoCount > 0 && erroCount === 0) {
+      setPendentesEnvio(new Set());
+      setEnvioFeedback({
+        tipo: 'sucesso',
+        mensagem: `${sucessoCount} conta(s) sincronizada(s) no Bling com sucesso!`,
+      });
+    } else if (sucessoCount > 0 && erroCount > 0) {
+      setEnvioFeedback({
+        tipo: 'sucesso',
+        mensagem: `${sucessoCount} enviada(s), mas ${erroCount} falharam.`,
+      });
+    } else {
+      setEnvioFeedback({
+        tipo: 'erro',
+        mensagem: 'Falha ao sincronizar contas com o Bling. Tente novamente.',
+      });
+    }
+
+    setTimeout(() => setEnvioFeedback(null), 4000);
+  };
+
   // Abre o card modal de detalhes do Bling com busca e fallback garantido
   const handleAbrirDetalhesReceber = (tx: FinanceTransaction) => {
     try {
@@ -788,6 +872,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
   // --- Edição Direta Inline de Transações ---
   const updateTransaction = (id: string, updates: Partial<FinanceTransaction>) => {
+    setPendentesEnvio((prev) => new Set(prev).add(id));
     setAllTransactions((prev) =>
       prev.map((t) => (t.id === id ? { ...t, ...updates } : t))
     );
@@ -809,6 +894,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
   // Adiamento de Vencimento
   const moveDate = (id: string, days: number) => {
+    setPendentesEnvio((prev) => new Set(prev).add(id));
     setAllTransactions((prev) =>
       prev.map((item) => {
         if (item.id !== id) return item;
@@ -827,6 +913,11 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   // Adiamento em Lote dos Selecionados
   const handleBulkMoveDate = (days: number) => {
     if (selectedTableItemIds.size === 0) return;
+    setPendentesEnvio((prev) => {
+      const n = new Set(prev);
+      selectedTableItemIds.forEach((id) => n.add(id));
+      return n;
+    });
     setAllTransactions((prev) =>
       prev.map((item) => {
         if (!selectedTableItemIds.has(item.id)) return item;
@@ -1419,20 +1510,47 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             </span>
           </button>
 
-          {/* Botão Sincronizar Bling */}
+          {/* Botão Trazer Dados */}
           {onRefreshBling && (
             <button
               onClick={onRefreshBling}
-              disabled={carregando}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60 rounded-lg text-xs font-bold transition-all shadow-xs border border-emerald-200/80 dark:border-emerald-800/60 disabled:opacity-50"
-              title="Buscar contas a pagar e receber atualizadas do Bling agora"
+              disabled={carregando || enviandoDados}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60 rounded-lg text-xs font-bold transition-all shadow-xs border border-emerald-200/80 dark:border-emerald-800/60 disabled:opacity-50 cursor-pointer"
+              title="Trazer contas e dados atualizados do Bling ERP"
             >
               <span className={`material-symbols-outlined text-base ${carregando ? 'animate-spin' : ''}`}>
-                sync
+                {carregando ? 'progress_activity' : 'download'}
               </span>
-              <span>{carregando ? 'Sincronizando...' : 'Sincronizar Bling'}</span>
+              <span>{carregando ? 'Trazendo...' : 'Trazer Dados'}</span>
             </button>
           )}
+
+          {/* Botão Enviar Dados */}
+          <button
+            onClick={handleEnviarDadosBling}
+            disabled={enviandoDados || pendentesEnvio.size === 0}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xs border cursor-pointer ${
+              pendentesEnvio.size > 0
+                ? 'bg-blue-600 hover:bg-blue-700 text-white border-blue-500 shadow-blue-500/25 ring-2 ring-blue-400/30 animate-pulse'
+                : 'bg-slate-100 text-slate-400 dark:bg-slate-800/50 dark:text-slate-500 border-slate-200 dark:border-slate-800 cursor-not-allowed opacity-60'
+            }`}
+            title={
+              pendentesEnvio.size > 0
+                ? `Enviar ${pendentesEnvio.size} alteração(ões) pendente(s) diretamente para o Bling ERP`
+                : 'Nenhuma alteração pendente para enviar'
+            }
+          >
+            <span className={`material-symbols-outlined text-base ${enviandoDados ? 'animate-spin' : ''}`}>
+              {enviandoDados ? 'progress_activity' : 'cloud_upload'}
+            </span>
+            <span>
+              {enviandoDados
+                ? 'Enviando...'
+                : pendentesEnvio.size > 0
+                ? `Enviar Dados (${pendentesEnvio.size})`
+                : 'Enviar Dados'}
+            </span>
+          </button>
 
           {/* Botão Uploads de Extratos */}
           <button
@@ -1558,6 +1676,30 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Banner de Feedback de Envio ao Bling */}
+      {envioFeedback && (
+        <div
+          className={`mx-4 my-2 px-3.5 py-2 rounded-xl text-xs font-bold flex items-center justify-between gap-2 animate-in fade-in slide-in-from-top-2 border ${
+            envioFeedback.tipo === 'sucesso'
+              ? 'bg-emerald-50 text-emerald-800 border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-200 dark:border-emerald-800'
+              : 'bg-rose-50 text-rose-800 border-rose-200 dark:bg-rose-950/60 dark:text-rose-200 dark:border-rose-800'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-sm">
+              {envioFeedback.tipo === 'sucesso' ? 'check_circle' : 'error'}
+            </span>
+            <span>{envioFeedback.mensagem}</span>
+          </div>
+          <button
+            onClick={() => setEnvioFeedback(null)}
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 text-xs cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       {/* 3. Área do Gráfico com Equalizador Hierárquico SVG e Zoom Contínuo */}
       {!isChartMinimized && (
@@ -1827,7 +1969,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                     />
                   </th>
                   <th className="p-2">{renderHeaderWithFilter('payable', 'bank', 'BANCO')}</th>
-                  <th className="p-2">DATA / ADIAR</th>
+                  <th className="p-2">VENCIMENTO</th>
                   <th className="p-2">{renderHeaderWithFilter('payable', 'entity', 'DESTINO')}</th>
                   <th className="p-2">{renderHeaderWithFilter('payable', 'method', 'MÉTODO')}</th>
                   <th className="p-2">{renderHeaderWithFilter('payable', 'description', 'DESCRIÇÃO/OBS')}</th>
@@ -1889,20 +2031,34 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                           </select>
                         </td>
 
-                        {/* Data com Botões de Adiar */}
-                        <td className="p-2 font-mono whitespace-nowrap">
+                        {/* Seletor Direto de Data e Botões de Adiar */}
+                        <td className="p-1 font-mono whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-1">
-                            <span>{tx.displayDate}</span>
+                            <input
+                              type="date"
+                              value={tx.date}
+                              onChange={(e) => {
+                                const newIso = e.target.value;
+                                if (newIso) {
+                                  updateTransaction(tx.id, {
+                                    date: newIso,
+                                    displayDate: formatDateBr(newIso),
+                                  });
+                                }
+                              }}
+                              className="text-[11px] font-mono py-0.5 px-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:border-red-500 focus:border-red-500 focus:ring-1 focus:ring-red-500 cursor-pointer shadow-2xs outline-none max-w-[115px]"
+                              title="Alterar data de vencimento no calendário"
+                            />
                             <button
                               onClick={() => moveDate(tx.id, 1)}
-                              className="text-[9px] px-1 rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 text-gray-700 dark:text-gray-200 font-bold"
+                              className="text-[9px] px-1 py-0.5 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold border border-slate-200/60 dark:border-slate-700/60 transition-all cursor-pointer"
                               title="Adiar +1 dia"
                             >
                               +1d
                             </button>
                             <button
                               onClick={() => moveDate(tx.id, 7)}
-                              className="text-[9px] px-1 rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 text-gray-700 dark:text-gray-200 font-bold"
+                              className="text-[9px] px-1 py-0.5 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold border border-slate-200/60 dark:border-slate-700/60 transition-all cursor-pointer"
                               title="Adiar +7 dias"
                             >
                               +7d
@@ -2039,7 +2195,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                     />
                   </th>
                   <th className="p-2">{renderHeaderWithFilter('receivable', 'bank', 'BANCO')}</th>
-                  <th className="p-2">DATA / ADIAR</th>
+                  <th className="p-2">VENCIMENTO</th>
                   <th className="p-2">{renderHeaderWithFilter('receivable', 'entity', 'ORIGEM')}</th>
                   <th className="p-2">{renderHeaderWithFilter('receivable', 'method', 'MÉTODO')}</th>
                   <th className="p-2">{renderHeaderWithFilter('receivable', 'description', 'DESCRIÇÃO/OBS')}</th>
@@ -2103,26 +2259,34 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                           </select>
                         </td>
 
-                        {/* Data com Botões de Adiar */}
-                        <td className="p-2 font-mono whitespace-nowrap">
+                        {/* Seletor Direto de Data e Botões de Adiar */}
+                        <td className="p-1 font-mono whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                           <div className="flex items-center gap-1">
-                            <span>{tx.displayDate}</span>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                moveDate(tx.id, 1);
+                            <input
+                              type="date"
+                              value={tx.date}
+                              onChange={(e) => {
+                                const newIso = e.target.value;
+                                if (newIso) {
+                                  updateTransaction(tx.id, {
+                                    date: newIso,
+                                    displayDate: formatDateBr(newIso),
+                                  });
+                                }
                               }}
-                              className="text-[9px] px-1 rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 text-gray-700 dark:text-gray-200 font-bold"
+                              className="text-[11px] font-mono py-0.5 px-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 hover:border-emerald-500 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 cursor-pointer shadow-2xs outline-none max-w-[115px]"
+                              title="Alterar data de vencimento no calendário"
+                            />
+                            <button
+                              onClick={() => moveDate(tx.id, 1)}
+                              className="text-[9px] px-1 py-0.5 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold border border-slate-200/60 dark:border-slate-700/60 transition-all cursor-pointer"
                               title="Adiar +1 dia"
                             >
                               +1d
                             </button>
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                moveDate(tx.id, 7);
-                              }}
-                              className="text-[9px] px-1 rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 text-gray-700 dark:text-gray-200 font-bold"
+                              onClick={() => moveDate(tx.id, 7)}
+                              className="text-[9px] px-1 py-0.5 rounded bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 font-bold border border-slate-200/60 dark:border-slate-700/60 transition-all cursor-pointer"
                               title="Adiar +7 dias"
                             >
                               +7d
@@ -2569,6 +2733,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
           conta={selectedContaReceberModal}
           onClose={() => setSelectedContaReceberModal(null)}
           onViewBoleto={onViewBoletoReceber}
+          onSalvarObservacao={handleSalvarObservacaoReceber}
         />
       )}
     </div>

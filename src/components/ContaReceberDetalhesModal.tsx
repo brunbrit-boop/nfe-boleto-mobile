@@ -20,14 +20,21 @@ interface ContaReceberDetalhesModalProps {
   conta: BlingContaReceber | null;
   onClose: () => void;
   onViewBoleto?: (conta: BlingContaReceber) => void;
+  onSalvarObservacao?: (idConta: number, novoTexto: string) => void | Promise<void>;
 }
 
 export const ContaReceberDetalhesModal: React.FC<ContaReceberDetalhesModalProps> = ({
   conta,
   onClose,
   onViewBoleto,
+  onSalvarObservacao,
 }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [observacaoEditada, setObservacaoEditada] = useState<string>(() =>
+    conta ? conta.historico || conta.observacoes || (conta as any).detalhes || '' : ''
+  );
+  const [salvandoObs, setSalvandoObs] = useState(false);
+  const [obsSalvaFeedback, setObsSalvaFeedback] = useState(false);
 
   if (!conta) return null;
 
@@ -48,13 +55,6 @@ export const ContaReceberDetalhesModal: React.FC<ContaReceberDetalhesModalProps>
     (conta as any).portador?.nome ||
     (conta as any).banco?.descricao ||
     'Não informada no Bling';
-
-  const detalhamentoTexto =
-    conta.historico ||
-    conta.observacoes ||
-    (conta as any).detalhes ||
-    (conta as any).observacao ||
-    '';
 
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -177,15 +177,54 @@ export const ContaReceberDetalhesModal: React.FC<ContaReceberDetalhesModalProps>
             </span>
           </div>
 
-          {/* 2. Detalhamento ou Observação Textual da Conta */}
-          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800 space-y-1.5 shadow-xs">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
-              <AlignLeft className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
-              <span>Detalhamento / Observação</span>
-            </span>
-            <p className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed font-medium bg-white dark:bg-slate-950/60 p-3 rounded-xl border border-slate-200/60 dark:border-slate-800/80 whitespace-pre-wrap">
-              {detalhamentoTexto || 'Nenhum detalhamento ou observação informada no Bling ERP.'}
-            </p>
+          {/* 2. Detalhamento ou Observação Textual da Conta (Editável) */}
+          <div className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200/80 dark:border-slate-800 space-y-2 shadow-xs">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                <AlignLeft className="w-3.5 h-3.5 text-slate-600 dark:text-slate-400" />
+                <span>Detalhamento / Observação</span>
+              </span>
+              {onSalvarObservacao && (
+                <button
+                  onClick={async () => {
+                    setSalvandoObs(true);
+                    try {
+                      await onSalvarObservacao(conta.id, observacaoEditada);
+                      setObsSalvaFeedback(true);
+                      setTimeout(() => setObsSalvaFeedback(false), 2500);
+                    } finally {
+                      setSalvandoObs(false);
+                    }
+                  }}
+                  disabled={salvandoObs}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50"
+                  title="Salvar observação no painel para envio ao Bling"
+                >
+                  {salvandoObs ? (
+                    <span>Salvando...</span>
+                  ) : obsSalvaFeedback ? (
+                    <>
+                      <Check className="w-3 h-3 text-white" />
+                      <span>Salvo!</span>
+                    </>
+                  ) : (
+                    <span>Salvar</span>
+                  )}
+                </button>
+              )}
+            </div>
+            <textarea
+              value={observacaoEditada}
+              onChange={(e) => {
+                setObservacaoEditada(e.target.value);
+                if (onSalvarObservacao) {
+                  onSalvarObservacao(conta.id, e.target.value);
+                }
+              }}
+              rows={3}
+              placeholder="Insira observações ou detalhamento para esta conta..."
+              className="w-full text-xs text-slate-800 dark:text-slate-200 leading-relaxed font-medium bg-white dark:bg-slate-950/60 p-3 rounded-xl border border-slate-200/60 dark:border-slate-800/80 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 outline-none resize-none transition-all placeholder:text-slate-400"
+            />
           </div>
 
           {/* 3. Outros Metadados Financeiros do Bling */}

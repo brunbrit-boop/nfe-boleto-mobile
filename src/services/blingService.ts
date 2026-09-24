@@ -1813,6 +1813,75 @@ export async function atualizarContaReceberBling(
   }
 }
 
+/**
+ * Atualiza uma Conta a Pagar no Bling ERP via API (PUT /contas/pagar/{id})
+ */
+export async function atualizarContaPagarBling(
+  idConta: number,
+  dados: {
+    contaContabilId?: number;
+    formaPagamentoId?: number;
+    vencimento?: string;
+    valor?: number;
+    historico?: string;
+  },
+  token?: string,
+  empresaId?: string
+): Promise<{ sucesso: boolean; mensagem?: string; data?: any }> {
+  try {
+    let contaAtual: any = null;
+    try {
+      const getRes = await callBlingApi(`/contas/pagar/${idConta}`, {
+        method: 'GET',
+        customToken: token,
+        empresaId,
+      }).catch(() => callBlingApi(`/contas-pagar/${idConta}`, { method: 'GET', customToken: token, empresaId }));
+      contaAtual = getRes?.data;
+    } catch {}
+
+    const payload: any = {
+      vencimento: dados.vencimento || contaAtual?.vencimento,
+      valor: dados.valor !== undefined ? dados.valor : contaAtual?.valor,
+      historico: dados.historico || contaAtual?.historico,
+    };
+
+    if (contaAtual?.contato?.id) {
+      payload.contato = { id: contaAtual.contato.id };
+    }
+    if (dados.contaContabilId) {
+      payload.contaContabil = { id: dados.contaContabilId };
+    } else if (contaAtual?.contaContabil?.id) {
+      payload.contaContabil = { id: contaAtual.contaContabil.id };
+    }
+    if (dados.formaPagamentoId) {
+      payload.formaPagamento = { id: dados.formaPagamentoId };
+    } else if (contaAtual?.formaPagamento?.id) {
+      payload.formaPagamento = { id: contaAtual.formaPagamento.id };
+    }
+
+    let res: any;
+    try {
+      res = await callBlingApi(`/contas/pagar/${idConta}`, {
+        method: 'PUT',
+        body: payload,
+        customToken: token,
+        empresaId,
+      });
+    } catch {
+      res = await callBlingApi(`/contas-pagar/${idConta}`, {
+        method: 'PUT',
+        body: payload,
+        customToken: token,
+        empresaId,
+      });
+    }
+
+    return { sucesso: true, data: res?.data };
+  } catch (err: any) {
+    return { sucesso: false, mensagem: err?.message || 'Erro ao atualizar conta a pagar no Bling' };
+  }
+}
+
 export interface ProgressUpdateSantander {
   index: number;
   total: number;
