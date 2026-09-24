@@ -2,6 +2,9 @@ import type { BlingContaPagar, BlingContaReceber, EmpresaTenant } from '../types
 
 const DEFAULT_PB_URL = 'https://juice-titled-lying-enterprises.trycloudflare.com';
 
+let isPocketBaseOfflineCache = false;
+let lastHealthCheckTime = 0;
+
 export function getPocketBaseUrl(): string {
   if (typeof window !== 'undefined') {
     return localStorage.getItem('nfe_pocketbase_url') || DEFAULT_PB_URL;
@@ -12,6 +15,34 @@ export function getPocketBaseUrl(): string {
 export function setPocketBaseUrl(url: string): void {
   if (typeof window !== 'undefined') {
     localStorage.setItem('nfe_pocketbase_url', url.trim().replace(/\/+$/, ''));
+    isPocketBaseOfflineCache = false;
+    lastHealthCheckTime = 0;
+  }
+}
+
+/**
+ * Verifica rapidamente se o PocketBase está acessível sem travar a aplicação
+ */
+export async function isPocketBaseOnline(): Promise<boolean> {
+  const now = Date.now();
+  // Se falhou há menos de 20 segundos, não tenta de novo para não floodar de requisições
+  if (isPocketBaseOfflineCache && now - lastHealthCheckTime < 20000) {
+    return false;
+  }
+
+  const baseUrl = getPocketBaseUrl();
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1200);
+    const res = await fetch(`${baseUrl}/api/health`, { method: 'GET', signal: controller.signal });
+    clearTimeout(timeout);
+    isPocketBaseOfflineCache = !res.ok;
+    lastHealthCheckTime = now;
+    return res.ok;
+  } catch {
+    isPocketBaseOfflineCache = true;
+    lastHealthCheckTime = now;
+    return false;
   }
 }
 
@@ -23,9 +54,14 @@ export async function salvarContasReceberNoBanco(
   contas: BlingContaReceber[],
   reconciliarExclusoes: boolean = true
 ): Promise<{ sucesso: boolean; totalSalvas: number; totalExcluidas: number }> {
+  if (!(await isPocketBaseOnline())) {
+    return { sucesso: false, totalSalvas: 0, totalExcluidas: 0 };
+  }
+
   const baseUrl = getPocketBaseUrl();
   let totalSalvas = 0;
   let totalExcluidas = 0;
+
 
   for (const cr of contas) {
     const chaveUnica = `${empresaId}_${cr.id}`;
@@ -78,7 +114,10 @@ export async function salvarContasReceberNoBanco(
         }
       }
     } catch (err) {
-      console.error(`Erro ao salvar conta a receber ${cr.id} no PocketBase:`, err);
+      isPocketBaseOfflineCache = true;
+      lastHealthCheckTime = Date.now();
+      console.warn(`PocketBase inacessível durante salvamento de contas a receber. Interrompendo sincronização no banco.`);
+      break;
     }
   }
 
@@ -119,9 +158,14 @@ export async function salvarContasPagarNoBanco(
   contas: BlingContaPagar[],
   reconciliarExclusoes: boolean = true
 ): Promise<{ sucesso: boolean; totalSalvas: number; totalExcluidas: number }> {
+  if (!(await isPocketBaseOnline())) {
+    return { sucesso: false, totalSalvas: 0, totalExcluidas: 0 };
+  }
+
   const baseUrl = getPocketBaseUrl();
   let totalSalvas = 0;
   let totalExcluidas = 0;
+
 
   for (const cp of contas) {
     const chaveUnica = `${empresaId}_${cp.id}`;
@@ -170,7 +214,10 @@ export async function salvarContasPagarNoBanco(
         }
       }
     } catch (err) {
-      console.error(`Erro ao salvar conta a pagar ${cp.id} no PocketBase:`, err);
+      isPocketBaseOfflineCache = true;
+      lastHealthCheckTime = Date.now();
+      console.warn(`PocketBase inacessível durante salvamento de contas a pagar. Interrompendo sincronização no banco.`);
+      break;
     }
   }
 
@@ -207,6 +254,8 @@ export async function salvarContasPagarNoBanco(
  * Consulta contas a receber do banco de dados do RDP
  */
 export async function obterContasReceberDoBanco(empresaId?: string): Promise<BlingContaReceber[]> {
+  if (!(await isPocketBaseOnline())) return [];
+
   const baseUrl = getPocketBaseUrl();
   const filter = empresaId ? `filter=(empresa_id='${encodeURIComponent(empresaId)}')&` : '';
   const url = `${baseUrl}/api/collections/contas_receber/records?${filter}perPage=500&sort=-vencimento`;
@@ -256,6 +305,8 @@ export async function obterContasReceberDoBanco(empresaId?: string): Promise<Bli
  * Consulta contas a pagar do banco de dados do RDP
  */
 export async function obterContasPagarDoBanco(empresaId?: string): Promise<BlingContaPagar[]> {
+  if (!(await isPocketBaseOnline())) return [];
+
   const baseUrl = getPocketBaseUrl();
   const filter = empresaId ? `filter=(empresa_id='${encodeURIComponent(empresaId)}')&` : '';
   const url = `${baseUrl}/api/collections/contas_pagar/records?${filter}perPage=500&sort=-vencimento`;
@@ -303,12 +354,18 @@ export async function obterContasPagarDoBanco(empresaId?: string): Promise<Bling
 export async function testarConexaoPocketBase(): Promise<{ ok: boolean; url: string; mensagem: string }> {
   const baseUrl = getPocketBaseUrl();
   try {
-    const res = await fetch(`${baseUrl}/api/health`, { method: 'GET' });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 1200);
+    const res = await fetch(`${baseUrl}/api/health`, { method: 'GET', signal: controller.signal });
+    clearTimeout(timeout);
     if (res.ok) {
+      isPocketBaseOfflineCache = false;
       return { ok: true, url: baseUrl, mensagem: 'Conectado ao PocketBase RDP' };
     }
+    isPocketBaseOfflineCache = true;
     return { ok: false, url: baseUrl, mensagem: `Status ${res.status}` };
   } catch (err: any) {
+    isPocketBaseOfflineCache = true;
     return { ok: false, url: baseUrl, mensagem: err?.message || 'Servidor offline' };
   }
 }
@@ -317,6 +374,8 @@ export async function testarConexaoPocketBase(): Promise<{ ok: boolean; url: str
  * Registra ou atualiza os metadados da empresa no banco
  */
 export async function registrarEmpresaNoBanco(empresa: EmpresaTenant): Promise<void> {
+  if (!(await isPocketBaseOnline())) return;
+
   const baseUrl = getPocketBaseUrl();
   const payload = {
     empresa_id: empresa.id,
