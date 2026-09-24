@@ -662,9 +662,38 @@ export async function gravarEsbocoNFeNoBling(
   }
 
   const idExistenteStr = idNotaBlingExistente ? String(idNotaBlingExistente).trim() : '';
-  const isEdicao = Boolean(idExistenteStr && /^\d+$/.test(idExistenteStr));
-  const endpoint = isEdicao ? `/nfe/${idExistenteStr}` : '/nfe';
-  const method = isEdicao ? 'PUT' : 'POST';
+  let isEdicao = Boolean(idExistenteStr && /^\d+$/.test(idExistenteStr));
+  let endpoint = isEdicao ? `/nfe/${idExistenteStr}` : '/nfe';
+  let method: 'POST' | 'PUT' = isEdicao ? 'PUT' : 'POST';
+
+  // Se for edição de nota prévia, consulta os dados atuais no Bling para obter obrigatoriamente numero e serie (exigidos pelo PUT v3)
+  if (isEdicao) {
+    try {
+      const consultaNota = await callBlingApi(`/nfe/${idExistenteStr}`, {
+        method: 'GET',
+        customToken: empresaToken,
+      });
+      const dataAtual = consultaNota?.data;
+      if (dataAtual && (dataAtual.id || dataAtual.numero)) {
+        if (dataAtual.numero) {
+          payload.numero = Number(dataAtual.numero);
+        }
+        if (dataAtual.serie) {
+          payload.serie = Number(dataAtual.serie);
+        }
+      } else {
+        // Se a nota não for encontrada ou o ID não for válido no Bling, cria um novo rascunho via POST
+        isEdicao = false;
+        endpoint = '/nfe';
+        method = 'POST';
+      }
+    } catch {
+      // Se der 404 ou erro na consulta da nota anterior (ex: nota de sessão antiga ou já apagada), faz fallback para POST
+      isEdicao = false;
+      endpoint = '/nfe';
+      method = 'POST';
+    }
+  }
 
   try {
     const resposta = await callBlingApi(endpoint, {
@@ -675,8 +704,8 @@ export async function gravarEsbocoNFeNoBling(
 
     const data = resposta?.data;
     const idGerado = data?.id || resposta?.id || (isEdicao ? Number(idExistenteStr) : undefined);
-    const numeroGerado = data?.numero ? String(data.numero) : undefined;
-    const serieGerada = data?.serie ? String(data.serie) : undefined;
+    const numeroGerado = data?.numero ? String(data.numero) : (payload.numero ? String(payload.numero) : undefined);
+    const serieGerada = data?.serie ? String(data.serie) : (payload.serie ? String(payload.serie) : undefined);
 
     if (!idGerado) {
       return {
@@ -697,12 +726,15 @@ export async function gravarEsbocoNFeNoBling(
       raw: data || resposta,
     };
   } catch (error: any) {
-    // Se tentou atualizar via PUT e a nota não foi encontrada no Bling (404), tenta criar um novo esboço via POST
-    if (isEdicao && (error?.status === 404 || error?.message?.includes('404') || error?.message?.includes('não encontrada'))) {
+    // Se tentou atualizar via PUT e deu erro (404, validação de número ou restrição de status), cria um novo esboço via POST
+    if (isEdicao) {
       try {
+        const payloadPost = { ...payload };
+        delete payloadPost.numero; // No POST /nfe o Bling gera a numeração automaticamente
+        delete payloadPost.serie;
         const respostaCriacao = await callBlingApi('/nfe', {
           method: 'POST',
-          body: payload,
+          body: payloadPost,
           customToken: empresaToken,
         });
         const idNovo = respostaCriacao?.data?.id || respostaCriacao?.id;
@@ -712,7 +744,7 @@ export async function gravarEsbocoNFeNoBling(
             idNotaBling: idNovo,
             numeroNota: respostaCriacao?.data?.numero ? String(respostaCriacao.data.numero) : undefined,
             serie: respostaCriacao?.data?.serie ? String(respostaCriacao.data.serie) : undefined,
-            mensagem: `Nota anterior não existia mais no Bling. Novo esboço de NF-e criado com sucesso (ID: ${idNovo}).`,
+            mensagem: `Novo esboço de NF-e criado com sucesso no Bling (ID: ${idNovo}).`,
             raw: respostaCriacao,
           };
         }

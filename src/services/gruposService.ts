@@ -583,7 +583,7 @@ export async function emitirNFeItemGrupo(
     }
 
     if (resBling.idNotaBling) {
-      novaNFe.numeroNFe = String(resBling.idNotaBling);
+      novaNFe.numeroNFe = String(resBling.numeroNota || resBling.idNotaBling);
       item.idNotaBling = resBling.idNotaBling;
     }
     novaNFe.status = 'rascunho';
