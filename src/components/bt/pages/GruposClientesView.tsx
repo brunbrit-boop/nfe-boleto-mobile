@@ -161,6 +161,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       ? grupoAtivo.diasSemanaPadrao
       : [1, 3, 5]; // Padrão: Segunda (1), Quarta (3), Sexta (5)
   });
+  const [modoEscalaSemanal, setModoEscalaSemanal] = useState<'continuo' | 'mesma_semana'>(() => {
+    return grupoAtivo?.modoEscalaSemanal || 'mesma_semana';
+  });
   const [isEmitindoLote, setIsEmitindoLote] = useState<boolean>(false);
   const [progressoEmissaoLote, setProgressoEmissaoLote] = useState<{ atual: number; total: number }>({ atual: 0, total: 0 });
 
@@ -274,6 +277,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       if (grupoAtivo.diasSemanaPadrao && grupoAtivo.diasSemanaPadrao.length > 0) {
         setDiasSemanaMassa(grupoAtivo.diasSemanaPadrao);
       }
+      if (grupoAtivo.modoEscalaSemanal) {
+        setModoEscalaSemanal(grupoAtivo.modoEscalaSemanal);
+      }
       setIsEditandoNomeGrupo(false);
       setNovoNomeGrupoTemp(grupoAtivo.nome || '');
       setDiretrizesGrupoTemp(grupoAtivo.diretrizesGrupo || '');
@@ -353,10 +359,12 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
 
     if (modoCronogramaMassa === 'semanal' && diasSemanaMassa.length > 0) {
       // Caminho 2: Gera datas escalonadas pelos dias da semana selecionados (ex: Seg, Qua, Sex)
+      // Suporta 'mesma_semana' (reinicia o ciclo na mesma semana) ou 'continuo' (avança pelas semanas seguintes)
       const datasEscalonadas = gerarDatasEscalonadasSemanais(
         primeiroVencMassa || obterDataPadraoD30(),
         grupoAtivo.clientes.length,
-        diasSemanaMassa
+        diasSemanaMassa,
+        modoEscalaSemanal
       );
 
       clientesAtualizados = grupoAtivo.clientes.map((c, idx) => ({
@@ -366,6 +374,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         intervaloDias: intervaloDiasMassa,
         diasSemana: [...diasSemanaMassa],
         tipoCronograma: 'semanal',
+        modoEscalaSemanal: modoEscalaSemanal,
       }));
     } else {
       // Modo Data Fixa
@@ -376,6 +385,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         intervaloDias: intervaloDiasMassa,
         diasSemana: undefined,
         tipoCronograma: 'data_fixa',
+        modoEscalaSemanal: undefined,
       }));
     }
 
@@ -386,6 +396,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       intervaloDiasPadrao: intervaloDiasMassa,
       tipoCronogramaPadrao: modoCronogramaMassa,
       diasSemanaPadrao: modoCronogramaMassa === 'semanal' ? diasSemanaMassa : undefined,
+      modoEscalaSemanal: modoCronogramaMassa === 'semanal' ? modoEscalaSemanal : undefined,
       clientes: clientesAtualizados,
     };
     atualizarGrupo(atualizado);
@@ -2060,6 +2071,37 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                   })}
                 </div>
               )}
+
+              {/* Alternador de Avanço do Cronograma (Mesma Semana vs Semanas Seguintes) */}
+              {modoCronogramaMassa === 'semanal' && (
+                <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded-lg border border-slate-700">
+                  <span className="text-[10px] font-bold text-slate-400 mr-0.5">Avanço:</span>
+                  <button
+                    type="button"
+                    onClick={() => setModoEscalaSemanal('mesma_semana')}
+                    className={`px-2 py-0.5 rounded text-[11px] font-bold transition cursor-pointer flex items-center gap-1 ${
+                      modoEscalaSemanal === 'mesma_semana'
+                        ? 'bg-amber-400 text-slate-950 font-black shadow-xs'
+                        : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                    }`}
+                    title="Mantém todos os vencimentos na mesma semana (Seg, Qua, Sex), repetindo os dias para os clientes seguintes"
+                  >
+                    <span>🔁 Mesma Semana</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setModoEscalaSemanal('continuo')}
+                    className={`px-2 py-0.5 rounded text-[11px] font-bold transition cursor-pointer flex items-center gap-1 ${
+                      modoEscalaSemanal === 'continuo'
+                        ? 'bg-[#11d493] text-slate-950 font-black shadow-xs'
+                        : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                    }`}
+                    title="Avança cronologicamente pelas semanas seguintes (1 cliente por dia útil contínuo)"
+                  >
+                    <span>📈 Semanas Seguintes</span>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Botão Aplicar a Todos */}
@@ -2077,9 +2119,19 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
           {/* Banner Informativo do Cronograma Semanal */}
           {modoCronogramaMassa === 'semanal' && (
             <div className="flex items-center gap-2 text-[11px] text-slate-300 bg-slate-900/60 px-3 py-1.5 rounded-lg border border-slate-700/60">
-              <span className="text-amber-400 font-bold shrink-0">ℹ️ Escala Semanal Ativa:</span>
+              <span className="text-amber-400 font-bold shrink-0">
+                {modoEscalaSemanal === 'mesma_semana' ? '🔁 Modo Mesma Semana Ativo:' : '📈 Modo Semanas Seguintes Ativo:'}
+              </span>
               <span>
-                1º vencimento distribuído cliente a cliente nos dias: <strong className="text-white">{diasSemanaMassa.map(d => ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][d]).join(', ')}</strong>. Parcelas futuras (+{intervaloDiasMassa}d) avançam para o próximo dia útil da escala (Caminho 2).
+                {modoEscalaSemanal === 'mesma_semana' ? (
+                  <>
+                    Todos os clientes têm o 1º vencimento concentrado na <strong>mesma semana</strong> ({diasSemanaMassa.map(d => ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][d]).join(', ')}), repetindo o ciclo para os clientes seguintes. Parcelas futuras (+{intervaloDiasMassa}d) avançam no próximo dia da escala (Caminho 2).
+                  </>
+                ) : (
+                  <>
+                    1º vencimento distribuído cliente a cliente <strong>avançando continuamente pelas próximas semanas</strong> ({diasSemanaMassa.map(d => ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][d]).join(', ')}). Parcelas futuras (+{intervaloDiasMassa}d) avançam no próximo dia da escala (Caminho 2).
+                  </>
+                )}
               </span>
             </div>
           )}

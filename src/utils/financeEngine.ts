@@ -238,11 +238,15 @@ export function ajustarParaProximoDiaPermitido(data: Date, diasPermitidos: numbe
  * Gera uma sequência de datas de primeiro vencimento escalonadas pelos dias da semana selecionados.
  * A primeira data será >= dataInicialStr caindo em um dos dias permitidos.
  * As datas subsequentes avançam nos próximos dias permitidos sucessivos da semana.
+ * Suporta 2 modalidades:
+ *  - 'continuo': avança continuamente pelas semanas seguintes (1 cliente por dia útil).
+ *  - 'mesma_semana': limita o ciclo aos dias da mesma semana de referência, repetindo-os para clientes adicionais.
  */
 export function gerarDatasEscalonadasSemanais(
   dataInicialStr: string,
   quantidade: number,
-  diasPermitidos: number[]
+  diasPermitidos: number[],
+  modoEscala: 'continuo' | 'mesma_semana' = 'continuo'
 ): string[] {
   if (quantidade <= 0) return [];
   if (!diasPermitidos || diasPermitidos.length === 0) {
@@ -255,14 +259,50 @@ export function gerarDatasEscalonadasSemanais(
     baseDate = new Date(ano, mes - 1, dia);
   }
 
+  const formatarIso = (d: Date) => {
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  if (modoEscala === 'mesma_semana') {
+    // Determina a Segunda-feira da semana de referência
+    const diaSem = baseDate.getDay(); // 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb
+    const offsetSegunda = diaSem === 0 ? -6 : 1 - diaSem;
+    const segundaFeira = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + offsetSegunda);
+
+    // Mapeia os dias permitidos ordenados de Segunda (1) a Domingo (7)
+    const diasPermitidosOrdenados = [...diasPermitidos].sort((a, b) => {
+      const pesoA = a === 0 ? 7 : a;
+      const pesoB = b === 0 ? 7 : b;
+      return pesoA - pesoB;
+    });
+
+    const datasDaSemana: string[] = diasPermitidosOrdenados.map((dia) => {
+      const d = new Date(segundaFeira);
+      const diffDias = (dia === 0 ? 7 : dia) - 1;
+      d.setDate(d.getDate() + diffDias);
+      return formatarIso(d);
+    });
+
+    if (datasDaSemana.length === 0) {
+      return Array(quantidade).fill(dataInicialStr);
+    }
+
+    const resultado: string[] = [];
+    for (let k = 0; k < quantidade; k++) {
+      resultado.push(datasDaSemana[k % datasDaSemana.length]);
+    }
+    return resultado;
+  }
+
+  // Modo Contínuo (avança pelas semanas seguintes)
   let cursor = ajustarParaProximoDiaPermitido(baseDate, diasPermitidos);
   const resultado: string[] = [];
 
   for (let k = 0; k < quantidade; k++) {
-    const yyyy = cursor.getFullYear();
-    const mm = String(cursor.getMonth() + 1).padStart(2, '0');
-    const dd = String(cursor.getDate()).padStart(2, '0');
-    resultado.push(`${yyyy}-${mm}-${dd}`);
+    resultado.push(formatarIso(cursor));
 
     if (k < quantidade - 1) {
       cursor.setDate(cursor.getDate() + 1);

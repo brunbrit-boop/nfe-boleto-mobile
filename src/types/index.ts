@@ -312,6 +312,7 @@ export interface GrupoClienteItem {
   intervaloDias?: number;
   diasSemana?: number[]; // [1, 3, 5] por exemplo (0=Dom, 1=Seg, ..., 6=Sáb)
   tipoCronograma?: 'data_fixa' | 'semanal';
+  modoEscalaSemanal?: 'continuo' | 'mesma_semana';
   status: 'pendente' | 'gerando' | 'gerado' | 'erro';
   ofertaGerada?: any; // OfertaGeradaResult
   nfeEmitida?: NFeData;
@@ -333,6 +334,7 @@ export interface GrupoClientes {
   intervaloDiasPadrao?: number;
   tipoCronogramaPadrao?: 'data_fixa' | 'semanal';
   diasSemanaPadrao?: number[];
+  modoEscalaSemanal?: 'continuo' | 'mesma_semana';
   grupoProdutoPadraoId?: string; // Vinculo padrao para todos do grupo
   diretrizesGrupo?: string; // Diretrizes especificas comerciais deste grupo para a IA
   clientes: GrupoClienteItem[];
