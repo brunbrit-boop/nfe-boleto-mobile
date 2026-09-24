@@ -554,8 +554,39 @@ export async function emitirNFeItemGrupo(
   const primeiroVenc = item.primeiroVencimento; // YYYY-MM-DD
   const diasSemanaPermitidos = item.diasSemana;
   const bancoEfetivo = item.banco || bancoAtual;
-  const idFormaPagEfetivo = item.idFormaPagamentoBling || formaPagamentoBlingId;
+  let idFormaPagEfetivo = item.idFormaPagamentoBling || formaPagamentoBlingId;
   const idContaFinEfetivo = item.idContaFinanceiraBling || contaFinanceiraBlingId;
+
+  // Se a forma de pagamento ainda não estiver preenchida, busca do cache pelo banco correspondente
+  if (!idFormaPagEfetivo && empresa.id) {
+    try {
+      const cachedFormas = localStorage.getItem(`bling_formas_pagamento_${empresa.id}`);
+      if (cachedFormas) {
+        const formasList = JSON.parse(cachedFormas);
+        if (Array.isArray(formasList) && formasList.length > 0) {
+          const bancoLower = (bancoEfetivo || '').toLowerCase();
+          const match =
+            formasList.find((f: any) => {
+              const desc = (f.descricao || '').toLowerCase();
+              if (bancoLower === 'itau') return desc.includes('itau') || desc.includes('itaú');
+              if (bancoLower === 'inter') return desc.includes('inter');
+              if (bancoLower === 'bradesco') return desc.includes('bradesco');
+              if (bancoLower === 'cora') return desc.includes('cora');
+              if (bancoLower === 'sicoob') return desc.includes('sicoob');
+              if (bancoLower === 'asaas') return desc.includes('asaas');
+              return Boolean(bancoLower && desc.includes(bancoLower));
+            }) ||
+            formasList.find((f: any) => (f.descricao || '').toLowerCase().includes('boleto')) ||
+            formasList.find((f: any) => f.padrao === 1) ||
+            formasList[0];
+
+          if (match) {
+            idFormaPagEfetivo = match.id;
+          }
+        }
+      }
+    } catch {}
+  }
 
   let baseDate: Date | undefined;
   if (primeiroVenc && /^\d{4}-\d{2}-\d{2}$/.test(primeiroVenc)) {
@@ -621,6 +652,7 @@ export async function emitirNFeItemGrupo(
 
     const resBling = await gravarEsbocoNFeNoBling({
       empresaToken: token,
+      empresaId: empresa.id,
       cliente: {
         id: item.clienteId,
         nome: item.nome,

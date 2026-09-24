@@ -515,6 +515,7 @@ export interface BlingContaFinanceira {
 
 export interface GravarEsbocoBlingParams {
   empresaToken?: string;
+  empresaId?: string;
   cliente: BlingCliente;
   itens: PedidoItemVenda[];
   parcelasCount?: number;
@@ -736,6 +737,40 @@ export async function gravarEsbocoNFeNoBling(
     return `${ano}-${mes}-${dia}`;
   };
 
+  // Auto-resolução da Forma de Pagamento no Bling (para preenchimento automático no Contas a Receber)
+  let idFormaPagamentoEfetiva = idFormaPagamentoBling;
+  if (!idFormaPagamentoEfetiva && empresaToken) {
+    try {
+      const formas = await buscarFormasPagamentoBling(empresaToken, params.empresaId);
+      if (formas && formas.length > 0) {
+        const bancoLower = (params.banco || '').toLowerCase();
+        let encontrada = formas.find((f) => {
+          const desc = (f.descricao || '').toLowerCase();
+          if (bancoLower === 'itau') return desc.includes('itau') || desc.includes('itaú');
+          if (bancoLower === 'inter') return desc.includes('inter');
+          if (bancoLower === 'bradesco') return desc.includes('bradesco');
+          if (bancoLower === 'cora') return desc.includes('cora');
+          if (bancoLower === 'sicoob') return desc.includes('sicoob');
+          if (bancoLower === 'asaas') return desc.includes('asaas');
+          return Boolean(bancoLower && desc.includes(bancoLower));
+        });
+
+        if (!encontrada) {
+          encontrada =
+            formas.find((f) => (f.descricao || '').toLowerCase().includes('boleto')) ||
+            formas.find((f) => f.padrao === 1) ||
+            formas[0];
+        }
+
+        if (encontrada) {
+          idFormaPagamentoEfetiva = encontrada.id;
+        }
+      }
+    } catch (err) {
+      console.warn('[Bling] Não foi possível resolver forma de pagamento automaticamente:', err);
+    }
+  }
+
   const parcelasDescricoes: string[] = [];
 
   let dataCorrente = new Date(dataBase.getFullYear(), dataBase.getMonth(), dataBase.getDate());
@@ -765,8 +800,8 @@ export async function gravarEsbocoNFeNoBling(
       valor: valorParcela,
       observacoes: `Parcela ${i}/${parcelasCount}`,
     };
-    if (idFormaPagamentoBling) {
-      itemParcela.formaPagamento = { id: idFormaPagamentoBling };
+    if (idFormaPagamentoEfetiva) {
+      itemParcela.formaPagamento = { id: idFormaPagamentoEfetiva };
     }
     if (idContaFinanceira) {
       itemParcela.contaContabil = { id: idContaFinanceira };

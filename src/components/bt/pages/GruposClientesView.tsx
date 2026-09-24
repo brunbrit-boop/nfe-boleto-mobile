@@ -45,7 +45,9 @@ import { formatCurrency, gerarDatasEscalonadasSemanais, BANKS } from '../../../u
 import { isCerebroIAConectado } from '../../../services/geminiService';
 import {
   buscarContasFinanceirasBling,
+  buscarFormasPagamentoBling,
   type BlingContaFinanceira,
+  type BlingFormaPagamento,
 } from '../../../services/blingService';
 import {
   obterGruposCacheLocal,
@@ -181,6 +183,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
   const [bancoMassa, setBancoMassa] = useState<BankProvider>(() => (grupoAtivo?.bancoPadrao || bancoAtual || 'itau'));
   const [contaFinanceiraBlingId, setContaFinanceiraBlingId] = useState<number | undefined>(() => grupoAtivo?.idContaFinanceiraBling);
   const [contasFinanceirasBling, setContasFinanceirasBling] = useState<BlingContaFinanceira[]>([]);
+  const [formasPagamentoBling, setFormasPagamentoBling] = useState<BlingFormaPagamento[]>([]);
   const [carregandoContasFinanceiras, setCarregandoContasFinanceiras] = useState<boolean>(false);
   const [isEmitindoLote, setIsEmitindoLote] = useState<boolean>(false);
   const [progressoEmissaoLote, setProgressoEmissaoLote] = useState<{ atual: number; total: number }>({ atual: 0, total: 0 });
@@ -278,18 +281,22 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     setDiretrizesGeraisTemp(obterDiretrizesGeraisEmpresa(empresa.id));
   }, [empresa.id]);
 
-  // Busca Contas Financeiras cadastradas no Bling para roteamento de previsão de caixa
+  // Busca Contas Financeiras e Formas de Pagamento cadastradas no Bling para roteamento de previsão de caixa
   useEffect(() => {
     let cancelado = false;
     const carregarDadosFinanceiros = async () => {
       setCarregandoContasFinanceiras(true);
       try {
-        const contas = await buscarContasFinanceirasBling(empresa.blingAccessToken, empresa.id);
+        const [contas, formas] = await Promise.all([
+          buscarContasFinanceirasBling(empresa.blingAccessToken, empresa.id),
+          buscarFormasPagamentoBling(empresa.blingAccessToken, empresa.id),
+        ]);
         if (!cancelado) {
           setContasFinanceirasBling(contas);
+          setFormasPagamentoBling(formas);
         }
       } catch (err) {
-        console.error('Erro ao buscar contas financeiras do Bling:', err);
+        console.error('Erro ao buscar contas financeiras e formas de pagamento do Bling:', err);
       } finally {
         if (!cancelado) {
           setCarregandoContasFinanceiras(false);
@@ -515,15 +522,54 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     return undefined;
   };
 
+  const encontrarFormaPagamentoPorBanco = (banco?: BankProvider, nomeConta?: string): number | undefined => {
+    if (!formasPagamentoBling || formasPagamentoBling.length === 0) return undefined;
+    const bancoLower = (banco || '').toLowerCase();
+    const nomeLower = (nomeConta || '').toLowerCase();
+
+    // 1. Tenta achar forma com nome do banco (ex: "Itau", "Inter", "Bradesco", etc.)
+    const porBanco = formasPagamentoBling.find((f) => {
+      const desc = (f.descricao || '').toLowerCase();
+      if (bancoLower === 'itau') return desc.includes('itau') || desc.includes('itaú');
+      if (bancoLower === 'inter') return desc.includes('inter');
+      if (bancoLower === 'bradesco') return desc.includes('bradesco');
+      if (bancoLower === 'cora') return desc.includes('cora');
+      if (bancoLower === 'sicoob') return desc.includes('sicoob');
+      if (bancoLower === 'asaas') return desc.includes('asaas');
+      return Boolean(bancoLower && desc.includes(bancoLower));
+    });
+    if (porBanco) return porBanco.id;
+
+    // 2. Tenta achar forma pelo nome da conta
+    if (nomeLower) {
+      const porNomeConta = formasPagamentoBling.find((f) => {
+        const desc = (f.descricao || '').toLowerCase();
+        return desc.includes(nomeLower) || nomeLower.includes(desc);
+      });
+      if (porNomeConta) return porNomeConta.id;
+    }
+
+    // 3. Fallback: Procura forma com 'boleto' ou padrão da loja
+    const porBoleto =
+      formasPagamentoBling.find((f) => (f.descricao || '').toLowerCase().includes('boleto')) ||
+      formasPagamentoBling.find((f) => f.padrao === 1);
+    return porBoleto?.id || formasPagamentoBling[0]?.id;
+  };
+
   const handleRecarregarContasBling = async () => {
     if (!empresa.blingAccessToken) return;
     setCarregandoContasFinanceiras(true);
     try {
       try {
         localStorage.removeItem(`bling_contas_financeiras_${empresa.id}`);
+        localStorage.removeItem(`bling_formas_pagamento_${empresa.id}`);
       } catch {}
-      const contas = await buscarContasFinanceirasBling(empresa.blingAccessToken, empresa.id);
+      const [contas, formas] = await Promise.all([
+        buscarContasFinanceirasBling(empresa.blingAccessToken, empresa.id),
+        buscarFormasPagamentoBling(empresa.blingAccessToken, empresa.id),
+      ]);
       setContasFinanceirasBling(contas);
+      setFormasPagamentoBling(formas);
     } catch (err) {
       console.error('Erro ao recarregar contas do Bling:', err);
     } finally {
@@ -540,15 +586,21 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     if (bancoDetectado) {
       setBancoMassa(bancoDetectado);
     }
+    const formaId = encontrarFormaPagamentoPorBanco(bancoDefinido, contaObj?.descricao);
+    const formaObj = formasPagamentoBling.find((f) => f.id === formaId);
+
     const atualizado: GrupoClientes = {
       ...grupoAtivo,
       idContaFinanceiraBling: novoId,
       nomeContaFinanceiraBling: contaObj?.descricao,
       bancoPadrao: bancoDefinido,
+      idFormaPagamentoBling: formaId,
+      nomeFormaPagamentoBling: formaObj?.descricao,
       clientes: grupoAtivo.clientes.map((c) => ({
         ...c,
         idContaFinanceiraBling: novoId,
         banco: bancoDefinido,
+        idFormaPagamentoBling: formaId,
       })),
     };
     atualizarGrupo(atualizado);
@@ -569,6 +621,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     if (!grupoAtivo) return;
     const contaObj = contasFinanceirasBling.find((c) => c.id === idConta);
     const bancoDetectado = contaObj?.descricao ? detectarBancoPorDescricao(contaObj.descricao) : undefined;
+    const bancoDefinido = bancoDetectado || grupoAtivo.bancoPadrao || bancoAtual;
+    const formaId = encontrarFormaPagamentoPorBanco(bancoDefinido, contaObj?.descricao);
+
     const atualizado: GrupoClientes = {
       ...grupoAtivo,
       clientes: grupoAtivo.clientes.map((c) =>
@@ -577,6 +632,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
               ...c,
               idContaFinanceiraBling: idConta,
               banco: bancoDetectado || c.banco || grupoAtivo.bancoPadrao || bancoAtual,
+              idFormaPagamentoBling: formaId || c.idFormaPagamentoBling,
             }
           : c
       ),
