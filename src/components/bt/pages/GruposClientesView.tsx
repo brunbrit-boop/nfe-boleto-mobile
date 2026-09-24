@@ -27,6 +27,7 @@ import {
   Calendar,
   CalendarDays,
   SlidersHorizontal,
+  Landmark,
 } from 'lucide-react';
 import type {
   EmpresaTenant,
@@ -40,8 +41,9 @@ import type {
   Installment,
 } from '../../../types';
 import type { CatalogoProduto, OfertaGeradaResult } from '../../../utils/salesOptimizer';
-import { formatCurrency, gerarDatasEscalonadasSemanais } from '../../../utils/financeEngine';
+import { formatCurrency, gerarDatasEscalonadasSemanais, BANKS } from '../../../utils/financeEngine';
 import { isCerebroIAConectado } from '../../../services/geminiService';
+import { buscarFormasPagamentoBling, type BlingFormaPagamento } from '../../../services/blingService';
 import {
   obterGruposCacheLocal,
   salvarGruposCacheLocal,
@@ -172,6 +174,11 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
   const [toleranciaMargem, setToleranciaMargem] = useState<number>(() => {
     return grupoAtivo?.margemToleranciaPadrao ? Math.round(grupoAtivo.margemToleranciaPadrao * 100) : 5;
   });
+  // Banco e Carteira no Bling (Previsão de Entrada)
+  const [bancoMassa, setBancoMassa] = useState<BankProvider>(() => (grupoAtivo?.bancoPadrao || bancoAtual || 'itau'));
+  const [formaPagamentoBlingId, setFormaPagamentoBlingId] = useState<number | undefined>(() => grupoAtivo?.idFormaPagamentoBling);
+  const [formasPagamentoBling, setFormasPagamentoBling] = useState<BlingFormaPagamento[]>([]);
+  const [carregandoFormasBling, setCarregandoFormasBling] = useState<boolean>(false);
   const [isEmitindoLote, setIsEmitindoLote] = useState<boolean>(false);
   const [progressoEmissaoLote, setProgressoEmissaoLote] = useState<{ atual: number; total: number }>({ atual: 0, total: 0 });
 
@@ -268,6 +275,30 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     setDiretrizesGeraisTemp(obterDiretrizesGeraisEmpresa(empresa.id));
   }, [empresa.id]);
 
+  // Busca formas de pagamento cadastradas no Bling para roteamento de previsão de caixa
+  useEffect(() => {
+    let cancelado = false;
+    const carregarFormas = async () => {
+      setCarregandoFormasBling(true);
+      try {
+        const formas = await buscarFormasPagamentoBling(empresa.blingAccessToken, empresa.id);
+        if (!cancelado) {
+          setFormasPagamentoBling(formas);
+        }
+      } catch (err) {
+        console.error('Erro ao buscar formas de pagamento do Bling:', err);
+      } finally {
+        if (!cancelado) {
+          setCarregandoFormasBling(false);
+        }
+      }
+    };
+    carregarFormas();
+    return () => {
+      cancelado = true;
+    };
+  }, [empresa.id, empresa.blingAccessToken]);
+
   // Atualiza controles em massa quando o grupo ativo muda
   useEffect(() => {
     if (grupoAtivo) {
@@ -293,6 +324,8 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       if (grupoAtivo.margemToleranciaPadrao) {
         setToleranciaMargem(Math.round(grupoAtivo.margemToleranciaPadrao * 100));
       }
+      setBancoMassa(grupoAtivo.bancoPadrao || bancoAtual || 'itau');
+      setFormaPagamentoBlingId(grupoAtivo.idFormaPagamentoBling);
       setIsEditandoNomeGrupo(false);
       setNovoNomeGrupoTemp(grupoAtivo.nome || '');
       setDiretrizesGrupoTemp(grupoAtivo.diretrizesGrupo || '');
@@ -302,7 +335,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         setMetaTotalGrupo(soma);
       }
     }
-  }, [grupoAtivoId, grupoAtivo?.nome, grupoAtivo?.diretrizesGrupo]);
+  }, [grupoAtivoId, grupoAtivo?.nome, grupoAtivo?.diretrizesGrupo, grupoAtivo?.bancoPadrao, grupoAtivo?.idFormaPagamentoBling, bancoAtual]);
 
   // Distribuição de Meta Total Escalonada com Trava: Maior <= Menor * 1.5
   const handleDistribuirMetaEscalonada = () => {
@@ -462,6 +495,59 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       ...grupoAtivo,
       clientes: grupoAtivo.clientes.map((c) =>
         c.clienteId === clienteId ? { ...c, intervaloDias: intervalo } : c
+      ),
+    };
+    atualizarGrupo(atualizado);
+  };
+
+  // Alterar Banco e Forma de Pagamento no Bling em Massa para o Grupo
+  const handleAlterarBancoMassa = (novoBanco: BankProvider) => {
+    setBancoMassa(novoBanco);
+    if (!grupoAtivo) return;
+    const atualizado: GrupoClientes = {
+      ...grupoAtivo,
+      bancoPadrao: novoBanco,
+      clientes: grupoAtivo.clientes.map((c) => ({
+        ...c,
+        banco: novoBanco,
+      })),
+    };
+    atualizarGrupo(atualizado);
+  };
+
+  const handleAlterarFormaPagamentoMassa = (novoId?: number) => {
+    setFormaPagamentoBlingId(novoId);
+    if (!grupoAtivo) return;
+    const formaObj = formasPagamentoBling.find((f) => f.id === novoId);
+    const atualizado: GrupoClientes = {
+      ...grupoAtivo,
+      idFormaPagamentoBling: novoId,
+      nomeFormaPagamentoBling: formaObj?.descricao,
+      clientes: grupoAtivo.clientes.map((c) => ({
+        ...c,
+        idFormaPagamentoBling: novoId,
+      })),
+    };
+    atualizarGrupo(atualizado);
+  };
+
+  const handleUpdateItemBanco = (clienteId: number, banco: BankProvider) => {
+    if (!grupoAtivo) return;
+    const atualizado: GrupoClientes = {
+      ...grupoAtivo,
+      clientes: grupoAtivo.clientes.map((c) =>
+        c.clienteId === clienteId ? { ...c, banco } : c
+      ),
+    };
+    atualizarGrupo(atualizado);
+  };
+
+  const handleUpdateItemFormaPagamentoBling = (clienteId: number, idForma?: number) => {
+    if (!grupoAtivo) return;
+    const atualizado: GrupoClientes = {
+      ...grupoAtivo,
+      clientes: grupoAtivo.clientes.map((c) =>
+        c.clienteId === clienteId ? { ...c, idFormaPagamentoBling: idForma } : c
       ),
     };
     atualizarGrupo(atualizado);
@@ -777,7 +863,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         setItemEmitindoNFeId(item.clienteId);
 
         try {
-          const res = await emitirNFeItemGrupo(item, empresa, company, bancoAtual, grupoAtivo?.nome);
+          const bancoParaEmitir = item.banco || grupoAtivo?.bancoPadrao || bancoAtual;
+          const formaPagId = item.idFormaPagamentoBling || grupoAtivo?.idFormaPagamentoBling;
+          const res = await emitirNFeItemGrupo(item, empresa, company, bancoParaEmitir, grupoAtivo?.nome, formaPagId);
           if (res.sucesso && res.nfe) {
             sucessoCount++;
             grupoEmProcessamento = {
@@ -946,7 +1034,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     }, 25000);
 
     try {
-      const res = await emitirNFeItemGrupo(item, empresa, company, bancoAtual, grupoAtivo?.nome);
+      const bancoParaEmitir = item.banco || grupoAtivo?.bancoPadrao || bancoAtual;
+      const formaPagId = item.idFormaPagamentoBling || grupoAtivo?.idFormaPagamentoBling;
+      const res = await emitirNFeItemGrupo(item, empresa, company, bancoParaEmitir, grupoAtivo?.nome, formaPagId);
       if (res.sucesso && res.nfe) {
         // Atualiza o item com a NF-e emitida e remove eventuais erros anteriores
         if (grupoAtivo) {
@@ -1012,7 +1102,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         setItemEmitindoNFeId(item.clienteId);
 
         try {
-          const res = await emitirNFeItemGrupo(item, empresa, company, bancoAtual, grupoAtivo?.nome);
+          const bancoParaEmitir = item.banco || grupoAtivo?.bancoPadrao || bancoAtual;
+          const formaPagId = item.idFormaPagamentoBling || grupoAtivo?.idFormaPagamentoBling;
+          const res = await emitirNFeItemGrupo(item, empresa, company, bancoParaEmitir, grupoAtivo?.nome, formaPagId);
           if (res.sucesso && res.nfe) {
             grupoEmProcessamento = {
               ...grupoEmProcessamento,
@@ -2333,6 +2425,84 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
             </div>
           )}
         </div>
+
+        {/* Bloco de Banco Emissor & Carteira Bling (Previsão de Entrada) */}
+        <div className="bg-slate-800/80 p-3.5 sm:p-4 rounded-xl border border-slate-700/60 flex flex-col gap-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-sky-500/10 text-sky-400 flex items-center justify-center shrink-0 border border-sky-500/20">
+                <Landmark className="w-4 h-4" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black text-white">Banco e Previsão Bling</span>
+                  <span className="text-[10px] px-2 py-0.2 rounded-full font-bold bg-sky-500/15 text-sky-400">
+                    Contas a Receber
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Previsão de entrada na conta bancária certa do ERP.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                handleAlterarBancoMassa(bancoMassa);
+                handleAlterarFormaPagamentoMassa(formaPagamentoBlingId);
+              }}
+              className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-sky-500 hover:bg-sky-400 text-slate-950 transition active:scale-95 cursor-pointer shadow-sm flex items-center gap-1.5 self-start md:self-auto"
+              title="Aplica o banco e forma de pagamento do Bling para todos os clientes deste grupo"
+            >
+              <Check className="w-3.5 h-3.5 stroke-[3]" />
+              <span>Aplicar Banco a Todos</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            {/* Banco Emissor */}
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
+                Banco Emissor
+              </span>
+              <select
+                value={bancoMassa}
+                onChange={(e) => handleAlterarBancoMassa(e.target.value as BankProvider)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs font-bold text-white focus:outline-none focus:border-sky-400 cursor-pointer"
+              >
+                {Object.entries(BANKS).map(([k, b]) => (
+                  <option key={k} value={k}>
+                    {b.name} ({b.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Forma de Pagamento Bling */}
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
+                Forma de Pagamento Bling
+              </span>
+              <select
+                value={formaPagamentoBlingId ?? ''}
+                onChange={(e) => {
+                  const val = e.target.value ? Number(e.target.value) : undefined;
+                  handleAlterarFormaPagamentoMassa(val);
+                }}
+                disabled={carregandoFormasBling}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs font-bold text-white focus:outline-none focus:border-sky-400 cursor-pointer disabled:opacity-50"
+              >
+                <option value="">Padrão da Loja</option>
+                {formasPagamentoBling.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.descricao} {f.codigoFiscal ? `(Cód: ${f.codigoFiscal})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Tabela Interativa de Produção */}
@@ -2738,6 +2908,45 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                             }
                             return null;
                           })()}
+
+                          {/* Linha 4: Banco / Previsão Bling */}
+                          <div className="pt-1 mt-1 border-t border-slate-200 dark:border-slate-800/80 flex items-center justify-between gap-1 text-[10px]">
+                            <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400 min-w-0">
+                              <Landmark className="w-3 h-3 text-sky-500 shrink-0" />
+                              <select
+                                value={item.banco || grupoAtivo?.bancoPadrao || bancoAtual}
+                                onChange={(e) => handleUpdateItemBanco(item.clienteId, e.target.value as BankProvider)}
+                                className="bg-transparent border-0 text-[10px] font-bold text-slate-700 dark:text-slate-300 focus:outline-none cursor-pointer max-w-[90px] truncate"
+                                title="Banco para emissão do boleto"
+                              >
+                                {Object.entries(BANKS).map(([k, b]) => (
+                                  <option key={k} value={k} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">
+                                    {b.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div className="shrink-0">
+                              <select
+                                value={item.idFormaPagamentoBling ?? grupoAtivo?.idFormaPagamentoBling ?? ''}
+                                onChange={(e) => {
+                                  const val = e.target.value ? Number(e.target.value) : undefined;
+                                  handleUpdateItemFormaPagamentoBling(item.clienteId, val);
+                                }}
+                                className="bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20 rounded text-[9px] font-semibold px-1 py-0.5 max-w-[105px] truncate focus:outline-none cursor-pointer"
+                                title="Forma de pagamento no Bling (Previsão de Entrada)"
+                              >
+                                <option value="" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">
+                                  Padrão Bling
+                                </option>
+                                {formasPagamentoBling.map((f) => (
+                                  <option key={f.id} value={f.id} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">
+                                    {f.descricao}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
                         </div>
                       </td>
 

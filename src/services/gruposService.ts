@@ -257,7 +257,10 @@ export function criarNovoGrupo(
   nome: string,
   clientesIniciais: BlingCliente[] = [],
   valorPadrao: number = 5000,
-  filtroPadrao: string = ''
+  filtroPadrao: string = '',
+  bancoPadrao: BankProvider = 'itau',
+  idFormaPagamentoBling?: number,
+  nomeFormaPagamentoBling?: string
 ): GrupoClientes {
   const agora = new Date().toISOString();
   const grupoId = `grupo_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -279,6 +282,8 @@ export function criarNovoGrupo(
     parcelasCount: 1,
     primeiroVencimento: primeiroVencPadrao,
     intervaloDias: 30,
+    banco: bancoPadrao,
+    idFormaPagamentoBling: idFormaPagamentoBling,
     status: 'pendente',
   }));
 
@@ -291,6 +296,9 @@ export function criarNovoGrupo(
     parcelasPadrao: 1,
     primeiroVencimentoPadrao: primeiroVencPadrao,
     intervaloDiasPadrao: 30,
+    bancoPadrao,
+    idFormaPagamentoBling,
+    nomeFormaPagamentoBling,
     clientes: itensClientes,
     criadoEm: agora,
     atualizadoEm: agora,
@@ -525,7 +533,8 @@ export async function emitirNFeItemGrupo(
   empresa: EmpresaTenant,
   company: CompanyProfile,
   bancoAtual: BankProvider,
-  nomeGrupo?: string
+  nomeGrupo?: string,
+  formaPagamentoBlingId?: number
 ): Promise<{ sucesso: boolean; nfe?: NFeData; idNotaBling?: number | string; erro?: string }> {
   if (!item.ofertaGerada || !item.ofertaGerada.itens || item.ofertaGerada.itens.length === 0) {
     return { sucesso: false, erro: 'Este cliente ainda não possui orçamento gerado pela IA.' };
@@ -538,6 +547,8 @@ export async function emitirNFeItemGrupo(
   const intervaloDias = Math.max(1, item.intervaloDias || 30);
   const primeiroVenc = item.primeiroVencimento; // YYYY-MM-DD
   const diasSemanaPermitidos = item.diasSemana;
+  const bancoEfetivo = item.banco || bancoAtual;
+  const idFormaPagEfetivo = item.idFormaPagamentoBling || formaPagamentoBlingId;
 
   let baseDate: Date | undefined;
   if (primeiroVenc && /^\d{4}-\d{2}-\d{2}$/.test(primeiroVenc)) {
@@ -548,7 +559,7 @@ export async function emitirNFeItemGrupo(
   const parcelasCalculadas = calcularDivisaoParcelas(
     valorTotal,
     numParcelas,
-    bancoAtual,
+    bancoEfetivo,
     intervaloDias,
     baseDate,
     diasSemanaPermitidos
@@ -582,7 +593,7 @@ export async function emitirNFeItemGrupo(
     valorTotalFormatado: formatCurrency(valorTotal),
     quantidadeParcelas: numParcelas,
     parcelas: parcelasCalculadas,
-    banco: bancoAtual,
+    banco: bancoEfetivo,
     informacoesComplementares: textoInformacoesComplementares,
   };
 
@@ -615,7 +626,8 @@ export async function emitirNFeItemGrupo(
       } as any,
       itens: item.ofertaGerada.itens,
       parcelasCount: numParcelas,
-      banco: bancoAtual,
+      banco: bancoEfetivo,
+      idFormaPagamentoBling: idFormaPagEfetivo,
       intervaloDias: intervaloDias,
       primeiroVencimento: primeiroVenc,
       diasSemanaPermitidos: diasSemanaPermitidos,

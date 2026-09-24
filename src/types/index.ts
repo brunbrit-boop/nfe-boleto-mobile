@@ -327,6 +327,8 @@ export interface GrupoClienteItem {
   modoEscalaSemanal?: 'continuo' | 'mesma_semana';
   itensMin?: number;
   itensMax?: number;
+  banco?: BankProvider;
+  idFormaPagamentoBling?: number;
   status: 'pendente' | 'gerando' | 'gerado' | 'erro';
   ofertaGerada?: any; // OfertaGeradaResult
   nfeEmitida?: NFeData;
@@ -354,8 +356,12 @@ export interface GrupoClientes {
   margemToleranciaPadrao?: number; // Tolerância simétrica percentual (ex: 0.05 para ±5%)
   grupoProdutoPadraoId?: string; // Vinculo padrao para todos do grupo
   diretrizesGrupo?: string; // Diretrizes especificas comerciais deste grupo para a IA
+  bancoPadrao?: BankProvider; // Banco emissor vinculado a este grupo
+  idFormaPagamentoBling?: number; // ID oficial da forma de pagamento no Bling para previsão de entrada
+  nomeFormaPagamentoBling?: string; // Nome da forma de pagamento no Bling
   clientes: GrupoClienteItem[];
   criadoEm: string;
   atualizadoEm: string;
 }
+
 

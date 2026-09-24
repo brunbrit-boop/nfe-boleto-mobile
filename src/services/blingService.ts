@@ -496,12 +496,23 @@ export async function callBlingApi(
   return directData;
 }
 
+export interface BlingFormaPagamento {
+  id: number;
+  descricao: string;
+  tipoPagamento?: number;
+  codigoFiscal?: number;
+  padrao?: number;
+  situacao?: number;
+  destino?: number;
+}
+
 export interface GravarEsbocoBlingParams {
   empresaToken?: string;
   cliente: BlingCliente;
   itens: PedidoItemVenda[];
   parcelasCount?: number;
   banco?: BankProvider;
+  idFormaPagamentoBling?: number;
   primeiroVencimento?: string;
   intervaloDias?: number;
   diasSemanaPermitidos?: number[];
@@ -519,6 +530,44 @@ export interface ResultadoEsbocoBling {
 }
 
 /**
+ * Busca as Formas de Pagamento ativas configuradas no Bling ERP
+ */
+export async function buscarFormasPagamentoBling(
+  token?: string,
+  empresaId?: string
+): Promise<BlingFormaPagamento[]> {
+  try {
+    const res = await callBlingApi('/formas-pagamentos?situacao=1', {
+      method: 'GET',
+      customToken: token,
+      empresaId,
+    });
+    if (res?.data && Array.isArray(res.data)) {
+      if (empresaId) {
+        try {
+          localStorage.setItem(`bling_formas_pagamento_${empresaId}`, JSON.stringify(res.data));
+        } catch {}
+      }
+      return res.data;
+    }
+  } catch (err) {
+    console.warn('[Bling] Não foi possível carregar formas de pagamento da API:', err);
+  }
+
+  // Fallback para cache local se disponível
+  if (empresaId) {
+    try {
+      const cached = localStorage.getItem(`bling_formas_pagamento_${empresaId}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+  }
+  return [];
+}
+
+/**
  * Grava ou Atualiza um Esboço de Nota Fiscal no Bling (Vendas > Notas Fiscais / Notas de Saída)
  * Se idNotaBlingExistente for informado, executa PUT /nfe/{id} para atualizar em vez de duplicar.
  * Cria o rascunho com status 'Pendente / Em digitação', sem transmissão imediata à SEFAZ.
@@ -531,6 +580,7 @@ export async function gravarEsbocoNFeNoBling(
     cliente,
     itens,
     parcelasCount = 1,
+    idFormaPagamentoBling,
     primeiroVencimento,
     intervaloDias = 15,
     diasSemanaPermitidos,
@@ -645,11 +695,15 @@ export async function gravarEsbocoNFeNoBling(
     const valorParcela = i === parcelasCount ? Number((valorTotal - acumulado).toFixed(2)) : valorParcelaBase;
     acumulado += valorParcela;
 
-    parcelasPayload.push({
+    const itemParcela: any = {
       data: dataVenc,
       valor: valorParcela,
       observacoes: `Parcela ${i}/${parcelasCount}`,
-    });
+    };
+    if (idFormaPagamentoBling) {
+      itemParcela.formaPagamento = { id: idFormaPagamentoBling };
+    }
+    parcelasPayload.push(itemParcela);
 
     const valorFormatado = valorParcela.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
     parcelasDescricoes.push(`Parcela ${i}/${parcelasCount}: ${dataVencBr} (${valorFormatado})`);
