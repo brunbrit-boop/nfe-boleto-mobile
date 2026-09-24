@@ -546,17 +546,51 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     atualizarGrupo(atualizado);
   };
 
+  const detectarBancoPorDescricao = (descricao: string): BankProvider | undefined => {
+    const descLower = descricao.toLowerCase();
+    if (descLower.includes('itau') || descLower.includes('itaú')) return 'itau';
+    if (descLower.includes('inter')) return 'inter';
+    if (descLower.includes('bradesco')) return 'bradesco';
+    if (descLower.includes('cora')) return 'cora';
+    if (descLower.includes('sicoob')) return 'sicoob';
+    if (descLower.includes('asaas')) return 'asaas';
+    return undefined;
+  };
+
+  const handleRecarregarContasBling = async () => {
+    if (!empresa.blingAccessToken) return;
+    setCarregandoContasFinanceiras(true);
+    try {
+      try {
+        localStorage.removeItem(`bling_contas_financeiras_${empresa.id}`);
+      } catch {}
+      const contas = await buscarContasFinanceirasBling(empresa.blingAccessToken, empresa.id);
+      setContasFinanceirasBling(contas);
+    } catch (err) {
+      console.error('Erro ao recarregar contas do Bling:', err);
+    } finally {
+      setCarregandoContasFinanceiras(false);
+    }
+  };
+
   const handleAlterarContaFinanceiraMassa = (novoId?: number) => {
     setContaFinanceiraBlingId(novoId);
     if (!grupoAtivo) return;
     const contaObj = contasFinanceirasBling.find((c) => c.id === novoId);
+    const bancoDetectado = contaObj?.descricao ? detectarBancoPorDescricao(contaObj.descricao) : undefined;
+    const bancoDefinido = bancoDetectado || bancoMassa;
+    if (bancoDetectado) {
+      setBancoMassa(bancoDetectado);
+    }
     const atualizado: GrupoClientes = {
       ...grupoAtivo,
       idContaFinanceiraBling: novoId,
       nomeContaFinanceiraBling: contaObj?.descricao,
+      bancoPadrao: bancoDefinido,
       clientes: grupoAtivo.clientes.map((c) => ({
         ...c,
         idContaFinanceiraBling: novoId,
+        banco: bancoDefinido,
       })),
     };
     atualizarGrupo(atualizado);
@@ -575,10 +609,18 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
 
   const handleUpdateItemContaFinanceira = (clienteId: number, idConta?: number) => {
     if (!grupoAtivo) return;
+    const contaObj = contasFinanceirasBling.find((c) => c.id === idConta);
+    const bancoDetectado = contaObj?.descricao ? detectarBancoPorDescricao(contaObj.descricao) : undefined;
     const atualizado: GrupoClientes = {
       ...grupoAtivo,
       clientes: grupoAtivo.clientes.map((c) =>
-        c.clienteId === clienteId ? { ...c, idContaFinanceiraBling: idConta } : c
+        c.clienteId === clienteId
+          ? {
+              ...c,
+              idContaFinanceiraBling: idConta,
+              banco: bancoDetectado || c.banco || grupoAtivo.bancoPadrao || bancoAtual,
+            }
+          : c
       ),
     };
     atualizarGrupo(atualizado);
@@ -2473,6 +2515,15 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                   <span className="text-[10px] px-2 py-0.2 rounded-full font-bold bg-sky-500/15 text-sky-400">
                     Previsão Bling
                   </span>
+                  <button
+                    type="button"
+                    onClick={handleRecarregarContasBling}
+                    disabled={carregandoContasFinanceiras}
+                    title="Recarregar contas do Bling agora"
+                    className="p-1 rounded-md text-sky-400 hover:text-white hover:bg-slate-700/60 transition cursor-pointer disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${carregandoContasFinanceiras ? 'animate-spin' : ''}`} />
+                  </button>
                 </div>
                 <p className="text-[11px] text-slate-400">
                   Previsão de entrada na conta financeira cadastrada no Bling.
