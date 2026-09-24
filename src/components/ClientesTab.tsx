@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Phone, MessageSquare, Building2, User, MapPin, Sparkles, RefreshCw, X } from 'lucide-react';
+import { Search, Phone, MessageSquare, Building2, User, MapPin, Sparkles, RefreshCw, X, Copy, Check } from 'lucide-react';
 import type { BlingCliente } from '../types';
 
 interface ClientesTabProps {
@@ -20,6 +20,34 @@ export const ClientesTab: React.FC<ClientesTabProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [filterTipo, setFilterTipo] = useState<'todos' | 'J' | 'F'>('todos');
   const [selectedCliente, setSelectedCliente] = useState<BlingCliente | null>(null);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const handleCopy = (text?: string, key?: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    if (key) {
+      setCopiedField(key);
+      setTimeout(() => setCopiedField((curr) => (curr === key ? null : curr)), 1800);
+    }
+  };
+
+  const renderCopyBtn = (text?: string, key?: string, title?: string) => {
+    if (!text) return null;
+    const isCopied = copiedField === key;
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          handleCopy(text, key);
+        }}
+        className="p-1 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition cursor-pointer shrink-0"
+        title={isCopied ? 'Copiado!' : (title || 'Copiar')}
+      >
+        {isCopied ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+      </button>
+    );
+  };
 
   // Filtragem dos clientes do Bling
   const clientesFiltrados = clientes.filter((c) => {
@@ -243,43 +271,91 @@ export const ClientesTab: React.FC<ClientesTabProps> = ({
             </div>
 
             <div className="p-4 space-y-3 text-xs">
-              <div>
-                <span className="text-[10px] text-slate-400 uppercase font-bold block">Razão Social / Nome</span>
-                <span className="text-sm font-bold text-slate-900 block">{selectedCliente.nome}</span>
-                {selectedCliente.fantasia && (
-                  <span className="text-xs text-slate-500 font-medium">Nome Fantasia: {selectedCliente.fantasia}</span>
-                )}
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Razão Social / Nome</span>
+                  <span className="text-sm font-bold text-slate-900 block select-all">{selectedCliente.nome}</span>
+                  {selectedCliente.fantasia && (
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <span className="text-xs text-slate-500 font-medium select-all">
+                        Fantasia: {selectedCliente.fantasia}
+                      </span>
+                      {renderCopyBtn(selectedCliente.fantasia, 'tab-fantasia', 'Copiar nome fantasia')}
+                    </div>
+                  )}
+                </div>
+                {renderCopyBtn(selectedCliente.nome, 'tab-nome', 'Copiar razão social')}
               </div>
 
               <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-200">
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">CPF / CNPJ</span>
-                  <span className="font-mono font-bold text-slate-800">{selectedCliente.numeroDocumento}</span>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block">CPF / CNPJ</span>
+                    <span className="font-mono font-bold text-slate-800 select-all">{selectedCliente.numeroDocumento}</span>
+                  </div>
+                  {renderCopyBtn(selectedCliente.numeroDocumento, 'tab-doc', 'Copiar CPF/CNPJ')}
                 </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Inscrição Estadual</span>
-                  <span className="font-mono text-slate-800">{selectedCliente.ie || 'ISENTO'}</span>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block">Inscrição Estadual</span>
+                    <span className="font-mono text-slate-800 select-all">{selectedCliente.ie || 'ISENTO'}</span>
+                  </div>
+                  {selectedCliente.ie && renderCopyBtn(selectedCliente.ie, 'tab-ie', 'Copiar Inscrição Estadual')}
                 </div>
               </div>
 
-              <div>
-                <span className="text-[10px] text-slate-400 uppercase font-bold block">Endereço Completo</span>
-                <p className="text-slate-700">
-                  {selectedCliente.endereco?.geral?.endereco}, {selectedCliente.endereco?.geral?.numero}
-                  {selectedCliente.endereco?.geral?.bairro && ` - ${selectedCliente.endereco.geral.bairro}`}
-                  <br />
-                  {selectedCliente.endereco?.geral?.municipio} - {selectedCliente.endereco?.geral?.uf} • CEP: {selectedCliente.endereco?.geral?.cep}
-                </p>
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Endereço Completo</span>
+                  <p className="text-slate-700 leading-relaxed select-all">
+                    {[
+                      selectedCliente.endereco?.geral?.endereco,
+                      selectedCliente.endereco?.geral?.numero ? `Nº ${selectedCliente.endereco.geral.numero}` : '',
+                      selectedCliente.endereco?.geral?.bairro ? `Bairro ${selectedCliente.endereco.geral.bairro}` : '',
+                    ].filter(Boolean).join(', ')}
+                    <br />
+                    {[
+                      selectedCliente.endereco?.geral?.municipio,
+                      selectedCliente.endereco?.geral?.uf,
+                      selectedCliente.endereco?.geral?.cep ? `CEP: ${selectedCliente.endereco.geral.cep}` : '',
+                    ].filter(Boolean).join(' - ')}
+                  </p>
+                </div>
+                {renderCopyBtn(
+                  [
+                    selectedCliente.endereco?.geral?.endereco,
+                    selectedCliente.endereco?.geral?.numero ? `Nº ${selectedCliente.endereco.geral.numero}` : '',
+                    selectedCliente.endereco?.geral?.bairro ? `Bairro ${selectedCliente.endereco.geral.bairro}` : '',
+                    selectedCliente.endereco?.geral?.municipio,
+                    selectedCliente.endereco?.geral?.uf,
+                    selectedCliente.endereco?.geral?.cep ? `CEP: ${selectedCliente.endereco.geral.cep}` : '',
+                  ].filter(Boolean).join(', '),
+                  'tab-end',
+                  'Copiar endereço completo'
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">E-mail</span>
-                  <span className="text-slate-700 truncate block">{selectedCliente.email || 'Não informado'}</span>
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block">E-mail</span>
+                    <span className="text-slate-700 truncate block select-all">{selectedCliente.email || 'Não informado'}</span>
+                  </div>
+                  {selectedCliente.email && renderCopyBtn(selectedCliente.email, 'tab-email', 'Copiar e-mail')}
                 </div>
-                <div>
-                  <span className="text-[10px] text-slate-400 uppercase font-bold block">Telefone</span>
-                  <span className="text-slate-700">{selectedCliente.celular || selectedCliente.telefone || 'Não informado'}</span>
+                <div className="flex items-center justify-between">
+                  <div className="min-w-0">
+                    <span className="text-[10px] text-slate-400 uppercase font-bold block">Telefone</span>
+                    <span className="text-slate-700 select-all block truncate">
+                      {selectedCliente.celular || selectedCliente.telefone || 'Não informado'}
+                    </span>
+                  </div>
+                  {(selectedCliente.celular || selectedCliente.telefone) &&
+                    renderCopyBtn(
+                      selectedCliente.celular || selectedCliente.telefone,
+                      'tab-tel',
+                      'Copiar telefone'
+                    )}
                 </div>
               </div>
             </div>

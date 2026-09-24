@@ -29,6 +29,7 @@ import {
   ChevronDown,
   ChevronUp,
   AlertCircle,
+  Phone,
 } from 'lucide-react';
 import {
   consultarCnpjReceita,
@@ -62,6 +63,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   const [filterStatus, setFilterStatus] = useState<'todos' | 'ativo' | 'com_debito'>('todos');
   const [copiedDocId, setCopiedDocId] = useState<number | null>(null);
   const [selectedClientModal, setSelectedClientModal] = useState<BlingCliente | null>(null);
+  const [copiedModalField, setCopiedModalField] = useState<string | null>(null);
 
   // Seleção e Consulta em Lote
   const [selectedClientIds, setSelectedClientIds] = useState<Set<number>>(new Set());
@@ -174,6 +176,40 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     navigator.clipboard.writeText(doc);
     setCopiedDocId(clientId);
     setTimeout(() => setCopiedDocId(null), 1800);
+  };
+
+  const handleCopyModalField = (text?: string, fieldKey?: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!text) return;
+    navigator.clipboard.writeText(String(text).trim());
+    if (fieldKey) {
+      setCopiedModalField(fieldKey);
+      setTimeout(() => {
+        setCopiedModalField((curr) => (curr === fieldKey ? null : curr));
+      }, 1800);
+    }
+  };
+
+  const renderCopyBtn = (text?: string, fieldKey?: string, title?: string, className?: string) => {
+    if (!text) return null;
+    const isCopied = copiedModalField === fieldKey;
+    return (
+      <button
+        type="button"
+        onClick={(e) => handleCopyModalField(text, fieldKey, e)}
+        className={
+          className ||
+          'p-1.5 rounded-lg text-gray-400 hover:text-emerald-500 hover:bg-emerald-500/10 dark:hover:text-[#11d493] dark:hover:bg-emerald-950/40 transition cursor-pointer shrink-0'
+        }
+        title={isCopied ? 'Copiado!' : (title || 'Copiar')}
+      >
+        {isCopied ? (
+          <Check className="w-3.5 h-3.5 text-[#11d493]" />
+        ) : (
+          <Copy className="w-3.5 h-3.5" />
+        )}
+      </button>
+    );
   };
 
   const handleWhatsApp = (e: React.MouseEvent, tel?: string) => {
@@ -1089,12 +1125,26 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                       </span>
                     )}
                   </div>
-                  <h3 className="text-base sm:text-lg font-black text-gray-900 dark:text-white truncate mt-1">
-                    {activeClientInModal.fantasia || activeClientInModal.nome}
-                  </h3>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 font-medium truncate">
-                    {activeClientInModal.nome}
-                  </p>
+                  <div className="flex items-center gap-1.5 mt-1">
+                    <h3 className="text-base sm:text-lg font-black text-gray-900 dark:text-white truncate">
+                      {activeClientInModal.fantasia || activeClientInModal.nome}
+                    </h3>
+                    {renderCopyBtn(
+                      activeClientInModal.fantasia || activeClientInModal.nome,
+                      'modal-header-fantasia',
+                      'Copiar nome fantasia'
+                    )}
+                  </div>
+                  {activeClientInModal.nome && (
+                    <div className="flex items-center gap-1">
+                      <p className="text-xs text-gray-500 dark:text-gray-400 font-medium truncate">
+                        {activeClientInModal.nome}
+                      </p>
+                      {activeClientInModal.fantasia && activeClientInModal.fantasia !== activeClientInModal.nome &&
+                        renderCopyBtn(activeClientInModal.nome, 'modal-header-nome', 'Copiar razão social')
+                      }
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1113,21 +1163,16 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                   <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
                     CNPJ / Documento
                   </span>
-                  <span className="font-mono font-black text-sm text-gray-900 dark:text-white">
+                  <span className="font-mono font-black text-sm text-gray-900 dark:text-white select-all">
                     {formatarCNPJ(activeClientInModal.numeroDocumento || '')}
                   </span>
                 </div>
-                <button
-                  onClick={(e) => handleCopyDoc(e, activeClientInModal.id, activeClientInModal.numeroDocumento)}
-                  className="p-2 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200 dark:border-gray-700 hover:border-[#11d493] text-gray-600 dark:text-gray-300 transition cursor-pointer"
-                  title="Copiar CNPJ"
-                >
-                  {copiedDocId === activeClientInModal.id ? (
-                    <Check className="w-4 h-4 text-[#11d493]" />
-                  ) : (
-                    <Copy className="w-4 h-4" />
-                  )}
-                </button>
+                {renderCopyBtn(
+                  activeClientInModal.numeroDocumento,
+                  'modal-cnpj',
+                  'Copiar CNPJ',
+                  'p-2 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200 dark:border-gray-700 hover:border-[#11d493] text-gray-600 dark:text-gray-300 transition cursor-pointer'
+                )}
               </div>
 
               <div className="p-3 rounded-2xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/70 dark:border-gray-700/60 flex items-center justify-between">
@@ -1135,76 +1180,135 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                   <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
                     Inscrição Estadual (Sintegra)
                   </span>
-                  <span className="font-mono font-bold text-xs text-gray-800 dark:text-gray-200">
+                  <span className="font-mono font-bold text-xs text-gray-800 dark:text-gray-200 select-all">
                     {activeClientInModal.ie || 'Não informada'}
                   </span>
                 </div>
-                <a
-                  href="http://www.sintegra.gov.br/"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200 dark:border-gray-700 hover:border-[#11d493] text-[11px] font-bold text-[#11d493] transition cursor-pointer"
-                  title="Consultar Sintegra Estadual"
-                >
-                  <Globe className="w-3.5 h-3.5" />
-                  <span>Sintegra</span>
-                </a>
+                <div className="flex items-center gap-1.5">
+                  {activeClientInModal.ie &&
+                    renderCopyBtn(
+                      activeClientInModal.ie,
+                      'modal-ie',
+                      'Copiar Inscrição Estadual',
+                      'p-2 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200 dark:border-gray-700 hover:border-[#11d493] text-gray-600 dark:text-gray-300 transition cursor-pointer'
+                    )}
+                  <a
+                    href="http://www.sintegra.gov.br/"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200 dark:border-gray-700 hover:border-[#11d493] text-[11px] font-bold text-[#11d493] transition cursor-pointer"
+                    title="Consultar Sintegra Estadual"
+                  >
+                    <Globe className="w-3.5 h-3.5" />
+                    <span>Sintegra</span>
+                  </a>
+                </div>
               </div>
             </div>
 
             {/* Quadro Cadastral Completo */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
-              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block flex items-center gap-1">
-                  <Calendar className="w-3 h-3 text-gray-400" /> Abertura
-                </span>
-                <span className="font-bold text-gray-800 dark:text-gray-200">
-                  {formatarDataBr(activeClientInModal.dataAbertura)}
-                </span>
+              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                      <Calendar className="w-3 h-3 text-gray-400" /> Abertura
+                    </span>
+                    {activeClientInModal.dataAbertura &&
+                      renderCopyBtn(
+                        formatarDataBr(activeClientInModal.dataAbertura),
+                        'modal-abertura',
+                        'Copiar data de abertura'
+                      )}
+                  </div>
+                  <span className="font-bold text-gray-800 dark:text-gray-200 select-all block mt-0.5">
+                    {formatarDataBr(activeClientInModal.dataAbertura)}
+                  </span>
+                </div>
               </div>
 
-              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block flex items-center gap-1">
-                  <Briefcase className="w-3 h-3 text-gray-400" /> Porte
-                </span>
-                <span className="font-bold text-gray-800 dark:text-gray-200 truncate block">
-                  {activeClientInModal.porte || 'Demais'}
-                </span>
+              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                      <Briefcase className="w-3 h-3 text-gray-400" /> Porte
+                    </span>
+                    {activeClientInModal.porte &&
+                      renderCopyBtn(
+                        activeClientInModal.porte,
+                        'modal-porte',
+                        'Copiar porte'
+                      )}
+                  </div>
+                  <span className="font-bold text-gray-800 dark:text-gray-200 truncate block mt-0.5 select-all">
+                    {activeClientInModal.porte || 'Demais'}
+                  </span>
+                </div>
               </div>
 
-              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block flex items-center gap-1">
-                  <DollarSign className="w-3 h-3 text-gray-400" /> Capital Social
-                </span>
-                <span className="font-bold text-gray-800 dark:text-gray-200">
-                  {typeof activeClientInModal.capitalSocial === 'number'
-                    ? activeClientInModal.capitalSocial.toLocaleString('pt-BR', {
-                        style: 'currency',
-                        currency: 'BRL',
-                      })
-                    : '-'}
-                </span>
+              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                      <DollarSign className="w-3 h-3 text-gray-400" /> Capital Social
+                    </span>
+                    {typeof activeClientInModal.capitalSocial === 'number' &&
+                      renderCopyBtn(
+                        activeClientInModal.capitalSocial.toLocaleString('pt-BR', {
+                          style: 'currency',
+                          currency: 'BRL',
+                        }),
+                        'modal-capital',
+                        'Copiar capital social'
+                      )}
+                  </div>
+                  <span className="font-bold text-gray-800 dark:text-gray-200 block mt-0.5 select-all">
+                    {typeof activeClientInModal.capitalSocial === 'number'
+                      ? activeClientInModal.capitalSocial.toLocaleString('pt-BR', {
+                          style: 'currency',
+                          currency: 'BRL',
+                        })
+                      : '-'}
+                  </span>
+                </div>
               </div>
 
-              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block flex items-center gap-1">
-                  <ShieldCheck className="w-3 h-3 text-gray-400" /> Situação
-                </span>
-                <span className="font-bold text-gray-800 dark:text-gray-200">
-                  {formatarDataBr(activeClientInModal.dataSituacaoCadastral)}
-                </span>
+              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3 text-gray-400" /> Situação
+                    </span>
+                    {activeClientInModal.dataSituacaoCadastral &&
+                      renderCopyBtn(
+                        formatarDataBr(activeClientInModal.dataSituacaoCadastral),
+                        'modal-situacao',
+                        'Copiar data da situação'
+                      )}
+                  </div>
+                  <span className="font-bold text-gray-800 dark:text-gray-200 block mt-0.5 select-all">
+                    {formatarDataBr(activeClientInModal.dataSituacaoCadastral)}
+                  </span>
+                </div>
               </div>
             </div>
 
             {/* Natureza Jurídica */}
             {activeClientInModal.naturezaJuridica && (
-              <div className="p-3 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50 text-xs">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
-                  Natureza Jurídica
-                </span>
-                <span className="font-medium text-gray-800 dark:text-gray-200">
-                  {activeClientInModal.naturezaJuridica}
-                </span>
+              <div className="p-3 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50 text-xs flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
+                    Natureza Jurídica
+                  </span>
+                  <span className="font-medium text-gray-800 dark:text-gray-200 select-all block">
+                    {activeClientInModal.naturezaJuridica}
+                  </span>
+                </div>
+                {renderCopyBtn(
+                  activeClientInModal.naturezaJuridica,
+                  'modal-natureza',
+                  'Copiar natureza jurídica'
+                )}
               </div>
             )}
 
@@ -1216,13 +1320,20 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
               </span>
 
               {activeClientInModal.cnaePrincipal?.codigo ? (
-                <div className="text-xs">
-                  <span className="font-mono font-black text-[#11d493] bg-emerald-500/10 px-2 py-0.5 rounded-md mr-2">
-                    {activeClientInModal.cnaePrincipal.codigo}
-                  </span>
-                  <span className="font-medium text-gray-800 dark:text-gray-200">
-                    {activeClientInModal.cnaePrincipal.descricao}
-                  </span>
+                <div className="text-xs flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="font-mono font-black text-[#11d493] bg-emerald-500/10 px-2 py-0.5 rounded-md mr-2 select-all">
+                      {activeClientInModal.cnaePrincipal.codigo}
+                    </span>
+                    <span className="font-medium text-gray-800 dark:text-gray-200 select-all">
+                      {activeClientInModal.cnaePrincipal.descricao}
+                    </span>
+                  </div>
+                  {renderCopyBtn(
+                    `${activeClientInModal.cnaePrincipal.codigo} - ${activeClientInModal.cnaePrincipal.descricao}`,
+                    'modal-cnae-principal',
+                    'Copiar CNAE principal'
+                  )}
                 </div>
               ) : (
                 <p className="text-xs text-gray-400 italic">
@@ -1248,11 +1359,21 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                   {showSecundariosModal && (
                     <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto pr-1">
                       {activeClientInModal.cnaesSecundarios.map((cnae, idx) => (
-                        <div key={idx} className="text-[11px] flex items-start gap-1.5">
-                          <span className="font-mono font-bold text-gray-500 dark:text-gray-400 shrink-0">
-                            {cnae.codigo}
-                          </span>
-                          <span className="text-gray-700 dark:text-gray-300">{cnae.descricao}</span>
+                        <div
+                          key={idx}
+                          className="text-[11px] flex items-center justify-between gap-1.5 py-0.5 border-b border-gray-100/40 dark:border-gray-800/40 last:border-0"
+                        >
+                          <div className="flex items-start gap-1.5 min-w-0">
+                            <span className="font-mono font-bold text-gray-500 dark:text-gray-400 shrink-0 select-all">
+                              {cnae.codigo}
+                            </span>
+                            <span className="text-gray-700 dark:text-gray-300 select-all">{cnae.descricao}</span>
+                          </div>
+                          {renderCopyBtn(
+                            `${cnae.codigo} - ${cnae.descricao}`,
+                            `modal-cnae-sec-${idx}`,
+                            'Copiar atividade'
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1273,12 +1394,19 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                   {activeClientInModal.qsa.map((socio, idx) => (
                     <div
                       key={idx}
-                      className="p-2 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/60 dark:border-gray-700/50 text-xs"
+                      className="p-2 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/60 dark:border-gray-700/50 text-xs flex items-center justify-between gap-2"
                     >
-                      <p className="font-bold text-gray-900 dark:text-white truncate">{socio.nome}</p>
-                      <p className="text-[10px] text-gray-400 truncate">
-                        {socio.qual || 'Sócio'} {socio.faixaEtaria ? `• ${socio.faixaEtaria}` : ''}
-                      </p>
+                      <div className="min-w-0">
+                        <p className="font-bold text-gray-900 dark:text-white truncate select-all">{socio.nome}</p>
+                        <p className="text-[10px] text-gray-400 truncate">
+                          {socio.qual || 'Sócio'} {socio.faixaEtaria ? `• ${socio.faixaEtaria}` : ''}
+                        </p>
+                      </div>
+                      {renderCopyBtn(
+                        `${socio.nome}${socio.qual ? ` (${socio.qual})` : ''}`,
+                        `modal-qsa-${idx}`,
+                        'Copiar dados do sócio'
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1310,51 +1438,84 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                       {activeClientInModal.nome || 'Não informada'}
                     </span>
                   </div>
-                  {activeClientInModal.nome && (
-                    <button
-                      onClick={(e) => handleCopyDoc(e, -1, activeClientInModal.nome)}
-                      className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 cursor-pointer"
-                      title="Copiar Razão Social"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                  {renderCopyBtn(activeClientInModal.nome, 'modal-razao', 'Copiar Razão Social')}
                 </div>
 
                 {/* 2. E-mail */}
-                <div className="p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5 flex items-center gap-1">
-                    <Mail className="w-3 h-3 text-gray-400" /> E-mail
-                  </span>
-                  {activeClientInModal.email ? (
-                    <a
-                      href={`mailto:${activeClientInModal.email}`}
-                      className="font-bold text-emerald-600 dark:text-[#11d493] hover:underline truncate block"
-                    >
-                      {activeClientInModal.email}
-                    </a>
-                  ) : (
-                    <span className="text-gray-400 italic">Não informado</span>
-                  )}
+                <div className="p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60 flex items-center justify-between">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5 flex items-center gap-1">
+                      <Mail className="w-3 h-3 text-gray-400" /> E-mail
+                    </span>
+                    {activeClientInModal.email ? (
+                      <a
+                        href={`mailto:${activeClientInModal.email}`}
+                        className="font-bold text-emerald-600 dark:text-[#11d493] hover:underline truncate block select-all"
+                      >
+                        {activeClientInModal.email}
+                      </a>
+                    ) : (
+                      <span className="text-gray-400 italic">Não informado</span>
+                    )}
+                  </div>
+                  {renderCopyBtn(activeClientInModal.email, 'modal-email', 'Copiar E-mail')}
                 </div>
 
-                {/* 3. CEP */}
-                <div className="p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
-                    CEP
-                  </span>
-                  <span className="font-mono font-bold text-gray-800 dark:text-gray-200">
-                    {activeClientInModal.endereco?.geral?.cep || 'Não informado'}
-                  </span>
+                {/* 3. Telefone / WhatsApp */}
+                <div className="p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60 flex items-center justify-between">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5 flex items-center gap-1">
+                      <Phone className="w-3 h-3 text-gray-400" /> Telefone / WhatsApp
+                    </span>
+                    {activeClientInModal.celular || activeClientInModal.telefone ? (
+                      <span className="font-mono font-bold text-gray-800 dark:text-gray-200 select-all block">
+                        {activeClientInModal.celular || activeClientInModal.telefone}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400 italic">Não informado</span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {renderCopyBtn(
+                      activeClientInModal.celular || activeClientInModal.telefone,
+                      'modal-telefone',
+                      'Copiar Telefone'
+                    )}
+                    {(activeClientInModal.celular || activeClientInModal.telefone) && (
+                      <button
+                        type="button"
+                        onClick={(e) =>
+                          handleWhatsApp(e, activeClientInModal.celular || activeClientInModal.telefone)
+                        }
+                        className="p-1.5 rounded-lg text-emerald-600 hover:bg-emerald-500/10 dark:text-[#11d493] transition cursor-pointer"
+                        title="Abrir WhatsApp"
+                      >
+                        <MessageSquare className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                {/* 4. Endereço Completo */}
+                {/* 4. CEP */}
+                <div className="p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60 flex items-center justify-between">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
+                      CEP
+                    </span>
+                    <span className="font-mono font-bold text-gray-800 dark:text-gray-200 select-all block">
+                      {activeClientInModal.endereco?.geral?.cep || 'Não informado'}
+                    </span>
+                  </div>
+                  {renderCopyBtn(activeClientInModal.endereco?.geral?.cep, 'modal-cep', 'Copiar CEP')}
+                </div>
+
+                {/* 5. Endereço Completo */}
                 <div className="sm:col-span-2 p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60 flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5 flex items-center gap-1">
-                      <MapPin className="w-3 h-3 text-[#11d493]" /> Endereço
+                      <MapPin className="w-3 h-3 text-[#11d493]" /> Endereço Completo
                     </span>
-                    <span className="font-semibold text-gray-800 dark:text-gray-200 leading-snug block">
+                    <span className="font-semibold text-gray-800 dark:text-gray-200 leading-snug block select-all">
                       {[
                         activeClientInModal.endereco?.geral?.endereco,
                         activeClientInModal.endereco?.geral?.numero ? `Nº ${activeClientInModal.endereco.geral.numero}` : '',
@@ -1366,43 +1527,64 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                     </span>
                   </div>
 
-                  {activeClientInModal.endereco?.geral?.municipio && (
-                    <a
-                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                        `${activeClientInModal.endereco.geral.endereco || ''} ${
-                          activeClientInModal.endereco.geral.numero || ''
-                        }, ${activeClientInModal.endereco.geral.municipio || ''} - ${
-                          activeClientInModal.endereco.geral.uf || ''
-                        }`
-                      )}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200 dark:border-gray-700 hover:border-[#11d493] text-gray-700 dark:text-gray-200 text-[11px] font-bold transition shrink-0 cursor-pointer"
-                    >
-                      <MapPin className="w-3 h-3 text-[#11d493]" />
-                      <span>Maps</span>
-                    </a>
-                  )}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {renderCopyBtn(
+                      [
+                        activeClientInModal.endereco?.geral?.endereco,
+                        activeClientInModal.endereco?.geral?.numero ? `Nº ${activeClientInModal.endereco.geral.numero}` : '',
+                        activeClientInModal.endereco?.geral?.complemento,
+                        activeClientInModal.endereco?.geral?.bairro ? `Bairro ${activeClientInModal.endereco.geral.bairro}` : '',
+                        activeClientInModal.endereco?.geral?.municipio,
+                        activeClientInModal.endereco?.geral?.uf,
+                        activeClientInModal.endereco?.geral?.cep ? `CEP ${activeClientInModal.endereco.geral.cep}` : '',
+                      ].filter(Boolean).join(', '),
+                      'modal-endereco',
+                      'Copiar Endereço Completo'
+                    )}
+                    {activeClientInModal.endereco?.geral?.municipio && (
+                      <a
+                        href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                          `${activeClientInModal.endereco.geral.endereco || ''} ${
+                            activeClientInModal.endereco.geral.numero || ''
+                          }, ${activeClientInModal.endereco.geral.municipio || ''} - ${
+                            activeClientInModal.endereco.geral.uf || ''
+                          }`
+                        )}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200 dark:border-gray-700 hover:border-[#11d493] text-gray-700 dark:text-gray-200 text-[11px] font-bold transition shrink-0 cursor-pointer"
+                      >
+                        <MapPin className="w-3 h-3 text-[#11d493]" />
+                        <span>Maps</span>
+                      </a>
+                    )}
+                  </div>
                 </div>
 
-                {/* 5. Cidade */}
-                <div className="p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
-                    Cidade
-                  </span>
-                  <span className="font-bold text-gray-800 dark:text-gray-200">
-                    {activeClientInModal.endereco?.geral?.municipio || 'Não informada'}
-                  </span>
+                {/* 6. Cidade */}
+                <div className="p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60 flex items-center justify-between">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
+                      Cidade
+                    </span>
+                    <span className="font-bold text-gray-800 dark:text-gray-200 select-all block">
+                      {activeClientInModal.endereco?.geral?.municipio || 'Não informada'}
+                    </span>
+                  </div>
+                  {renderCopyBtn(activeClientInModal.endereco?.geral?.municipio, 'modal-cidade', 'Copiar Cidade')}
                 </div>
 
-                {/* 6. Federação (UF) */}
-                <div className="p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60">
-                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
-                    Federação (UF)
-                  </span>
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-md font-mono font-black text-xs bg-emerald-500/10 text-emerald-600 dark:text-[#11d493]">
-                    {activeClientInModal.endereco?.geral?.uf || 'SP'}
-                  </span>
+                {/* 7. Federação (UF) */}
+                <div className="p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60 flex items-center justify-between">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
+                      Federação (UF)
+                    </span>
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md font-mono font-black text-xs bg-emerald-500/10 text-emerald-600 dark:text-[#11d493] select-all">
+                      {activeClientInModal.endereco?.geral?.uf || 'SP'}
+                    </span>
+                  </div>
+                  {renderCopyBtn(activeClientInModal.endereco?.geral?.uf || 'SP', 'modal-uf', 'Copiar UF')}
                 </div>
               </div>
             </div>
