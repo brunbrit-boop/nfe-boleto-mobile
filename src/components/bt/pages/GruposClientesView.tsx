@@ -1877,9 +1877,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                           </button>
                         ) : isGerado && item.ofertaGerada ? (
                           <div className="flex flex-col gap-1">
-                            <div className="flex items-center gap-2">
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-[#11d493] font-bold text-[11px]">
-                                <CheckCircle2 className="w-3.5 h-3.5" />
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-[#11d493] font-bold text-[11px] border border-emerald-500/20 shadow-sm">
+                                <CheckCircle2 className="w-3.5 h-3.5 text-[#11d493]" />
                                 <span>{item.ofertaGerada.itens.length} itens</span>
                                 <span className="font-mono ml-1 font-bold text-slate-900 dark:text-white">
                                   {formatCurrency(item.ofertaGerada.valorTotal)}
@@ -1888,10 +1888,20 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                               <button
                                 type="button"
                                 onClick={() => setItemVisualizandoOferta(item)}
-                                className="p-1 rounded text-slate-400 hover:text-[#11d493] transition cursor-pointer"
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-[#11d493] hover:bg-[#11d493]/10 transition active:scale-95 cursor-pointer"
                                 title="Ver e ajustar quantidades do pedido"
                               >
                                 <Eye className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleGerarItemIndividual(item.clienteId)}
+                                disabled={isGerandoLote || isGerando}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-amber-500 dark:text-amber-400 hover:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/25 transition active:scale-95 cursor-pointer disabled:opacity-40"
+                                title="Refazer orçamento deste cliente com a IA (gera novo mix comercial)"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                                <span>Refazer</span>
                               </button>
                             </div>
                             {item.nfeEmitida && (
@@ -2300,25 +2310,41 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
             </div>
 
             {/* Ações do Modal */}
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200 dark:border-[#1a382e]">
-              <button
-                type="button"
-                onClick={() => setItemVisualizandoOferta(null)}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-[#162f27] text-slate-700 dark:text-slate-300"
-              >
-                Fechar
-              </button>
+            <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-200 dark:border-[#1a382e] flex-wrap">
               <button
                 type="button"
                 onClick={() => {
-                  const target = itemVisualizandoOferta;
+                  const targetId = itemVisualizandoOferta.clienteId;
                   setItemVisualizandoOferta(null);
-                  handleEmitirLinha(target);
+                  handleGerarItemIndividual(targetId);
                 }}
-                className="px-4 py-2 rounded-xl text-xs font-bold bg-[#11d493] text-slate-950 hover:bg-[#0eb880]"
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 dark:text-amber-400 border border-amber-500/30 transition active:scale-95 cursor-pointer"
+                title="Recalcular e gerar uma nova proposta para este cliente"
               >
-                Emitir NF-e e Boleto Deste Orçamento
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Refazer com IA</span>
               </button>
+
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setItemVisualizandoOferta(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-[#162f27] text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-[#1f4337] transition"
+                >
+                  Fechar
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = itemVisualizandoOferta;
+                    setItemVisualizandoOferta(null);
+                    handleEmitirLinha(target);
+                  }}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-[#11d493] text-slate-950 hover:bg-[#0eb880] transition"
+                >
+                  Emitir NF-e e Boleto Deste Orçamento
+                </button>
+              </div>
             </div>
           </div>
         </div>
