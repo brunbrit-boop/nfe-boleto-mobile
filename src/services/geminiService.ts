@@ -4,7 +4,9 @@ import { CATALOGO_PRODUTOS_PADRAO } from '../utils/salesOptimizer';
 export const GEMINI_MODELS = [
   'gemini-3.6-flash',
   'gemini-flash-latest',
+  'gemini-flash-lite-latest',
   'gemini-3.5-flash',
+  'gemini-3.1-flash-lite',
   'gemini-3.7-flash',
   'gemini-3.8-flash',
 ];
@@ -226,6 +228,10 @@ Retorne ESTRITAMENTE um objeto JSON válido (sem blocos markdown) com a seguinte
         const errData = await response.json().catch(() => ({}));
         if (response.status === 402) {
           throw new Error('Seus créditos pré-pagos do Google Gemini esgotaram (Erro 402: Prepayment credits depleted). Acesse https://aistudio.google.com para adicionar saldo ou use uma nova chave em um projeto gratuito.');
+        }
+        if (response.status === 429) {
+          console.warn(`[Gemini ${model}] 429 Quota/Rate Limit atingido. Aguardando pausa de 3s...`);
+          await new Promise((r) => setTimeout(r, 3000));
         }
         ultimoErroIndividual = errData?.error?.message || `HTTP ${response.status} (${model})`;
         continue;
@@ -476,6 +482,10 @@ INSTRUÇÕES CRÍTICAS DE RETORNO E VARIAÇÃO DE NICHOS:
         const errData = await response.json().catch(() => ({}));
         if (response.status === 402) {
           throw new Error('Seus créditos pré-pagos do Google Gemini esgotaram (Erro 402: Prepayment credits depleted). Acesse https://aistudio.google.com para adicionar saldo ou use uma nova chave em um projeto gratuito.');
+        }
+        if (response.status === 429) {
+          console.warn(`[Gemini Lote ${model}] 429 Quota/Rate Limit atingido. Aguardando pausa de 3.5s...`);
+          await new Promise((r) => setTimeout(r, 3500));
         }
         ultimoErroLote = errData?.error?.message || `HTTP ${response.status} (${model})`;
         continue;

@@ -837,56 +837,80 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     const diretrizesGerais = obterDiretrizesGeraisEmpresa(empresa.id);
 
     try {
-      let grupoEmProcessamento = { ...grupoAtivo };
-      for (let i = 0; i < grupoAtivo.clientes.length; i++) {
-        // Se o usuário clicou em pausar, interrompe o loop imediatamente mantendo o que já foi gerado
-        if (cancelarGeracaoRef.current) {
-          break;
-        }
+      let grupoEmProcessamento: GrupoClientes = {
+        ...grupoAtivo,
+        clientes: grupoAtivo.clientes.map((c): GrupoClienteItem => ({
+          ...c,
+          status: 'gerando',
+          idNotaBling: undefined,
+          nfeEmitida: undefined,
+          erro: undefined,
+        })),
+      };
+      atualizarGrupo(grupoEmProcessamento);
 
-        const item = grupoAtivo.clientes[i];
-        setProgressoLote({ atual: i + 1, total: grupoAtivo.clientes.length });
+      const TAMANHO_CHUNK = 10;
+      const todosClientes = [...grupoAtivo.clientes];
+      let concluidosCount = 0;
 
-        // Atualiza status para gerando
-        grupoEmProcessamento = {
-          ...grupoEmProcessamento,
-          clientes: grupoEmProcessamento.clientes.map((c) =>
-            c.clienteId === item.clienteId ? { ...c, status: 'gerando' } : c
-          ),
-        };
-        atualizarGrupo(grupoEmProcessamento);
+      for (let i = 0; i < todosClientes.length; i += TAMANHO_CHUNK) {
+        if (cancelarGeracaoRef.current) break;
+
+        const chunk = todosClientes.slice(i, i + TAMANHO_CHUNK);
+        const chunkIds = new Set(chunk.map((c) => c.clienteId));
 
         try {
-          const oferta = await gerarOfertaParaItem(
-            item,
+          const mapaOfertas = await gerarOfertasEmLoteUnificado(
+            chunk,
             catalogoProdutos,
             0.05,
             gruposProdutos,
             diretrizesGerais,
             grupoAtivo.diretrizesGrupo,
-            item.itensMin ?? itensMinMassa,
-            item.itensMax ?? itensMaxMassa
+            itensMinMassa,
+            itensMaxMassa
           );
+
+          grupoEmProcessamento = {
+            ...grupoEmProcessamento,
+            clientes: grupoEmProcessamento.clientes.map((c) => {
+              if (!chunkIds.has(c.clienteId)) return c;
+              const oferta = mapaOfertas[c.clienteId];
+              if (oferta && oferta.itens && oferta.itens.length > 0) {
+                return {
+                  ...c,
+                  status: 'gerado' as const,
+                  ofertaGerada: oferta,
+                  erro: undefined,
+                };
+              } else {
+                return {
+                  ...c,
+                  status: 'erro' as const,
+                  erro: 'IA não retornou itens para esta empresa no lote unificado.',
+                };
+              }
+            }),
+          };
+          concluidosCount += chunk.length;
+          setProgressoLote({ atual: Math.min(concluidosCount, todosClientes.length), total: todosClientes.length });
+          atualizarGrupo(grupoEmProcessamento);
+        } catch (errChunk: any) {
+          console.error('Falha no lote unificado:', errChunk);
           grupoEmProcessamento = {
             ...grupoEmProcessamento,
             clientes: grupoEmProcessamento.clientes.map((c) =>
-              c.clienteId === item.clienteId
-                ? { ...c, status: 'gerado', ofertaGerada: oferta, erro: undefined }
+              chunkIds.has(c.clienteId)
+                ? { ...c, status: 'erro' as const, erro: errChunk.message || 'Falha na IA' }
                 : c
             ),
           };
-        } catch (err: any) {
-          grupoEmProcessamento = {
-            ...grupoEmProcessamento,
-            clientes: grupoEmProcessamento.clientes.map((c) =>
-              c.clienteId === item.clienteId
-                ? { ...c, status: 'erro', erro: err.message || 'Falha na IA' }
-                : c
-            ),
-          };
+          atualizarGrupo(grupoEmProcessamento);
         }
-        atualizarGrupo(grupoEmProcessamento);
-        await new Promise((r) => setTimeout(r, 200));
+
+        if (i + TAMANHO_CHUNK < todosClientes.length && !cancelarGeracaoRef.current) {
+          await new Promise((r) => setTimeout(r, 2500));
+        }
       }
     } finally {
       // Reverte eventuais itens que ficaram com status 'gerando' caso tenha havido interrupção
