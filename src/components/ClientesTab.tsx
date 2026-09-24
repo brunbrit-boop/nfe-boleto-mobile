@@ -26,7 +26,7 @@ export const ClientesTab: React.FC<ClientesTabProps> = ({
     const term = searchTerm.toLowerCase();
     const matchName = c.nome.toLowerCase().includes(term) || (c.fantasia && c.fantasia.toLowerCase().includes(term));
     const matchDoc = c.numeroDocumento.replace(/\D/g, '').includes(term.replace(/\D/g, ''));
-    const matchCity = c.endereco?.geral?.municipio.toLowerCase().includes(term);
+    const matchCity = c.endereco?.geral?.municipio?.toLowerCase().includes(term);
 
     const matchesSearch = matchName || matchDoc || matchCity;
     const matchesTipo = filterTipo === 'todos' || c.tipoPessoa === filterTipo;

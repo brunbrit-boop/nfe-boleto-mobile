@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import type { BlingCliente, BlingContaReceber } from '../../../types';
 import {
   Search,
@@ -15,9 +15,32 @@ import {
   ExternalLink,
   ShieldCheck,
   CreditCard,
+  Building2,
+  CheckSquare,
+  Square,
+  MinusSquare,
+  Loader2,
+  FileSearch,
+  Globe,
+  DollarSign,
+  Briefcase,
+  Calendar,
+  Layers,
+  ChevronDown,
+  ChevronUp,
+  AlertCircle,
 } from 'lucide-react';
+import {
+  consultarCnpjReceita,
+  mesclarDadosCartaoNoCliente,
+  salvarCacheClientesEnriquecidos,
+  obterCacheClientesEnriquecidos,
+  formatarCNPJ,
+  formatarDataBr,
+} from '../../../services/cnpjService';
 
 interface ClientsViewProps {
+  empresaId?: string;
   clientesBling?: BlingCliente[];
   contasReceber?: BlingContaReceber[];
   carregando?: boolean;
@@ -26,6 +49,7 @@ interface ClientsViewProps {
 }
 
 export const ClientsView: React.FC<ClientsViewProps> = ({
+  empresaId = 'default',
   clientesBling = [],
   contasReceber = [],
   carregando = false,
@@ -39,6 +63,31 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   const [copiedDocId, setCopiedDocId] = useState<number | null>(null);
   const [selectedClientModal, setSelectedClientModal] = useState<BlingCliente | null>(null);
 
+  // Seleção e Consulta em Lote
+  const [selectedClientIds, setSelectedClientIds] = useState<Set<number>>(new Set());
+  const [isConsultandoLote, setIsConsultandoLote] = useState(false);
+  const [progressoLote, setProgressoLote] = useState<{
+    atual: number;
+    total: number;
+    clienteNome: string;
+    mensagem: string;
+  } | null>(null);
+  const [singleConsultandoId, setSingleConsultandoId] = useState<number | null>(null);
+  const [consultaErro, setConsultaErro] = useState<string | null>(null);
+  const [showSecundariosModal, setShowSecundariosModal] = useState(false);
+  const cancelarLoteRef = useRef<boolean>(false);
+
+  // Cache de dados da Receita Federal persistidos
+  const [enriquecimentoMap, setEnriquecimentoMap] = useState<Record<string, Partial<BlingCliente>>>(() => {
+    return obterCacheClientesEnriquecidos(empresaId);
+  });
+
+  // Atualiza cache ao trocar de empresa
+  useEffect(() => {
+    setEnriquecimentoMap(obterCacheClientesEnriquecidos(empresaId));
+  }, [empresaId]);
+
+  // Modal Novo Cliente
   const [showAddModal, setShowAddModal] = useState(false);
   const [newName, setNewName] = useState('');
   const [newFantasia, setNewFantasia] = useState('');
@@ -50,11 +99,31 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   const [newUf, setNewUf] = useState('SP');
   const [localClients, setLocalClients] = useState<BlingCliente[]>([]);
 
-  // Combina clientes do Bling com novos cadastrados nesta sessão
-  const allClients = [...localClients, ...clientesBling];
+  // Combina clientes do Bling + locais e mescla os dados enriquecidos da Receita
+  const allClients = useMemo(() => {
+    const base = [...localClients, ...clientesBling];
+    return base.map((c) => {
+      const docLimpo = (c.numeroDocumento || '').replace(/\D/g, '');
+      const enriquecido = docLimpo ? enriquecimentoMap[docLimpo] : undefined;
+      if (enriquecido) {
+        return {
+          ...c,
+          ...enriquecido,
+          endereco: {
+            ...c.endereco,
+            geral: {
+              ...c.endereco?.geral,
+              ...enriquecido.endereco?.geral,
+            },
+          },
+        };
+      }
+      return c;
+    });
+  }, [localClients, clientesBling, enriquecimentoMap]);
 
-  // Mapeia contas a receber por cliente (por id ou documento ou nome)
-  const openReceivablesByClient = React.useMemo(() => {
+  // Mapeia contas a receber por cliente
+  const openReceivablesByClient = useMemo(() => {
     const map = new Map<string, { total: number; count: number }>();
 
     contasReceber.forEach((cr) => {
@@ -92,7 +161,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
 
     if (rec && rec.total > 0) return rec;
 
-    // Fallback caso o cliente tenha saldoDevedor anotado
     if (c.saldoDevedor && c.saldoDevedor > 0) {
       return { total: c.saldoDevedor, count: 1 };
     }
@@ -117,7 +185,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   };
 
   // Lista de segmentos únicos para o filtro
-  const segmentosUnicos = React.useMemo(() => {
+  const segmentosUnicos = useMemo(() => {
     const set = new Set<string>();
     allClients.forEach((c) => {
       if (c.segmento) set.add(c.segmento);
@@ -126,38 +194,193 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   }, [allClients]);
 
   // Filtragem dos clientes na tabela
-  const filteredClients = allClients.filter((c) => {
-    const term = searchTerm.toLowerCase();
-    const nome = (c.nome || '').toLowerCase();
-    const fantasia = (c.fantasia || '').toLowerCase();
-    const doc = (c.numeroDocumento || '').replace(/\D/g, '');
-    const email = (c.email || '').toLowerCase();
-    const fone = (c.telefone || c.celular || '').replace(/\D/g, '');
-    const cidade = (c.endereco?.geral?.municipio || '').toLowerCase();
-    const segmento = (c.segmento || '').toLowerCase();
-    const cod = (c.codigo || '').toLowerCase();
+  const filteredClients = useMemo(() => {
+    return allClients.filter((c) => {
+      const term = searchTerm.toLowerCase();
+      const nome = (c.nome || '').toLowerCase();
+      const fantasia = (c.fantasia || '').toLowerCase();
+      const doc = (c.numeroDocumento || '').replace(/\D/g, '');
+      const email = (c.email || '').toLowerCase();
+      const fone = (c.telefone || c.celular || '').replace(/\D/g, '');
+      const cidade = (c.endereco?.geral?.municipio || '').toLowerCase();
+      const segmento = (c.segmento || '').toLowerCase();
+      const cod = (c.codigo || '').toLowerCase();
 
-    const matchesSearch =
-      nome.includes(term) ||
-      fantasia.includes(term) ||
-      doc.includes(term.replace(/\D/g, '')) ||
-      email.includes(term) ||
-      fone.includes(term.replace(/\D/g, '')) ||
-      cidade.includes(term) ||
-      segmento.includes(term) ||
-      cod.includes(term);
+      const matchesSearch =
+        nome.includes(term) ||
+        fantasia.includes(term) ||
+        doc.includes(term.replace(/\D/g, '')) ||
+        email.includes(term) ||
+        fone.includes(term.replace(/\D/g, '')) ||
+        cidade.includes(term) ||
+        segmento.includes(term) ||
+        cod.includes(term);
 
-    const matchesTipo = filterTipo === 'todos' || c.tipoPessoa === filterTipo;
-    const matchesSegmento = filterSegmento === 'todos' || c.segmento === filterSegmento;
+      const matchesTipo = filterTipo === 'todos' || c.tipoPessoa === filterTipo;
+      const matchesSegmento = filterSegmento === 'todos' || c.segmento === filterSegmento;
 
-    const balance = getClientReceivables(c);
-    const matchesStatus =
-      filterStatus === 'todos' ||
-      (filterStatus === 'ativo' && c.situacao !== 'I') ||
-      (filterStatus === 'com_debito' && balance.total > 0);
+      const balance = getClientReceivables(c);
+      const matchesStatus =
+        filterStatus === 'todos' ||
+        (filterStatus === 'ativo' && c.situacao !== 'I') ||
+        (filterStatus === 'com_debito' && balance.total > 0);
 
-    return matchesSearch && matchesTipo && matchesSegmento && matchesStatus;
-  });
+      return matchesSearch && matchesTipo && matchesSegmento && matchesStatus;
+    });
+  }, [allClients, searchTerm, filterTipo, filterSegmento, filterStatus, openReceivablesByClient]);
+
+  // Gerenciamento de Seleção
+  const toggleSelectClient = (id: number, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setSelectedClientIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const isAllVisibleSelected =
+    filteredClients.length > 0 && filteredClients.every((c) => selectedClientIds.has(c.id));
+  const isSomeVisibleSelected =
+    filteredClients.some((c) => selectedClientIds.has(c.id)) && !isAllVisibleSelected;
+
+  const handleSelectAllVisible = () => {
+    if (isAllVisibleSelected) {
+      setSelectedClientIds(new Set());
+    } else {
+      setSelectedClientIds(new Set(filteredClients.map((c) => c.id)));
+    }
+  };
+
+  // Consulta Individual
+  const handleConsultarIndividual = async (cliente: BlingCliente) => {
+    const docLimpo = (cliente.numeroDocumento || '').replace(/\D/g, '');
+    if (docLimpo.length !== 14) {
+      setConsultaErro('Apenas clientes PJ com CNPJ de 14 dígitos podem ser consultados na Receita.');
+      setTimeout(() => setConsultaErro(null), 4000);
+      return;
+    }
+
+    setSingleConsultandoId(cliente.id);
+    setConsultaErro(null);
+
+    try {
+      const dados = await consultarCnpjReceita(docLimpo);
+      const atualizado = mesclarDadosCartaoNoCliente(cliente, dados);
+
+      const novoCacheItem: Partial<BlingCliente> = {
+        nome: atualizado.nome,
+        fantasia: atualizado.fantasia,
+        situacaoCadastral: atualizado.situacaoCadastral,
+        dataSituacaoCadastral: atualizado.dataSituacaoCadastral,
+        motivoSituacaoCadastral: atualizado.motivoSituacaoCadastral,
+        dataAbertura: atualizado.dataAbertura,
+        naturezaJuridica: atualizado.naturezaJuridica,
+        porte: atualizado.porte,
+        capitalSocial: atualizado.capitalSocial,
+        cnaePrincipal: atualizado.cnaePrincipal,
+        cnaesSecundarios: atualizado.cnaesSecundarios,
+        qsa: atualizado.qsa,
+        consultadoEm: atualizado.consultadoEm,
+        endereco: atualizado.endereco,
+      };
+
+      const novoMapa = {
+        ...enriquecimentoMap,
+        [docLimpo]: novoCacheItem,
+      };
+
+      setEnriquecimentoMap(novoMapa);
+      salvarCacheClientesEnriquecidos(empresaId, novoMapa);
+
+      if (selectedClientModal && selectedClientModal.id === cliente.id) {
+        setSelectedClientModal(atualizado);
+      }
+    } catch (err: any) {
+      setConsultaErro(err.message || 'Erro ao consultar Receita Federal.');
+      setTimeout(() => setConsultaErro(null), 4500);
+    } finally {
+      setSingleConsultandoId(null);
+    }
+  };
+
+  // Consulta em Lote com Pacing Anti-Bloqueio
+  const handleConsultarEmLote = async () => {
+    const selecionados = filteredClients.filter((c) => selectedClientIds.has(c.id));
+    const candidatos = selecionados.filter((c) => {
+      const doc = (c.numeroDocumento || '').replace(/\D/g, '');
+      return doc.length === 14;
+    });
+
+    if (candidatos.length === 0) {
+      setConsultaErro('Nenhum cliente PJ com CNPJ de 14 dígitos está selecionado.');
+      setTimeout(() => setConsultaErro(null), 4000);
+      return;
+    }
+
+    setIsConsultandoLote(true);
+    cancelarLoteRef.current = false;
+    setConsultaErro(null);
+
+    const novoMapa = { ...enriquecimentoMap };
+
+    for (let i = 0; i < candidatos.length; i++) {
+      if (cancelarLoteRef.current) break;
+
+      const cliente = candidatos[i];
+      const docLimpo = cliente.numeroDocumento!.replace(/\D/g, '');
+      const nomeExibicao = cliente.fantasia || cliente.nome || formatarCNPJ(docLimpo);
+
+      setProgressoLote({
+        atual: i + 1,
+        total: candidatos.length,
+        clienteNome: nomeExibicao,
+        mensagem: `Consultando (${i + 1} de ${candidatos.length})...`,
+      });
+
+      try {
+        const dados = await consultarCnpjReceita(docLimpo);
+        const atualizado = mesclarDadosCartaoNoCliente(cliente, dados);
+
+        novoMapa[docLimpo] = {
+          nome: atualizado.nome,
+          fantasia: atualizado.fantasia,
+          situacaoCadastral: atualizado.situacaoCadastral,
+          dataSituacaoCadastral: atualizado.dataSituacaoCadastral,
+          motivoSituacaoCadastral: atualizado.motivoSituacaoCadastral,
+          dataAbertura: atualizado.dataAbertura,
+          naturezaJuridica: atualizado.naturezaJuridica,
+          porte: atualizado.porte,
+          capitalSocial: atualizado.capitalSocial,
+          cnaePrincipal: atualizado.cnaePrincipal,
+          cnaesSecundarios: atualizado.cnaesSecundarios,
+          qsa: atualizado.qsa,
+          consultadoEm: atualizado.consultadoEm,
+          endereco: atualizado.endereco,
+        };
+
+        setEnriquecimentoMap({ ...novoMapa });
+        salvarCacheClientesEnriquecidos(empresaId, novoMapa);
+      } catch (err: any) {
+        console.warn(`[Lote] Falha ao consultar CNPJ ${docLimpo}:`, err);
+      }
+
+      // Intervalo de segurança (1.3s) entre requisições para evitar rate limit
+      if (i < candidatos.length - 1 && !cancelarLoteRef.current) {
+        await new Promise((res) => setTimeout(res, 1300));
+      }
+    }
+
+    setIsConsultandoLote(false);
+    setProgressoLote(null);
+  };
+
+  const handleCancelarLote = () => {
+    cancelarLoteRef.current = true;
+    setIsConsultandoLote(false);
+    setProgressoLote(null);
+  };
 
   // KPIs
   const totalClientes = allClients.length;
@@ -218,6 +441,27 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     return (partes[0][0] + partes[1][0]).toUpperCase();
   };
 
+  // Cliente atualmente inspecionado no modal
+  const activeClientInModal = useMemo(() => {
+    if (!selectedClientModal) return null;
+    const docLimpo = (selectedClientModal.numeroDocumento || '').replace(/\D/g, '');
+    const enriquecido = docLimpo ? enriquecimentoMap[docLimpo] : undefined;
+    if (enriquecido) {
+      return {
+        ...selectedClientModal,
+        ...enriquecido,
+        endereco: {
+          ...selectedClientModal.endereco,
+          geral: {
+            ...selectedClientModal.endereco?.geral,
+            ...enriquecido.endereco?.geral,
+          },
+        },
+      };
+    }
+    return selectedClientModal;
+  }, [selectedClientModal, enriquecimentoMap]);
+
   return (
     <div className="flex flex-col h-full bg-[#f6f8f7] dark:bg-[#10221c] overflow-y-auto font-['Manrope',sans-serif] transition-colors">
       {/* Top Banner & Header de Ações */}
@@ -234,7 +478,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
               </span>
             </div>
             <p className="text-gray-500 dark:text-gray-400 text-xs md:text-sm font-medium">
-              Base oficial sincronizada de contatos, dados fiscais, faturamento e contas a receber.
+              Base oficial com Cartão CNPJ Receita Federal, Sintegra e limites financeiros.
             </p>
           </div>
 
@@ -247,7 +491,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                 title="Sincronizar base de contatos com a API do Bling"
               >
                 <RefreshCw className={`w-4 h-4 text-[#11d493] ${carregando ? 'animate-spin' : ''}`} />
-                <span>{carregando ? 'Buscando no Bling...' : 'Sincronizar Bling'}</span>
+                <span>{carregando ? 'Buscando...' : 'Sincronizar Bling'}</span>
               </button>
             )}
 
@@ -261,7 +505,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
           </div>
         </div>
 
-        {/* 3 KPI Cards de Alta Performance */}
+        {/* 3 KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="p-4 rounded-2xl bg-white dark:bg-[#162f27] border border-gray-200 dark:border-[#214739] shadow-sm flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 text-[#11d493] flex items-center justify-center font-bold border border-emerald-500/20 shrink-0">
@@ -306,7 +550,23 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
           </div>
         </div>
 
-        {/* Barra de Busca e Filtros Avançados */}
+        {/* Notificação de Erro / Alerta Temporário */}
+        {consultaErro && (
+          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 text-xs font-bold flex items-center justify-between gap-2 animate-in fade-in">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{consultaErro}</span>
+            </div>
+            <button
+              onClick={() => setConsultaErro(null)}
+              className="p-1 text-rose-500 hover:text-rose-700 cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+
+        {/* Barra de Busca e Filtros */}
         <div className="bg-white dark:bg-[#162f27] rounded-2xl p-3.5 border border-gray-200 dark:border-[#214739] shadow-sm space-y-3">
           <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
             {/* Input de Busca */}
@@ -409,7 +669,8 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
 
           <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 pt-1 border-t border-gray-100 dark:border-[#214739]">
             <span>
-              Exibindo <strong className="text-gray-900 dark:text-white">{filteredClients.length}</strong> de <strong className="text-gray-900 dark:text-white">{allClients.length}</strong> clientes
+              Exibindo <strong className="text-gray-900 dark:text-white">{filteredClients.length}</strong> de{' '}
+              <strong className="text-gray-900 dark:text-white">{allClients.length}</strong> clientes
             </span>
 
             {(searchTerm || filterTipo !== 'todos' || filterSegmento !== 'todos') && (
@@ -419,16 +680,69 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                   setFilterTipo('todos');
                   setFilterSegmento('todos');
                 }}
-                className="text-xs font-bold text-[#11d493] hover:underline"
+                className="text-xs font-bold text-[#11d493] hover:underline cursor-pointer"
               >
-                Limpar todos os filtros
+                Limpar filtros
               </button>
             )}
           </div>
         </div>
+
+        {/* BARRA DE AÇÃO EM LOTE (Aparece quando há seleção) */}
+        {selectedClientIds.size > 0 && (
+          <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-emerald-500/15 border border-[#11d493]/30 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
+            <div className="flex items-center gap-3">
+              <span className="w-8 h-8 rounded-xl bg-[#11d493] text-gray-950 font-black text-xs flex items-center justify-center shadow-sm">
+                {selectedClientIds.size}
+              </span>
+              <div>
+                <p className="text-xs font-bold text-gray-900 dark:text-white">
+                  {selectedClientIds.size} cliente{selectedClientIds.size > 1 ? 's' : ''} selecionado{selectedClientIds.size > 1 ? 's' : ''}
+                </p>
+                <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                  Consulta de dados oficiais na Receita Federal e Sintegra
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+              {isConsultandoLote ? (
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 text-xs font-bold text-[#11d493]">
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>{progressoLote?.mensagem || 'Consultando...'}</span>
+                  </div>
+                  <button
+                    onClick={handleCancelarLote}
+                    className="px-3 py-1.5 rounded-xl text-xs font-bold bg-gray-200 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-300 cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={handleConsultarEmLote}
+                    className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-2 px-4 py-2 bg-[#11d493] text-gray-950 font-black rounded-xl text-xs hover:bg-[#0eb880] transition shadow-md shadow-emerald-500/20 active:scale-95 cursor-pointer"
+                  >
+                    <FileSearch className="w-4 h-4 stroke-[2.4]" />
+                    <span>Consultar Cartão CNPJ</span>
+                  </button>
+
+                  <button
+                    onClick={() => setSelectedClientIds(new Set())}
+                    className="px-3 py-2 rounded-xl text-xs font-bold text-gray-600 dark:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-white/10 transition cursor-pointer"
+                  >
+                    Desmarcar
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* A TABELA MODELO GIGANTONA DE CLIENTES */}
+      {/* A TABELA DE CLIENTES */}
       <div className="px-6 md:px-8 pb-10 flex-1">
         <div className="bg-white dark:bg-[#162f27] rounded-2xl border border-gray-200 dark:border-[#214739] shadow-sm overflow-hidden">
           {filteredClients.length === 0 ? (
@@ -445,27 +759,43 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
               {onRefreshBling && (
                 <button
                   onClick={onRefreshBling}
-                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#11d493] text-gray-950 font-bold rounded-xl text-xs hover:bg-[#0eb880] shadow-md shadow-emerald-500/20"
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#11d493] text-gray-950 font-bold rounded-xl text-xs hover:bg-[#0eb880] shadow-md shadow-emerald-500/20 cursor-pointer"
                 >
                   <RefreshCw className="w-4 h-4" />
-                  <span>Buscar no Bling Agora</span>
+                  <span>Buscar no Bling</span>
                 </button>
               )}
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-gray-600 dark:text-gray-300 border-collapse min-w-[1000px]">
+              <table className="w-full text-left text-xs text-gray-600 dark:text-gray-300 border-collapse min-w-[1050px]">
                 <thead className="bg-gray-50 dark:bg-[#10221c]/90 text-[11px] uppercase font-extrabold text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-[#214739] sticky top-0 z-10">
                   <tr>
-                    <th className="px-4 py-3.5">Cód / Cliente</th>
-                    <th className="px-4 py-3.5">CNPJ / CPF</th>
-                    <th className="px-4 py-3.5">Segmento</th>
-                    <th className="px-4 py-3.5">Localidade</th>
-                    <th className="px-4 py-3.5">Contato & WhatsApp</th>
-                    <th className="px-4 py-3.5">Condição / Regime</th>
-                    <th className="px-4 py-3.5">Saldo em Aberto</th>
-                    <th className="px-4 py-3.5">Status</th>
-                    <th className="px-4 py-3.5 text-right">Ações Fiscais</th>
+                    {/* Checkbox em Lote */}
+                    <th className="w-10 px-3 py-3.5 text-center">
+                      <button
+                        onClick={handleSelectAllVisible}
+                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer p-0.5"
+                        title={isAllVisibleSelected ? 'Desmarcar todos' : 'Selecionar todos os visíveis'}
+                      >
+                        {isAllVisibleSelected ? (
+                          <CheckSquare className="w-4 h-4 text-[#11d493]" />
+                        ) : isSomeVisibleSelected ? (
+                          <MinusSquare className="w-4 h-4 text-[#11d493]" />
+                        ) : (
+                          <Square className="w-4 h-4 text-gray-400" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="px-3 py-3.5">Cód / Cliente</th>
+                    <th className="px-3 py-3.5">CNPJ / CPF</th>
+                    <th className="px-3 py-3.5">Cartão CNPJ / Situação</th>
+                    <th className="px-3 py-3.5">Localidade</th>
+                    <th className="px-3 py-3.5">Contato & WhatsApp</th>
+                    <th className="px-3 py-3.5">Condição / Regime</th>
+                    <th className="px-3 py-3.5">Saldo em Aberto</th>
+                    <th className="px-3 py-3.5">Status</th>
+                    <th className="px-3 py-3.5 text-right">Ações Fiscais</th>
                   </tr>
                 </thead>
 
@@ -475,15 +805,40 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                     const isCopied = copiedDocId === c.id;
                     const iniciais = getIniciais(c.fantasia || c.nome);
                     const fone = c.telefone || c.celular;
+                    const isSelected = selectedClientIds.has(c.id);
+                    const isConsulting = singleConsultandoId === c.id;
+                    const docLimpo = (c.numeroDocumento || '').replace(/\D/g, '');
+                    const isPJ = docLimpo.length === 14;
 
                     return (
                       <tr
                         key={c.id}
                         onClick={() => setSelectedClientModal(c)}
-                        className="hover:bg-emerald-50/40 dark:hover:bg-white/5 transition-colors cursor-pointer group"
+                        className={`transition-colors cursor-pointer group ${
+                          isSelected
+                            ? 'bg-emerald-500/10 dark:bg-emerald-950/20'
+                            : 'hover:bg-emerald-50/40 dark:hover:bg-white/5'
+                        }`}
                       >
+                        {/* 0. Checkbox Seleção */}
+                        <td
+                          className="w-10 px-3 py-3.5 text-center"
+                          onClick={(e) => toggleSelectClient(c.id, e)}
+                        >
+                          <button
+                            type="button"
+                            className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer p-0.5"
+                          >
+                            {isSelected ? (
+                              <CheckSquare className="w-4 h-4 text-[#11d493]" />
+                            ) : (
+                              <Square className="w-4 h-4 text-gray-400" />
+                            )}
+                          </button>
+                        </td>
+
                         {/* 1. Cód & Nome do Cliente */}
-                        <td className="px-4 py-3.5">
+                        <td className="px-3 py-3.5">
                           <div className="flex items-center gap-3">
                             <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-600 text-slate-950 font-black text-xs flex items-center justify-center shadow-sm shrink-0">
                               {iniciais}
@@ -507,7 +862,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                         </td>
 
                         {/* 2. CNPJ / CPF com Cópia Rápida */}
-                        <td className="px-4 py-3.5">
+                        <td className="px-3 py-3.5">
                           <div
                             onClick={(e) => handleCopyDoc(e, c.id, c.numeroDocumento)}
                             className="inline-flex items-center gap-1.5 p-1.5 rounded-lg bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 border border-gray-200/60 dark:border-gray-700 transition cursor-pointer"
@@ -533,15 +888,57 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                           </div>
                         </td>
 
-                        {/* 3. Segmento */}
-                        <td className="px-4 py-3.5">
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-bold bg-gray-100 dark:bg-[#10221c] text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700">
-                            {c.segmento || 'Geral'}
-                          </span>
+                        {/* 3. Situação Cadastral Receita Federal / Cartão CNPJ */}
+                        <td className="px-3 py-3.5">
+                          {c.situacaoCadastral ? (
+                            <div className="flex flex-col gap-0.5">
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold w-fit ${
+                                  c.situacaoCadastral === 'ATIVA'
+                                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                                    : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                                }`}
+                              >
+                                <span
+                                  className={`w-1.5 h-1.5 rounded-full ${
+                                    c.situacaoCadastral === 'ATIVA' ? 'bg-[#11d493]' : 'bg-rose-500'
+                                  }`}
+                                />
+                                {c.situacaoCadastral}
+                              </span>
+                              {c.cnaePrincipal?.codigo && (
+                                <span
+                                  className="text-[10px] text-gray-400 truncate max-w-[170px]"
+                                  title={`${c.cnaePrincipal.codigo} - ${c.cnaePrincipal.descricao}`}
+                                >
+                                  CNAE: {c.cnaePrincipal.codigo}
+                                </span>
+                              )}
+                            </div>
+                          ) : isPJ ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleConsultarIndividual(c);
+                              }}
+                              disabled={isConsulting}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-[#11d493] border border-emerald-500/20 transition cursor-pointer"
+                              title="Consultar Cartão CNPJ e Sintegra na Receita Federal"
+                            >
+                              {isConsulting ? (
+                                <Loader2 className="w-3 h-3 animate-spin" />
+                              ) : (
+                                <FileSearch className="w-3 h-3" />
+                              )}
+                              <span>{isConsulting ? 'Consultando...' : 'Consultar CNPJ'}</span>
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-gray-400">Pessoa Física</span>
+                          )}
                         </td>
 
                         {/* 4. Localidade */}
-                        <td className="px-4 py-3.5">
+                        <td className="px-3 py-3.5">
                           <div className="flex items-center gap-1 text-gray-700 dark:text-gray-300 font-medium">
                             <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" />
                             <span>
@@ -553,7 +950,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                         </td>
 
                         {/* 5. Contato & WhatsApp */}
-                        <td className="px-4 py-3.5">
+                        <td className="px-3 py-3.5">
                           <div className="space-y-1">
                             {fone ? (
                               <div className="flex items-center gap-1.5">
@@ -562,8 +959,8 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                                 </span>
                                 <button
                                   onClick={(e) => handleWhatsApp(e, fone)}
-                                  className="p-1 rounded bg-emerald-500/15 hover:bg-emerald-500/30 text-[#11d493] transition"
-                                  title="Abrir conversa no WhatsApp"
+                                  className="p-1 rounded bg-emerald-500/15 hover:bg-emerald-500/30 text-[#11d493] transition cursor-pointer"
+                                  title="Abrir WhatsApp"
                                 >
                                   <MessageSquare className="w-3.5 h-3.5" />
                                 </button>
@@ -586,13 +983,13 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                         </td>
 
                         {/* 6. Condição & Regime */}
-                        <td className="px-4 py-3.5 text-[11px] text-gray-600 dark:text-gray-300">
+                        <td className="px-3 py-3.5 text-[11px] text-gray-600 dark:text-gray-300">
                           <div className="font-semibold">{c.condicaoPagamento || 'A Combinar'}</div>
                           <div className="text-[10px] text-gray-400">{c.regimeTributario || 'Simples Nacional'}</div>
                         </td>
 
                         {/* 7. Saldo em Aberto */}
-                        <td className="px-4 py-3.5">
+                        <td className="px-3 py-3.5">
                           {balance.total > 0 ? (
                             <div>
                               <span className="font-extrabold text-emerald-600 dark:text-emerald-400 text-xs">
@@ -613,7 +1010,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                         </td>
 
                         {/* 8. Status */}
-                        <td className="px-4 py-3.5">
+                        <td className="px-3 py-3.5">
                           <span
                             className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
                               c.situacao !== 'I'
@@ -631,12 +1028,12 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                         </td>
 
                         {/* 9. Ações Fiscais */}
-                        <td className="px-4 py-3.5 text-right" onClick={(e) => e.stopPropagation()}>
+                        <td className="px-3 py-3.5 text-right" onClick={(e) => e.stopPropagation()}>
                           {onEmitirParaCliente ? (
                             <button
                               onClick={() => onEmitirParaCliente(c)}
                               className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#11d493] text-gray-950 hover:bg-[#0eb880] font-black rounded-xl text-xs transition shadow-sm active:scale-95 cursor-pointer"
-                              title="Emitir NF-e ou Boleto com Pix para este cliente"
+                              title="Emitir NF-e ou Boleto"
                             >
                               <Receipt className="w-3.5 h-3.5" />
                               <span>Emitir</span>
@@ -644,7 +1041,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                           ) : (
                             <button
                               onClick={() => setSelectedClientModal(c)}
-                              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition"
+                              className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer"
                             >
                               <ExternalLink className="w-4 h-4" />
                             </button>
@@ -660,84 +1057,320 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
         </div>
       </div>
 
-      {/* Modal / Prontuário Completo do Cliente */}
-      {selectedClientModal && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#162f27] rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-gray-200 dark:border-[#214739] space-y-4">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-600 text-slate-950 font-black text-base flex items-center justify-center shadow-md">
-                  {getIniciais(selectedClientModal.fantasia || selectedClientModal.nome)}
+      {/* MODAL COMPLETO: CARTÃO CNPJ & SINTEGRA */}
+      {activeClientInModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white dark:bg-[#162f27] rounded-3xl max-w-2xl w-full p-5 sm:p-7 shadow-2xl border border-gray-200 dark:border-[#214739] space-y-5 my-8 max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in-95">
+            {/* Header com Emblema e Fechar */}
+            <div className="flex items-start justify-between gap-4 pb-4 border-b border-gray-100 dark:border-[#214739]">
+              <div className="flex items-start gap-3.5 min-w-0">
+                <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-emerald-500 to-teal-600 text-slate-950 font-black text-lg flex items-center justify-center shadow-md shrink-0">
+                  <Building2 className="w-6 h-6 stroke-[2.2]" />
                 </div>
-                <div>
-                  <h3 className="text-base font-black text-gray-900 dark:text-white">
-                    {selectedClientModal.fantasia || selectedClientModal.nome}
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-500/10 text-[#11d493] border border-emerald-500/20">
+                      Cartão CNPJ & Sintegra
+                    </span>
+                    {activeClientInModal.situacaoCadastral && (
+                      <span
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold ${
+                          activeClientInModal.situacaoCadastral === 'ATIVA'
+                            ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30'
+                            : 'bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-500/30'
+                        }`}
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full ${
+                            activeClientInModal.situacaoCadastral === 'ATIVA' ? 'bg-[#11d493]' : 'bg-rose-500'
+                          }`}
+                        />
+                        {activeClientInModal.situacaoCadastral}
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-base sm:text-lg font-black text-gray-900 dark:text-white truncate mt-1">
+                    {activeClientInModal.fantasia || activeClientInModal.nome}
                   </h3>
-                  <p className="text-xs text-gray-500 dark:text-gray-400 font-medium">
-                    {selectedClientModal.nome}
+                  <p className="text-xs text-gray-500 dark:text-gray-400 font-medium truncate">
+                    {activeClientInModal.nome}
                   </p>
                 </div>
               </div>
+
               <button
                 onClick={() => setSelectedClientModal(null)}
-                className="p-1.5 rounded-xl text-gray-400 hover:text-gray-600 dark:hover:text-white"
+                className="p-1.5 rounded-xl text-gray-400 hover:text-gray-600 dark:hover:text-white transition cursor-pointer shrink-0"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-xs pt-2 border-t border-gray-100 dark:border-[#214739]">
-              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
-                  CNPJ / CPF
+            {/* Documentos Fiscais: CNPJ e Inscrição Estadual (Sintegra) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <div className="p-3 rounded-2xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/70 dark:border-gray-700/60 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
+                    CNPJ / Documento
+                  </span>
+                  <span className="font-mono font-black text-sm text-gray-900 dark:text-white">
+                    {formatarCNPJ(activeClientInModal.numeroDocumento || '')}
+                  </span>
+                </div>
+                <button
+                  onClick={(e) => handleCopyDoc(e, activeClientInModal.id, activeClientInModal.numeroDocumento)}
+                  className="p-2 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200 dark:border-gray-700 hover:border-[#11d493] text-gray-600 dark:text-gray-300 transition cursor-pointer"
+                  title="Copiar CNPJ"
+                >
+                  {copiedDocId === activeClientInModal.id ? (
+                    <Check className="w-4 h-4 text-[#11d493]" />
+                  ) : (
+                    <Copy className="w-4 h-4" />
+                  )}
+                </button>
+              </div>
+
+              <div className="p-3 rounded-2xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/70 dark:border-gray-700/60 flex items-center justify-between">
+                <div>
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
+                    Inscrição Estadual (Sintegra)
+                  </span>
+                  <span className="font-mono font-bold text-xs text-gray-800 dark:text-gray-200">
+                    {activeClientInModal.ie || 'Não informada'}
+                  </span>
+                </div>
+                <a
+                  href="http://www.sintegra.gov.br/"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200 dark:border-gray-700 hover:border-[#11d493] text-[11px] font-bold text-[#11d493] transition cursor-pointer"
+                  title="Consultar Sintegra Estadual"
+                >
+                  <Globe className="w-3.5 h-3.5" />
+                  <span>Sintegra</span>
+                </a>
+              </div>
+            </div>
+
+            {/* Quadro Cadastral Completo */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block flex items-center gap-1">
+                  <Calendar className="w-3 h-3 text-gray-400" /> Abertura
                 </span>
-                <span className="font-mono font-bold text-gray-800 dark:text-gray-200">
-                  {selectedClientModal.numeroDocumento}
+                <span className="font-bold text-gray-800 dark:text-gray-200">
+                  {formatarDataBr(activeClientInModal.dataAbertura)}
                 </span>
               </div>
 
-              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
-                  Segmento
+              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block flex items-center gap-1">
+                  <Briefcase className="w-3 h-3 text-gray-400" /> Porte
                 </span>
-                <span className="font-bold text-gray-800 dark:text-gray-200">
-                  {selectedClientModal.segmento || 'Geral'}
-                </span>
-              </div>
-
-              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
-                  Localidade
-                </span>
-                <span className="font-bold text-gray-800 dark:text-gray-200">
-                  {selectedClientModal.endereco?.geral?.municipio || 'São Paulo'} / {selectedClientModal.endereco?.geral?.uf || 'SP'}
+                <span className="font-bold text-gray-800 dark:text-gray-200 truncate block">
+                  {activeClientInModal.porte || 'Demais'}
                 </span>
               </div>
 
-              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block">
-                  Condição de Pagamento
+              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block flex items-center gap-1">
+                  <DollarSign className="w-3 h-3 text-gray-400" /> Capital Social
                 </span>
                 <span className="font-bold text-gray-800 dark:text-gray-200">
-                  {selectedClientModal.condicaoPagamento || 'A Combinar'}
+                  {typeof activeClientInModal.capitalSocial === 'number'
+                    ? activeClientInModal.capitalSocial.toLocaleString('pt-BR', {
+                        style: 'currency',
+                        currency: 'BRL',
+                      })
+                    : '-'}
+                </span>
+              </div>
+
+              <div className="p-2.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3 text-gray-400" /> Situação
+                </span>
+                <span className="font-bold text-gray-800 dark:text-gray-200">
+                  {formatarDataBr(activeClientInModal.dataSituacaoCadastral)}
                 </span>
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 pt-3 border-t border-gray-100 dark:border-[#214739]">
-              {onEmitirParaCliente && (
-                <button
-                  onClick={() => {
-                    const c = selectedClientModal;
-                    setSelectedClientModal(null);
-                    onEmitirParaCliente(c);
-                  }}
-                  className="px-4 py-2.5 text-xs font-black bg-[#11d493] text-gray-950 rounded-xl hover:bg-[#0eb880] shadow-md shadow-emerald-500/20 flex items-center gap-2 cursor-pointer"
-                >
-                  <Receipt className="w-4 h-4" />
-                  <span>Emitir NF-e / Boleto</span>
-                </button>
+            {/* Natureza Jurídica */}
+            {activeClientInModal.naturezaJuridica && (
+              <div className="p-3 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50 text-xs">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
+                  Natureza Jurídica
+                </span>
+                <span className="font-medium text-gray-800 dark:text-gray-200">
+                  {activeClientInModal.naturezaJuridica}
+                </span>
+              </div>
+            )}
+
+            {/* Atividades Econômicas (CNAEs) */}
+            <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50 space-y-2">
+              <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                <Layers className="w-3.5 h-3.5 text-[#11d493]" />
+                Atividade Econômica Principal (CNAE)
+              </span>
+
+              {activeClientInModal.cnaePrincipal?.codigo ? (
+                <div className="text-xs">
+                  <span className="font-mono font-black text-[#11d493] bg-emerald-500/10 px-2 py-0.5 rounded-md mr-2">
+                    {activeClientInModal.cnaePrincipal.codigo}
+                  </span>
+                  <span className="font-medium text-gray-800 dark:text-gray-200">
+                    {activeClientInModal.cnaePrincipal.descricao}
+                  </span>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic">
+                  {activeClientInModal.segmento || 'Não informado pela base'}
+                </p>
               )}
+
+              {/* CNAEs Secundários Colapsáveis */}
+              {activeClientInModal.cnaesSecundarios && activeClientInModal.cnaesSecundarios.length > 0 && (
+                <div className="pt-2 border-t border-gray-200/60 dark:border-gray-700/50">
+                  <button
+                    onClick={() => setShowSecundariosModal(!showSecundariosModal)}
+                    className="flex items-center justify-between w-full text-[11px] font-bold text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white cursor-pointer"
+                  >
+                    <span>{activeClientInModal.cnaesSecundarios.length} Atividades Secundárias</span>
+                    {showSecundariosModal ? (
+                      <ChevronUp className="w-3.5 h-3.5" />
+                    ) : (
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+
+                  {showSecundariosModal && (
+                    <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                      {activeClientInModal.cnaesSecundarios.map((cnae, idx) => (
+                        <div key={idx} className="text-[11px] flex items-start gap-1.5">
+                          <span className="font-mono font-bold text-gray-500 dark:text-gray-400 shrink-0">
+                            {cnae.codigo}
+                          </span>
+                          <span className="text-gray-700 dark:text-gray-300">{cnae.descricao}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Quadro de Sócios e Administradores (QSA) */}
+            {activeClientInModal.qsa && activeClientInModal.qsa.length > 0 && (
+              <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50 space-y-2">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5 text-blue-500" />
+                  Quadro de Sócios e Administradores (QSA)
+                </span>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {activeClientInModal.qsa.map((socio, idx) => (
+                    <div
+                      key={idx}
+                      className="p-2 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/60 dark:border-gray-700/50 text-xs"
+                    >
+                      <p className="font-bold text-gray-900 dark:text-white truncate">{socio.nome}</p>
+                      <p className="text-[10px] text-gray-400 truncate">
+                        {socio.qual || 'Sócio'} {socio.faixaEtaria ? `• ${socio.faixaEtaria}` : ''}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Endereço Fiscal Completo com link Google Maps */}
+            <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+              <div className="min-w-0">
+                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5 flex items-center gap-1">
+                  <MapPin className="w-3.5 h-3.5 text-[#11d493]" /> Endereço Fiscal Cadastrado
+                </span>
+                <p className="font-semibold text-gray-800 dark:text-gray-200 leading-snug">
+                  {[
+                    activeClientInModal.endereco?.geral?.endereco,
+                    activeClientInModal.endereco?.geral?.numero,
+                    activeClientInModal.endereco?.geral?.complemento,
+                  ]
+                    .filter(Boolean)
+                    .join(', ') || 'Endereço não cadastrado'}
+                </p>
+                <p className="text-[11px] text-gray-400">
+                  {[
+                    activeClientInModal.endereco?.geral?.bairro,
+                    activeClientInModal.endereco?.geral?.municipio,
+                    activeClientInModal.endereco?.geral?.uf,
+                    activeClientInModal.endereco?.geral?.cep,
+                  ]
+                    .filter(Boolean)
+                    .join(' - ')}
+                </p>
+              </div>
+
+              {activeClientInModal.endereco?.geral?.municipio && (
+                <a
+                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                    `${activeClientInModal.endereco.geral.endereco || ''} ${
+                      activeClientInModal.endereco.geral.numero || ''
+                    }, ${activeClientInModal.endereco.geral.municipio || ''} - ${
+                      activeClientInModal.endereco.geral.uf || ''
+                    }`
+                  )}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200 dark:border-gray-700 hover:border-[#11d493] text-gray-700 dark:text-gray-200 text-xs font-bold transition shrink-0 cursor-pointer"
+                >
+                  <MapPin className="w-3.5 h-3.5 text-[#11d493]" />
+                  <span>Ver no Maps</span>
+                </a>
+              )}
+            </div>
+
+            {/* Rodapé com Ações do Modal */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-gray-100 dark:border-[#214739]">
+              <span className="text-[10px] text-gray-400">
+                {activeClientInModal.consultadoEm
+                  ? `Atualizado em ${formatarDataBr(activeClientInModal.consultadoEm)}`
+                  : 'Nenhuma consulta efetuada ainda'}
+              </span>
+
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                {/* Botão Consultar Receita Agora */}
+                <button
+                  onClick={() => handleConsultarIndividual(activeClientInModal)}
+                  disabled={singleConsultandoId === activeClientInModal.id}
+                  className="flex-1 sm:flex-initial inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 rounded-xl border border-gray-200 dark:border-[#214739] text-gray-700 dark:text-gray-200 hover:border-[#11d493] hover:text-[#11d493] text-xs font-bold transition cursor-pointer disabled:opacity-50"
+                  title="Atualizar dados cadastrais via Receita Federal"
+                >
+                  {singleConsultandoId === activeClientInModal.id ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-[#11d493]" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4 text-[#11d493]" />
+                  )}
+                  <span>
+                    {singleConsultandoId === activeClientInModal.id ? 'Consultando...' : 'Atualizar Dados'}
+                  </span>
+                </button>
+
+                {onEmitirParaCliente && (
+                  <button
+                    onClick={() => {
+                      const c = activeClientInModal;
+                      setSelectedClientModal(null);
+                      onEmitirParaCliente(c);
+                    }}
+                    className="flex-1 sm:flex-initial px-4 py-2.5 text-xs font-black bg-[#11d493] text-gray-950 rounded-xl hover:bg-[#0eb880] shadow-md shadow-emerald-500/20 flex items-center justify-center gap-1.5 cursor-pointer"
+                  >
+                    <Receipt className="w-4 h-4" />
+                    <span>Emitir NF-e</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -746,7 +1379,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
       {/* Modal Adicionar Cliente */}
       {showAddModal && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#162f27] rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-gray-200 dark:border-[#214739] space-y-4">
+          <div className="bg-white dark:bg-[#162f27] rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-gray-200 dark:border-[#214739] space-y-4 animate-in fade-in">
             <div className="flex items-center justify-between">
               <h3 className="text-base font-black text-gray-900 dark:text-white flex items-center gap-2">
                 <Plus className="w-5 h-5 text-[#11d493]" />
@@ -754,7 +1387,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
               </h3>
               <button
                 onClick={() => setShowAddModal(false)}
-                className="p-1 rounded-lg text-gray-400 hover:text-white"
+                className="p-1 rounded-lg text-gray-400 hover:text-white cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -873,7 +1506,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2.5 text-xs font-bold text-gray-600 dark:text-gray-400 hover:text-gray-900"
+                  className="px-4 py-2.5 text-xs font-bold text-gray-600 dark:text-gray-400 hover:text-gray-900 cursor-pointer"
                 >
                   Cancelar
                 </button>

@@ -181,17 +181,29 @@ export interface BlingCliente {
   regimeTributario?: string;
   endereco?: {
     geral?: {
-      endereco: string;
-      numero: string;
+      endereco?: string;
+      numero?: string;
       complemento?: string;
-      bairro: string;
-      cep: string;
-      municipio: string;
-      uf: string;
+      bairro?: string;
+      cep?: string;
+      municipio?: string;
+      uf?: string;
     };
   };
   saldoDevedor?: number;
   limiteCredito?: number;
+  // Dados estendidos do Cartão CNPJ e Sintegra (Receita Federal)
+  cnaePrincipal?: { codigo: string | number; descricao: string };
+  cnaesSecundarios?: Array<{ codigo: string | number; descricao: string }>;
+  situacaoCadastral?: string;
+  dataSituacaoCadastral?: string;
+  motivoSituacaoCadastral?: string;
+  naturezaJuridica?: string;
+  dataAbertura?: string;
+  capitalSocial?: number;
+  porte?: string;
+  qsa?: Array<{ nome: string; qual?: string; faixaEtaria?: string }>;
+  consultadoEm?: string;
 }
 
 export interface BlingFornecedor {

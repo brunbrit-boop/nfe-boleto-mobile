@@ -180,6 +180,7 @@ export const BtBusinessSuite: React.FC<BtBusinessSuiteProps> = ({
           {/* 3. Clientes (ClientsView) */}
           {activeMenu === 'clients' && (
             <ClientsView
+              empresaId={empresa.id}
               clientesBling={clientes}
               contasReceber={contasReceber}
               carregando={carregandoBling}
