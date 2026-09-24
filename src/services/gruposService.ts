@@ -22,14 +22,19 @@ export const DIRETRIZES_GERAIS_PADRAO = `1. REGRA DE OURO - QUANTIDADES QUEBRADA
 - Itens de baixo ticket (joelhos, luvas, curvas, buchas, fita veda-rosca) NUNCA podem ter quantidades absurdas. O teto máximo normal é entre 5 e 35 unidades por item.
 - É ABSOLUTAMENTE PROIBIDO usar um produto barato com centenas ou milhares de unidades apenas para "fechar" o valor financeiro do pedido!
 
-3. LEI DE PARETO (80/20 DO VALOR DA VENDA):
-- Pelo menos 75% a 85% do valor total do pedido DEVE ser construído pelos itens estruturais ou de maior valor unitário (ex: tubulações em barras, rolos de cabos, sacos de cimento, disjuntores).
-- Os itens baratos servem exclusivamente como complementos funcionais do kit.
+3. BALANCEAMENTO DE ESTRUTURA COMERCIAL (50% ESTRUTURAL / 50% COMPLETAMENTE SORTIDO):
+- Aprox. metade dos orçamentos gerados pode ter foco estrutural (itens de maior valor como âncora + complementos técnicos).
+- A outra metade dos orçamentos DEVE ser COMPLETAMENTE SORTIDA (mix multicategoria colorido e vibrante, cruzando de 3 a 5 departamentos diferentes: hidráulica, elétrica, pintura, ferramentas, fixação/acabamento).
+- Pedidos sortidos NUNCA podem ser monocromáticos (centrados em uma única categoria), mantendo sempre coesão realista de compras de obra.
 
-4. PROPORÇÃO TÉCNICA E COERÊNCIA DE MIX:
-- Produtos estruturais e miudezas devem ter relação técnica realista. Se cotar tubos de PVC, inclua conexões proporcionais.
+4. CUMPRIMENTO RÍGIDO DA QUANTIDADE DE ITENS (ANTI-ACOMODAÇÃO):
+- Se a meta de itens para o cliente for alta (ex: 28, 35, 40 itens), a IA NUNCA deve parar antes de preencher a quantidade estipulada de linhas!
+- Para atingir 30 a 40 itens sem ultrapassar o valor financeiro em reais, fraciona e reduz as quantidades unitárias de cada item (ex: 2 a 8 unidades de cada).
 
-5. PRECISÃO DE VALOR E MARGEM COMERCIAL:
+5. PROPORÇÃO TÉCNICA E COERÊNCIA DE COMPRA:
+- Mesmo quando o mix for amplamente sortido (multicategoria), os produtos selecionados devem fazer sentido conjunto como uma compra plausível de obra ou reforma.
+
+6. PRECISÃO DE VALOR E MARGEM COMERCIAL:
 - O valor total do orçamento deve atingir o valor-alvo estipulado com desvio máximo de até 5% (nunca exceder 5%).`;
 
 /**

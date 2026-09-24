@@ -2,12 +2,11 @@ import type { CatalogoProduto, OfertaGeradaResult, PedidoItemVenda } from '../ut
 import { CATALOGO_PRODUTOS_PADRAO } from '../utils/salesOptimizer';
 
 export const GEMINI_MODELS = [
-  'gemini-2.5-flash',
-  'gemini-1.5-flash',
-  'gemini-2.0-flash',
+  'gemini-3.6-flash',
+  'gemini-flash-latest',
   'gemini-3.5-flash',
   'gemini-3.7-flash',
-  'gemini-3.6-flash',
+  'gemini-3.8-flash',
 ];
 
 /**
@@ -150,11 +149,12 @@ export async function gerarOfertaComGeminiOuLocal(
 2. LEI DA TRAVA DE QUANTIDADE PARA ACESSÓRIOS E ITENS BARATOS (< R$ 18,00):
    - Itens de baixo ticket (joelhos, luvas, curvas, buchas, fita veda-rosca) NUNCA podem ter quantidades absurdas. O teto máximo normal é entre 5 e 35 unidades por item.
    - É ABSOLUTAMENTE PROIBIDO usar um produto barato com centenas ou milhares de unidades apenas para "fechar" o valor financeiro do pedido!
-3. LEI DE PARETO (80/20 DO VALOR DA VENDA):
-   - Pelo menos 75% a 85% do valor total do pedido DEVE ser construído pelos itens estruturais ou de maior valor unitário (ex: tubulações em barras, rolos de cabos, sacos de cimento, disjuntores).
-   - Os itens baratos servem exclusivamente como complementos funcionais do kit.
-4. PROPORÇÃO TÉCNICA E COERÊNCIA DE MIX:
-   - Produtos estruturais e miudezas devem ter relação técnica realista. Se cotar tubos de PVC, inclua conexões proporcionais.`;
+3. BALANCEAMENTO DE ESTRUTURA COMERCIAL (50% ESTRUTURAL / 50% COMPLETAMENTE SORTIDO):
+   - Aprox. metade dos pedidos pode ter base estrutural de maior valor, e a outra metade DEVE ser COMPLETAMENTE SORTIDA e multicategoria (cruzando de 3 a 5 departamentos diferentes, NUNCA monocromático).
+4. CUMPRIMENTO RÍGIDO DA QUANTIDADE DE ITENS (ANTI-ACOMODAÇÃO):
+   - O pedido DEVE atingir a quantidade estipulada de itens distintos (${minEfetivo} a ${maxEfetivo}). Nunca pare antes de preencher as linhas solicitadas! Fracione as quantidades unitárias para que todos os itens caibam no valor pretendido.
+5. PROPORÇÃO TÉCNICA E COERÊNCIA DE COMPRA:
+   - Produtos devem ter relação técnica realista e coesão prática de obra.`;
 
   const prompt = `Você é um diretor comercial sênior e especialista em orçamentos B2B e vendas de materiais de construção.
 Sua missão é selecionar uma combinação técnica e comercialmente IMPECÁVEL de produtos do catálogo para compor um pedido de venda no valor pretendido.
@@ -163,14 +163,14 @@ DADOS DA SOLICITAÇÃO:
 - Valor Alvo Pretendido: R$ ${valorAlvo.toFixed(2)}
 - Valor Máximo Permitido (com margem de até ${margemMax * 100}%): R$ ${limiteMaximo.toFixed(2)}
 - Margem Aceitável: O valor total do pedido (soma de qtd * precoUnitario) DEVE ficar estritamente entre R$ ${valorAlvo.toFixed(2)} e R$ ${limiteMaximo.toFixed(2)}.
-- QUANTIDADE DE PRODUTOS DISTINTOS (SKUs): O pedido DEVE conter OBRIGATORIAMENTE entre ${minEfetivo} e ${maxEfetivo} itens diferentes do catálogo (sortimento equilibrado).
+- QUANTIDADE DE PRODUTOS DISTINTOS (SKUs) OBRIGATÓRIA: O pedido DEVE conter OBRIGATORIAMENTE entre ${minEfetivo} e ${maxEfetivo} itens diferentes do catálogo. NÃO se acomode em poucos produtos! Distribua o valor entre ${minEfetivo} e ${maxEfetivo} produtos distintos.
 ${diretrizComercial ? `- DIRETRIZ DE FOCO / NICHO COMERCIAL: "${diretrizComercial}".` : ''}
 
 🎯 MODALIDADES DE ORÇAMENTO (SIGA CONFORME A DIRETRIZ ACIMA):
 1. SE FOR NICHO ESPECÍFICO (ex: "Cabos & Condutores", "Tubos & Conexões", "Disjuntores & Proteção", "Iluminação & Lâmpadas", "Cimento & Alvenaria", "Ferramentas & Fixação", "Tintas & Químicos"):
    - Concentre pelo menos 85% a 100% do pedido em itens desta categoria/nicho e seus complementos técnicos diretos.
-2. SE FOR CESTA BALANCEADA MULTICATEGORIA (ex: "Cesta Balanceada", "Multicategoria", "Mix Variado"):
-   - OBRIGATÓRIO mesclar produtos de 2 a 4 nichos distintos (ex: 50%-60% estrutural principal + 25%-30% instalação/infra + 10%-15% acabamento/fixação). NUNCA concentre tudo em apenas uma categoria.
+2. SE FOR CESTA BALANCEADA OU MIX SORTIDO:
+   - OBRIGATÓRIO mesclar produtos de 3 a 5 categorias distintas (mix colorido: ex: hidráulica + elétrica + ferramentas + pintura + fixação). NUNCA concentre tudo em apenas uma categoria.
 3. SE FOR MIX ROTATIVO OU ABERTO (ex: "Mix Rotativo Automático" ou Geral):
    - Varie a seleção de produtos com criatividade comercial e evite repetir sempre os mesmos itens convencionais.
 
@@ -339,11 +339,16 @@ export async function gerarOfertasLoteUnificadoGemini(
   const listaClientesPrompt = clientesInput.map((c, idx) => {
     const minClamped = Math.max(10, Math.min(50, c.itensMin ?? itensMinGeral ?? 10));
     const maxClamped = Math.max(minClamped, Math.min(50, c.itensMax ?? itensMaxGeral ?? 35));
-    // Alterna a meta de quantidade de itens entre os clientes de forma sortida e harmoniosa
+    // Alterna a meta de quantidade de itens entre os clientes de forma sortida e variada
     const range = maxClamped - minClamped;
-    const fatores = [0.1, 0.85, 0.4, 0.95, 0.25, 0.65];
+    const fatores = [0.15, 0.95, 0.45, 1.0, 0.25, 0.75];
     const fator = range > 0 ? fatores[idx % fatores.length] : 0;
-    const metaItensSugerida = Math.round(minClamped + fator * range);
+    const metaItensExata = Math.round(minClamped + fator * range);
+
+    // Alterna 50% estrutural / 50% completamente sortido multicategoria
+    const estiloProposta = idx % 2 === 0
+      ? 'Estrutural (itens de maior valor como âncora + complementos)'
+      : 'Completamente Sortido (mix colorido cruzando de 3 a 5 categorias diferentes, nunca monocromático)';
 
     return {
       clienteId: c.clienteId,
@@ -351,7 +356,9 @@ export async function gerarOfertasLoteUnificadoGemini(
       valorAlvo: c.valorAlvo,
       limiteMaximo: Number((c.valorAlvo * (1 + margemMax)).toFixed(2)),
       foco: c.foco || 'Geral / Mix comercial equilibrado',
-      faixaItensDistintos: `Entre ${minClamped} e ${maxClamped} itens diferentes (meta sugerida para este cliente: aprox. ${metaItensSugerida} itens)`,
+      metaExataItensDistintos: metaItensExata,
+      instrucaoLinhas: `O pedido DEVE conter exatamente ou cerca de ${metaItensExata} itens diferentes (faixa ${minClamped} a ${maxClamped} itens). NÃO pare antes de preencher as ${metaItensExata} linhas!`,
+      estiloComposicao: estiloProposta,
       produtosPermitidos: c.catalogoEspecifico ? c.catalogoEspecifico.map((p) => p.id) : undefined,
     };
   });
@@ -364,11 +371,13 @@ export async function gerarOfertasLoteUnificadoGemini(
 2. LEI DA TRAVA DE QUANTIDADE PARA ACESSÓRIOS E ITENS BARATOS (< R$ 18,00):
    - Itens de baixo ticket (joelhos, luvas, curvas, buchas, fita veda-rosca) NUNCA podem ter quantidades absurdas. Teto entre 5 e 35 unidades por item.
    - É ABSOLUTAMENTE PROIBIDO usar um produto barato com centenas de unidades apenas para fechar o valor do pedido!
-3. LEI DE PARETO (80/20 DO VALOR DA VENDA):
-   - Pelo menos 75% a 85% do valor total do pedido DEVE ser construído pelos itens estruturais ou de maior valor unitário.
-   - Itens baratos servem exclusivamente como complementos funcionais do kit.
-4. PROPORÇÃO TÉCNICA E COERÊNCIA DE MIX:
-   - Produtos estruturais e miudezas devem ter relação técnica realista.`;
+3. BALANCEAMENTO DE ESTRUTURA COMERCIAL (50% ESTRUTURAL / 50% COMPLETAMENTE SORTIDO):
+   - Aprox. metade das notas deve ser estrutural (com base forte de itens principais de maior valor) e a outra metade DEVE ser COMPLETAMENTE SORTIDA e multicategoria (cruzando de 3 a 5 categorias diferentes da loja, NUNCA monocromática).
+4. CUMPRIMENTO RÍGIDO DA QUANTIDADE DE ITENS (ANTI-ACOMODAÇÃO):
+   - A IA DEVE cumprir a "metaExataItensDistintos" de cada cliente (ex: se a meta for 35 ou 40 itens, preencha exatamente 35 ou 40 itens diferentes!).
+   - NUNCA pare em 15 ou 20 itens por ter atingido o valor financeiro: reduza as quantidades unitárias de cada produto para que todas as linhas caibam no orçamento.
+5. PROPORÇÃO TÉCNICA E COERÊNCIA DE MIX:
+   - Produtos estruturais e miudezas devem ter relação técnica realista e coerência prática de compra de obra.`;
 
   const prompt = `Você é um diretor comercial sênior e especialista em orçamentos B2B e vendas de materiais de construção.
 Sua missão é gerar propostas comerciais personalizadas para uma LISTA DE CLIENTES em uma única resposta unificada.
@@ -395,16 +404,20 @@ INSTRUÇÕES CRÍTICAS DE RETORNO E VARIAÇÃO DE NICHOS:
 - Se o cliente tiver "produtosPermitidos", use EXCLUSIVAMENTE IDs dessa lista para ele.
 - O valor total de cada proposta deve atingir o "valorAlvo" com desvio máximo de até ${margemMax * 100}%.
 
-🎲 VARIAÇÃO E SORTIMENTO DA QUANTIDADE DE ITENS (REGRA OBRIGATÓRIA):
-- Cada cliente tem sua "faixaItensDistintos" informada acima. Respeite RIGOROSAMENTE o mínimo e o máximo de itens diferentes (SKUs) em cada proposta.
-- ALTERNE e DIVERSIFIQUE a quantidade de linhas entre as notas: clientes diferentes devem receber quantidades variadas de itens (algumas notas mais enxutas com itens de maior valor, outras notas com sortimento extenso de produtos variados). NUNCA gere notas com o mesmo número idêntico de itens!
+🎲 CUMPRIMENTO RÍGIDO DA QUANTIDADE DE ITENS (ANTI-ACOMODAÇÃO):
+- Cada cliente tem sua "metaExataItensDistintos" (ex: 12, 22, 35, 40 itens). CUMPRA rigorosamente essa quantidade de linhas para cada cliente!
+- É expressamente PROIBIDO parar antes da meta de itens. Se o cliente tiver meta de 35 a 40 itens, coloque 35 a 40 itens diferentes, fracionando as quantidades unitárias (ex: 2 a 8 unidades por produto) para fechar o valor total sem estourar a margem.
+
+🎨 ALTERNÂNCIA DE ESTILOS (50% ESTRUTURAL / 50% SORTIDO MULTICATEGORIA):
+- Metade dos clientes tem estilo "Estrutural" (âncora de produtos de maior ticket + complementos).
+- A outra metade tem estilo "Completamente Sortido": crie uma CESTA COLORIDA e diversificada mesclando de 3 a 5 departamentos diferentes (ex: hidráulica, elétrica, ferramentas, pintura, acabamento). NUNCA monte notas monocromáticas com produtos de um único nicho!
 
 🎲 ROTAÇÃO AUTOMÁTICA E DIVERSIDADE ENTRE CLIENTES (REGRA SUPREMA):
 - Quando os clientes tiverem foco "Mix Rotativo Automático", foco livre ou "Geral", a IA DEVE ALTERNAR os nichos comerciais entre os clientes!
   Exemplo: Se há 5 clientes, o Cliente 1 pode receber foco em Hidráulica/Tubos, o Cliente 2 em Elétrica/Cabos & Disjuntores, o Cliente 3 em Iluminação, o Cliente 4 em Cimento & Alvenaria, e o Cliente 5 em Cesta Multicategoria Balanceada.
 - NUNCA monte o mesmo kit repetido ou os mesmos produtos idênticos para clientes diferentes da lista!
 - SE O CLIENTE TIVER UM NICHO ESPECÍFICO (ex: "Cabos & Condutores" ou "Tubos & Conexões"): Monte o kit focado estritamente nesse nicho.
-- SE O CLIENTE TIVER "Cesta Balanceada Multicategoria": Mescle obrigatoriamente produtos de 2 a 4 categorias diferentes.
+- SE O CLIENTE TIVER "Cesta Balanceada Multicategoria": Mescle obrigatoriamente produtos de 3 a 5 categorias diferentes.
 
 - Retorne ESTRITAMENTE um objeto JSON válido (sem blocos markdown) com a seguinte estrutura exata:
 {
