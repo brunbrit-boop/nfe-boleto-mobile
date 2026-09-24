@@ -504,6 +504,7 @@ export interface GravarEsbocoBlingParams {
   banco?: BankProvider;
   primeiroVencimento?: string;
   intervaloDias?: number;
+  observacoesAdicionais?: string;
 }
 
 export interface ResultadoEsbocoBling {
@@ -529,6 +530,7 @@ export async function gravarEsbocoNFeNoBling(
     parcelasCount = 1,
     primeiroVencimento,
     intervaloDias = 15,
+    observacoesAdicionais,
   } = params;
 
   if (!empresaToken || !empresaToken.trim()) {
@@ -638,8 +640,11 @@ export async function gravarEsbocoNFeNoBling(
     parcelasDescricoes.push(`Parcela ${i}/${parcelasCount}: ${dataVencBr} (${valorFormatado})`);
   }
 
-  // Monta as informações complementares da nota com as datas e valores das parcelas
-  const textoInformacoesComplementares = `Condições de Pagamento: ${parcelasDescricoes.join(' | ')}`;
+  // Monta as informações complementares da nota com as datas e valores das parcelas e observações adicionais (ex: nome do grupo/banco)
+  const condicoesTexto = `Condições de Pagamento: ${parcelasDescricoes.join(' | ')}`;
+  const textoInformacoesComplementares = observacoesAdicionais?.trim()
+    ? `${observacoesAdicionais.trim()}\n${condicoesTexto}`
+    : condicoesTexto;
 
   const payload: any = {
     tipo: 1, // 1 = Nota Fiscal de Saída (Vendas > Notas Fiscais)

@@ -349,7 +349,8 @@ export async function emitirNFeItemGrupo(
   item: GrupoClienteItem,
   empresa: EmpresaTenant,
   company: CompanyProfile,
-  bancoAtual: BankProvider
+  bancoAtual: BankProvider,
+  nomeGrupo?: string
 ): Promise<{ sucesso: boolean; nfe?: NFeData; erro?: string }> {
   if (!item.ofertaGerada || !item.ofertaGerada.itens || item.ofertaGerada.itens.length === 0) {
     return { sucesso: false, erro: 'Este cliente ainda não possui orçamento gerado pela IA.' };
@@ -377,6 +378,11 @@ export async function emitirNFeItemGrupo(
     baseDate
   );
 
+  const condicoesTexto = `Condições de Pagamento: ${parcelasCalculadas.map((p, idx) => `Parcela ${idx + 1}/${numParcelas}: ${p.dataVencimento.split('-').reverse().join('/')} (${formatCurrency(p.valor)})`).join(' | ')}`;
+  const textoInformacoesComplementares = nomeGrupo?.trim()
+    ? `${nomeGrupo.trim()}\n${condicoesTexto}`
+    : condicoesTexto;
+
   const novaNFe: NFeData = {
     numeroNFe: String(Math.floor(1000 + Math.random() * 9000)),
     serie: '1',
@@ -401,7 +407,7 @@ export async function emitirNFeItemGrupo(
     quantidadeParcelas: numParcelas,
     parcelas: parcelasCalculadas,
     banco: bancoAtual,
-    informacoesComplementares: `Orçamento gerado por IA para o grupo de clientes. Condição: ${numParcelas}x (${intervaloDias}d).`,
+    informacoesComplementares: textoInformacoesComplementares,
   };
 
   // Verifica se a empresa possui token Bling conectado para emissão do rascunho
@@ -430,6 +436,7 @@ export async function emitirNFeItemGrupo(
       banco: bancoAtual,
       intervaloDias: intervaloDias,
       primeiroVencimento: primeiroVenc,
+      observacoesAdicionais: nomeGrupo?.trim(),
     });
 
     if (!resBling.sucesso) {

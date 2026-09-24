@@ -489,7 +489,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     }, 25000);
 
     try {
-      const res = await emitirNFeItemGrupo(item, empresa, company, bancoAtual);
+      const res = await emitirNFeItemGrupo(item, empresa, company, bancoAtual, grupoAtivo?.nome);
       if (res.sucesso && res.nfe) {
         // Atualiza o item com a NF-e emitida e remove eventuais erros anteriores
         if (grupoAtivo) {
@@ -553,7 +553,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         setItemEmitindoNFeId(item.clienteId);
 
         try {
-          const res = await emitirNFeItemGrupo(item, empresa, company, bancoAtual);
+          const res = await emitirNFeItemGrupo(item, empresa, company, bancoAtual, grupoAtivo?.nome);
           if (res.sucesso && res.nfe) {
             grupoEmProcessamento = {
               ...grupoEmProcessamento,
