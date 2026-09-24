@@ -267,32 +267,26 @@ export function gerarDatasEscalonadasSemanais(
   };
 
   if (modoEscala === 'mesma_semana') {
-    // Determina a Segunda-feira da semana de referência
-    const diaSem = baseDate.getDay(); // 0=Dom, 1=Seg, 2=Ter, 3=Qua, 4=Qui, 5=Sex, 6=Sáb
-    const offsetSegunda = diaSem === 0 ? -6 : 1 - diaSem;
-    const segundaFeira = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate() + offsetSegunda);
+    // Opção 1: Janela de ciclo semanal a partir da data de partida (garante que nenhuma data seja < baseDate)
+    const totalDiasCiclo = Math.max(1, diasPermitidos.length);
+    const datasCiclo: string[] = [];
+    let cursorCiclo = ajustarParaProximoDiaPermitido(baseDate, diasPermitidos);
 
-    // Mapeia os dias permitidos ordenados de Segunda (1) a Domingo (7)
-    const diasPermitidosOrdenados = [...diasPermitidos].sort((a, b) => {
-      const pesoA = a === 0 ? 7 : a;
-      const pesoB = b === 0 ? 7 : b;
-      return pesoA - pesoB;
-    });
+    for (let c = 0; c < totalDiasCiclo; c++) {
+      datasCiclo.push(formatarIso(cursorCiclo));
+      if (c < totalDiasCiclo - 1) {
+        cursorCiclo.setDate(cursorCiclo.getDate() + 1);
+        cursorCiclo = ajustarParaProximoDiaPermitido(cursorCiclo, diasPermitidos);
+      }
+    }
 
-    const datasDaSemana: string[] = diasPermitidosOrdenados.map((dia) => {
-      const d = new Date(segundaFeira);
-      const diffDias = (dia === 0 ? 7 : dia) - 1;
-      d.setDate(d.getDate() + diffDias);
-      return formatarIso(d);
-    });
-
-    if (datasDaSemana.length === 0) {
+    if (datasCiclo.length === 0) {
       return Array(quantidade).fill(dataInicialStr);
     }
 
     const resultado: string[] = [];
     for (let k = 0; k < quantidade; k++) {
-      resultado.push(datasDaSemana[k % datasDaSemana.length]);
+      resultado.push(datasCiclo[k % datasCiclo.length]);
     }
     return resultado;
   }
