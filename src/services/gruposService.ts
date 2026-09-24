@@ -12,6 +12,47 @@ import { formatCurrency, gerarChaveAcessoNFe, calcularDivisaoParcelas } from '..
 
 const STORAGE_PREFIX = 'nfe_grupos_clientes';
 const STORAGE_PREFIX_PRODUTOS = 'nfe_grupos_produtos';
+const STORAGE_PREFIX_DIRETRIZES = 'nfe_diretrizes_gerais_empresa';
+
+export const DIRETRIZES_GERAIS_PADRAO = `1. REGRA DE OURO - QUANTIDADES QUEBRADAS E HUMANIZADAS:
+- NUNCA use quantidades redondas terminadas em zero (expressamente proibido 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, etc.).
+- Use SEMPRE quantidades comerciais quebradas e naturais, típicas de compras reais de obra (ex: 7, 13, 16, 19, 23, 27, 31, 38, 44 unidades).
+
+2. LEI DA TRAVA DE QUANTIDADE PARA ACESSÓRIOS E ITENS BARATOS (< R$ 18,00):
+- Itens de baixo ticket (joelhos, luvas, curvas, buchas, fita veda-rosca) NUNCA podem ter quantidades absurdas. O teto máximo normal é entre 5 e 35 unidades por item.
+- É ABSOLUTAMENTE PROIBIDO usar um produto barato com centenas ou milhares de unidades apenas para "fechar" o valor financeiro do pedido!
+
+3. LEI DE PARETO (80/20 DO VALOR DA VENDA):
+- Pelo menos 75% a 85% do valor total do pedido DEVE ser construído pelos itens estruturais ou de maior valor unitário (ex: tubulações em barras, rolos de cabos, sacos de cimento, disjuntores).
+- Os itens baratos servem exclusivamente como complementos funcionais do kit.
+
+4. PROPORÇÃO TÉCNICA E COERÊNCIA DE MIX:
+- Produtos estruturais e miudezas devem ter relação técnica realista. Se cotar tubos de PVC, inclua conexões proporcionais.
+
+5. PRECISÃO DE VALOR E MARGEM COMERCIAL:
+- O valor total do orçamento deve atingir o valor-alvo estipulado com desvio máximo de até 5% (nunca exceder 5%).`;
+
+/**
+ * Obtém as diretrizes gerais da empresa configuradas pelo usuário ou o padrão
+ */
+export function obterDiretrizesGeraisEmpresa(empresaId: string): string {
+  if (!empresaId) return DIRETRIZES_GERAIS_PADRAO;
+  try {
+    const salva = localStorage.getItem(`${STORAGE_PREFIX_DIRETRIZES}_${empresaId}`);
+    if (salva && salva.trim()) return salva;
+  } catch {}
+  return DIRETRIZES_GERAIS_PADRAO;
+}
+
+/**
+ * Salva as diretrizes gerais da empresa no armazenamento local
+ */
+export function salvarDiretrizesGeraisEmpresa(empresaId: string, diretrizes: string): void {
+  if (!empresaId) return;
+  try {
+    localStorage.setItem(`${STORAGE_PREFIX_DIRETRIZES}_${empresaId}`, diretrizes);
+  } catch {}
+}
 
 /**
  * Carrega a lista de grupos de produtos da empresa a partir do cache local
@@ -245,7 +286,9 @@ export async function gerarOfertaParaItem(
   item: GrupoClienteItem,
   catalogoDisponivel: CatalogoProduto[],
   margemMax: number = 0.05,
-  gruposProdutos: GrupoProdutos[] = []
+  gruposProdutos: GrupoProdutos[] = [],
+  diretrizesGerais?: string,
+  diretrizesGrupo?: string
 ): Promise<OfertaGeradaResult> {
   let catalogoEfetivo = catalogoDisponivel;
   let diretriz: string | undefined = undefined;
@@ -291,7 +334,14 @@ export async function gerarOfertaParaItem(
     throw new Error('Cérebro IA desconectado! Configure a Chave de API Google Gemini antes de gerar a proposta comercial.');
   }
 
-  return await gerarOfertaComGeminiOuLocal(item.valorAlvo, margemMax, catalogoEfetivo, diretriz);
+  return await gerarOfertaComGeminiOuLocal(
+    item.valorAlvo,
+    margemMax,
+    catalogoEfetivo,
+    diretriz,
+    diretrizesGerais,
+    diretrizesGrupo
+  );
 }
 
 /**
@@ -301,7 +351,8 @@ export async function executarGeracaoEmLote(
   grupo: GrupoClientes,
   catalogo: CatalogoProduto[],
   onProgress?: (clienteId: number, status: 'gerando' | 'gerado' | 'erro', oferta?: OfertaGeradaResult, erro?: string) => void,
-  shouldCancel?: () => boolean
+  shouldCancel?: () => boolean,
+  diretrizesGerais?: string
 ): Promise<GrupoClientes> {
   if (!isCerebroIAConectado()) {
     throw new Error('Cérebro IA desconectado! Conecte a Chave de API Google Gemini nas configurações antes de iniciar a geração em lote.');
@@ -321,8 +372,15 @@ export async function executarGeracaoEmLote(
     item.status = 'gerando';
 
     try {
-      // Gera a oferta personalizada com IA
-      const oferta = await gerarOfertaParaItem(item, catalogo);
+      // Gera a oferta personalizada com IA repassando diretrizes gerais e específicas do grupo
+      const oferta = await gerarOfertaParaItem(
+        item,
+        catalogo,
+        0.05,
+        [],
+        diretrizesGerais,
+        grupo.diretrizesGrupo
+      );
 
       item.status = 'gerado';
       item.ofertaGerada = oferta;

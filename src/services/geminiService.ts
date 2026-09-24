@@ -107,7 +107,9 @@ export async function gerarOfertaComGeminiOuLocal(
   valorAlvo: number,
   margemMax: number = 0.05,
   catalogo: CatalogoProduto[] = CATALOGO_PRODUTOS_PADRAO,
-  diretrizComercial?: string
+  diretrizComercial?: string,
+  diretrizesGeraisPersonalizadas?: string,
+  diretrizesGrupoPersonalizadas?: string
 ): Promise<OfertaGeradaResult & { motor: 'gemini' }> {
   const apiKey = getStoredGeminiApiKey().trim();
 
@@ -131,6 +133,18 @@ export async function gerarOfertaComGeminiOuLocal(
     categoria: p.categoria,
   }));
 
+  const diretrizesGeraisEfetivas = diretrizesGeraisPersonalizadas?.trim() || `1. QUANTIDADES HUMANIZADAS E QUEBRADAS (REGRA DE OURO):
+   - NUNCA use quantidades perfeitamente redondas ou terminadas em zero (evite expressamente 10, 20, 30, 40, 50, 100).
+   - Use SEMPRE quantidades comerciais quebradas e naturais, típicas de compras reais de obra (ex: 7, 13, 16, 19, 23, 27, 31, 38, 44 unidades).
+2. LEI DA TRAVA DE QUANTIDADE PARA ACESSÓRIOS E ITENS BARATOS (< R$ 18,00):
+   - Itens de baixo ticket (joelhos, luvas, curvas, buchas, fita veda-rosca) NUNCA podem ter quantidades absurdas. O teto máximo normal é entre 5 e 35 unidades por item.
+   - É ABSOLUTAMENTE PROIBIDO usar um produto barato com centenas ou milhares de unidades apenas para "fechar" o valor financeiro do pedido!
+3. LEI DE PARETO (80/20 DO VALOR DA VENDA):
+   - Pelo menos 75% a 85% do valor total do pedido DEVE ser construído pelos itens estruturais ou de maior valor unitário (ex: tubulações em barras, rolos de cabos, sacos de cimento, disjuntores).
+   - Os itens baratos servem exclusivamente como complementos funcionais do kit.
+4. PROPORÇÃO TÉCNICA E COERÊNCIA DE MIX:
+   - Produtos estruturais e miudezas devem ter relação técnica realista. Se cotar tubos de PVC, inclua conexões proporcionais.`;
+
   const prompt = `Você é um diretor comercial sênior e especialista em orçamentos B2B e vendas de materiais de construção.
 Sua missão é selecionar uma combinação técnica e comercialmente IMPECÁVEL de produtos do catálogo para compor um pedido de venda no valor pretendido.
 
@@ -138,22 +152,14 @@ DADOS DA SOLICITAÇÃO:
 - Valor Alvo Pretendido: R$ ${valorAlvo.toFixed(2)}
 - Valor Máximo Permitido (com margem de até ${margemMax * 100}%): R$ ${limiteMaximo.toFixed(2)}
 - Margem Aceitável: O valor total do pedido (soma de qtd * precoUnitario) DEVE ficar estritamente entre R$ ${valorAlvo.toFixed(2)} e R$ ${limiteMaximo.toFixed(2)}.
-${diretrizComercial ? `- FOCO / DIRETRIZ COMERCIAL SOLICITADA: "${diretrizComercial}". Priorize fortemente itens e complementos desta linha!` : '- DIRETRIZ COMERCIAL: Monte um mix balanceado e coerente para obra/reforma.'}
+${diretrizComercial ? `- FOCO DE PRODUTOS ESPECÍFICO DESTE CLIENTE: "${diretrizComercial}". Priorize itens e complementos desta linha!` : ''}
 
-⚠️ 4 LEIS COMERCIAIS OBRIGATÓRIAS (VIOLAÇÃO GERA PROPOSTA INVÁLIDA):
-1. LEI DO MIX LÓGICO E PROPORÇÃO REAL DE CONSUMO:
-   - Produtos estruturais e miudezas devem ter relação técnica realista.
-   - Exemplo: Se cotar Tubos de PVC (6m), inclua no máximo 2 a 4 conexões/joelhos por barra de tubo. NUNCA crie pedidos com dezenas de tubos e milhares de joelhos!
-   - Se cotar cimento, inclua argamassa/areia em proporções de canteiro de obras real.
-2. LEI DA TRAVA DE QUANTIDADE PARA ACESSÓRIOS E ITENS BARATOS (< R$ 18,00):
-   - Itens de baixo ticket (joelhos, luvas, curvas, buchas, fita veda-rosca) NUNCA podem ter quantidades absurdas. O teto máximo normal é entre 5 e 30 unidades por item.
-   - É ABSOLUTAMENTE PROIBIDO usar um produto barato com centenas ou milhares de unidades apenas para "fechar" o valor financeiro do pedido!
-3. LEI DE PARETO (80/20 DO VALOR DA VENDA):
-   - Pelo menos 75% a 85% do valor total do pedido DEVE ser construído pelos itens estruturais ou de maior valor unitário (ex: tubulações em barras, rolos de cabos, sacos de cimento, disjuntores).
-   - Os itens baratos servem exclusivamente como complementos funcionais do kit.
-4. LEI DOS LOTES COMERCIAIS REAIS:
-   - Use quantidades comerciais usuais em depósitos e construtoras (ex: 5, 10, 20, 25, 50, 100).
-   - Use APENAS produtos existentes no catálogo fornecido. As quantidades devem ser inteiros > 0.
+🌐 DIRETRIZES GERAIS DA EMPRESA (LEIS OBRIGATÓRIAS):
+${diretrizesGeraisEfetivas}
+
+${diretrizesGrupoPersonalizadas?.trim() ? `🎯 DIRETRIZES ESPECÍFICAS DESTE GRUPO DE VENDAS:
+${diretrizesGrupoPersonalizadas.trim()}
+` : ''}
 
 CATÁLOGO DISPONÍVEL (JSON):
 ${JSON.stringify(catalogoResumido, null, 2)}
@@ -161,7 +167,7 @@ ${JSON.stringify(catalogoResumido, null, 2)}
 Retorne ESTRITAMENTE um objeto JSON válido (sem blocos markdown) com a seguinte estrutura:
 {
   "itens": [
-    { "id": "prod_1", "quantidade": 10 }
+    { "id": "prod_1", "quantidade": 23 }
   ],
   "razaoExplicativa": "Explicação comercial concisa de como o mix foi estruturado (itens principais + complementos) e como o valor foi atingido com até 5% de margem."
 }`;
@@ -200,9 +206,15 @@ Retorne ESTRITAMENTE um objeto JSON válido (sem blocos markdown) com a seguinte
         const prod = catalogo.find((p) => p.id === itemGemini.id);
         let qtd = Math.max(1, Math.floor(Number(itemGemini.quantidade) || 1));
 
+        // Regra de Ouro: Se a quantidade for múltipla de 10 (ex: 10, 20, 30), transforma em quantidade quebrada e natural (ex: 11, 19, 23, 27, 31)
+        if (qtd > 5 && qtd % 10 === 0) {
+          const delta = (Math.random() > 0.5 ? 1 : -1) * (1 + Math.floor(Math.random() * 3));
+          qtd = Math.max(1, qtd + delta);
+        }
+
         // Trava de segurança anti-alucinação: se o produto for < R$ 18 e o modelo mandou > 35, trava em 30
         if (prod && prod.precoUnitario < 18 && qtd > 35) {
-          qtd = 30;
+          qtd = 27; // número quebrado natural
         }
 
         if (prod) {

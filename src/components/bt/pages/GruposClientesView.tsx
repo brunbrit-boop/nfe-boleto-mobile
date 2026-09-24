@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Users,
   Plus,
@@ -19,6 +19,10 @@ import {
   Target,
   Pencil,
   Check,
+  Pause,
+  Brain,
+  BookOpen,
+  RotateCcw,
 } from 'lucide-react';
 import type {
   EmpresaTenant,
@@ -44,6 +48,9 @@ import {
   gerarOfertaParaItem,
   emitirNFeItemGrupo,
   distribuirMetaEscalonada,
+  obterDiretrizesGeraisEmpresa,
+  salvarDiretrizesGeraisEmpresa,
+  DIRETRIZES_GERAIS_PADRAO,
 } from '../../../services/gruposService';
 
 interface GruposClientesViewProps {
@@ -174,6 +181,16 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
   const [buscaProdutoModal, setBuscaProdutoModal] = useState('');
   const [produtosSelecionadosModal, setProdutosSelecionadosModal] = useState<string[]>([]);
 
+  // Controle de Pausa na Geração com IA
+  const cancelarGeracaoRef = useRef<boolean>(false);
+
+  // Central de Diretrizes do Robô (Gerais da Empresa & Específicas do Grupo)
+  const [isDiretrizesModalOpen, setIsDiretrizesModalOpen] = useState<boolean>(false);
+  const [abaDiretrizesAtiva, setAbaDiretrizesAtiva] = useState<'gerais' | 'grupo'>('gerais');
+  const [diretrizesGeraisTemp, setDiretrizesGeraisTemp] = useState<string>(() => obterDiretrizesGeraisEmpresa(empresa.id));
+  const [diretrizesGrupoTemp, setDiretrizesGrupoTemp] = useState<string>(() => grupoAtivo?.diretrizesGrupo || '');
+  const [feedbackSalvarDiretrizes, setFeedbackSalvarDiretrizes] = useState<string | null>(null);
+
   // Atualiza cache de grupos de produtos
   const atualizarGruposProdutos = (novos: GrupoProdutos[]) => {
     setGruposProdutos(novos);
@@ -218,6 +235,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     if (prods.length > 0) {
       setGrupoProdutoSelecionadoId(prods[0].id);
     }
+    setDiretrizesGeraisTemp(obterDiretrizesGeraisEmpresa(empresa.id));
   }, [empresa.id]);
 
   // Atualiza controles em massa quando o grupo ativo muda
@@ -233,12 +251,13 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       setIntervaloDiasMassa(grupoAtivo.intervaloDiasPadrao || 30);
       setIsEditandoNomeGrupo(false);
       setNovoNomeGrupoTemp(grupoAtivo.nome || '');
+      setDiretrizesGrupoTemp(grupoAtivo.diretrizesGrupo || '');
       const soma = grupoAtivo.clientes.reduce((acc, c) => acc + (c.valorAlvo || 5000), 0);
       if (soma > 0) {
         setMetaTotalGrupo(soma);
       }
     }
-  }, [grupoAtivoId, grupoAtivo?.nome]);
+  }, [grupoAtivoId, grupoAtivo?.nome, grupoAtivo?.diretrizesGrupo]);
 
   // Distribuição de Meta Total Escalonada com Trava: Maior <= Menor * 1.5
   const handleDistribuirMetaEscalonada = () => {
@@ -379,6 +398,35 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     atualizarGrupo(atualizado);
   };
 
+  // Handlers da Central de Diretrizes do Robô
+  const handleSalvarDiretrizes = () => {
+    salvarDiretrizesGeraisEmpresa(empresa.id, diretrizesGeraisTemp);
+    if (grupoAtivo) {
+      const atualizado: GrupoClientes = {
+        ...grupoAtivo,
+        diretrizesGrupo: diretrizesGrupoTemp.trim() || undefined,
+        atualizadoEm: new Date().toISOString(),
+      };
+      atualizarGrupo(atualizado);
+    }
+    setFeedbackSalvarDiretrizes('✅ Diretrizes do Robô salvas com sucesso!');
+    setTimeout(() => {
+      setFeedbackSalvarDiretrizes(null);
+      setIsDiretrizesModalOpen(false);
+    }, 1000);
+  };
+
+  const handleRestaurarDiretrizesGeraisPadrao = () => {
+    if (confirm('Deseja restaurar as Diretrizes Gerais para o padrão oficial do sistema?')) {
+      setDiretrizesGeraisTemp(DIRETRIZES_GERAIS_PADRAO);
+    }
+  };
+
+  // Pausa a geração em lote imediatamente
+  const handlePausarGeracao = () => {
+    cancelarGeracaoRef.current = true;
+  };
+
   // Executa IA para um item individual
   const handleGerarItemIndividual = async (clienteId: number) => {
     if (!grupoAtivo) return;
@@ -403,7 +451,15 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     atualizarGrupo(atualizado);
 
     try {
-      const oferta = await gerarOfertaParaItem(item, catalogoProdutos, 0.05, gruposProdutos);
+      const diretrizesGerais = obterDiretrizesGeraisEmpresa(empresa.id);
+      const oferta = await gerarOfertaParaItem(
+        item,
+        catalogoProdutos,
+        0.05,
+        gruposProdutos,
+        diretrizesGerais,
+        grupoAtivo.diretrizesGrupo
+      );
       atualizado = {
         ...grupoAtivo,
         clientes: grupoAtivo.clientes.map((c) =>
@@ -421,7 +477,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     atualizarGrupo(atualizado);
   };
 
-  // Executa Geração em Lote de Todo o Grupo com IA
+  // Executa Geração em Lote de Todo o Grupo com IA (com suporte a PAUSA/CANCELAMENTO em tempo real)
   const handleGerarTodosLote = async () => {
     if (!grupoAtivo || grupoAtivo.clientes.length === 0 || isGerandoLote) return;
 
@@ -433,12 +489,20 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       return;
     }
 
+    cancelarGeracaoRef.current = false;
     setIsGerandoLote(true);
     setProgressoLote({ atual: 0, total: grupoAtivo.clientes.length });
+
+    const diretrizesGerais = obterDiretrizesGeraisEmpresa(empresa.id);
 
     try {
       let grupoEmProcessamento = { ...grupoAtivo };
       for (let i = 0; i < grupoAtivo.clientes.length; i++) {
+        // Se o usuário clicou em pausar, interrompe o loop imediatamente mantendo o que já foi gerado
+        if (cancelarGeracaoRef.current) {
+          break;
+        }
+
         const item = grupoAtivo.clientes[i];
         setProgressoLote({ atual: i + 1, total: grupoAtivo.clientes.length });
 
@@ -452,7 +516,14 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         atualizarGrupo(grupoEmProcessamento);
 
         try {
-          const oferta = await gerarOfertaParaItem(item, catalogoProdutos, 0.05, gruposProdutos);
+          const oferta = await gerarOfertaParaItem(
+            item,
+            catalogoProdutos,
+            0.05,
+            gruposProdutos,
+            diretrizesGerais,
+            grupoAtivo.diretrizesGrupo
+          );
           grupoEmProcessamento = {
             ...grupoEmProcessamento,
             clientes: grupoEmProcessamento.clientes.map((c) =>
@@ -475,7 +546,18 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         await new Promise((r) => setTimeout(r, 200));
       }
     } finally {
+      // Reverte eventuais itens que ficaram com status 'gerando' caso tenha havido interrupção
+      if (cancelarGeracaoRef.current && grupoAtivo) {
+        const revertido: GrupoClientes = {
+          ...grupoAtivo,
+          clientes: grupoAtivo.clientes.map((c) =>
+            c.status === 'gerando' ? { ...c, status: 'pendente' as const } : c
+          ),
+        };
+        atualizarGrupo(revertido);
+      }
       setIsGerandoLote(false);
+      cancelarGeracaoRef.current = false;
     }
   };
 
@@ -1261,24 +1343,39 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
 
           {/* Botões Mestres de Ação em Lote */}
           <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Botão de Diretrizes do Robô */}
             <button
               type="button"
-              onClick={handleGerarTodosLote}
-              disabled={isGerandoLote || isEmitindoLote || !grupoAtivo || grupoAtivo.clientes.length === 0}
-              className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-black text-xs sm:text-sm bg-gradient-to-r from-[#11d493] to-emerald-500 hover:from-[#0eb880] hover:to-emerald-600 text-slate-950 shadow-md shadow-emerald-500/20 transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              onClick={() => setIsDiretrizesModalOpen(true)}
+              className="inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl font-bold text-xs sm:text-sm bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 shadow-md transition-all duration-150 active:scale-95 cursor-pointer"
+              title="Configurar Diretrizes Comerciais do Robô (Gerais da Empresa e Deste Grupo)"
             >
-              {isGerandoLote ? (
-                <>
-                  <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
-                  <span>Gerando ({progressoLote.atual}/{progressoLote.total})...</span>
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4 fill-slate-950" />
-                  <span>⚡ Gerar Orçamentos com IA (Todos)</span>
-                </>
-              )}
+              <Brain className="w-4 h-4 text-amber-400" />
+              <span>🧠 Diretrizes do Robô</span>
             </button>
+
+            {/* Botão Mestre de Gerar com IA / Pausar */}
+            {isGerandoLote ? (
+              <button
+                type="button"
+                onClick={handlePausarGeracao}
+                className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-black text-xs sm:text-sm bg-gradient-to-r from-rose-500 to-amber-600 hover:from-rose-600 hover:to-amber-700 text-white shadow-lg shadow-rose-500/30 transition-all duration-150 active:scale-95 cursor-pointer animate-pulse"
+                title="Clique a qualquer momento para pausar a geração de orçamentos"
+              >
+                <Pause className="w-4 h-4 fill-white" />
+                <span>⏸️ Pausar Geração ({progressoLote.atual}/{progressoLote.total})</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={handleGerarTodosLote}
+                disabled={isEmitindoLote || !grupoAtivo || grupoAtivo.clientes.length === 0}
+                className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-black text-xs sm:text-sm bg-gradient-to-r from-[#11d493] to-emerald-500 hover:from-[#0eb880] hover:to-emerald-600 text-slate-950 shadow-md shadow-emerald-500/20 transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                <Play className="w-4 h-4 fill-slate-950" />
+                <span>⚡ Gerar Orçamentos com IA (Todos)</span>
+              </button>
+            )}
 
             {grupoAtivo?.clientes.some((c) => c.ofertaGerada && !c.nfeEmitida) && (
               <button
@@ -1769,10 +1866,15 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                       {/* Status da IA */}
                       <td className="py-3 px-4">
                         {isGerando ? (
-                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/10 text-amber-500 font-bold text-[11px] animate-pulse">
-                            <RefreshCw className="w-3 h-3 animate-spin" />
-                            <span>Compondo com IA...</span>
-                          </span>
+                          <button
+                            type="button"
+                            onClick={handlePausarGeracao}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/20 hover:bg-rose-500/20 text-amber-400 hover:text-rose-400 border border-amber-500/30 hover:border-rose-500/40 font-bold text-[11px] animate-pulse cursor-pointer transition shadow-sm"
+                            title="Clique para pausar a geração do robô"
+                          >
+                            <Pause className="w-3 h-3 fill-current" />
+                            <span>Compondo com IA... (Pausar)</span>
+                          </button>
                         ) : isGerado && item.ofertaGerada ? (
                           <div className="flex flex-col gap-1">
                             <div className="flex items-center gap-2">
@@ -1864,6 +1966,16 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                                 </button>
                               )}
                             </>
+                          ) : isGerando ? (
+                            <button
+                              type="button"
+                              onClick={handlePausarGeracao}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 font-bold text-[11px] border border-rose-500/40 transition active:scale-95 cursor-pointer animate-pulse"
+                              title="Pausar geração imediatamente"
+                            >
+                              <Pause className="w-3 h-3 fill-current" />
+                              <span>Pausar</span>
+                            </button>
                           ) : (
                             <button
                               type="button"
@@ -2443,6 +2555,161 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                   className="px-4 py-2 rounded-xl text-xs font-black bg-[#11d493] text-slate-950 hover:bg-[#0eb880] shadow-md shadow-emerald-500/20 transition cursor-pointer"
                 >
                   Confirmar e Salvar no Grupo ({produtosSelecionadosModal.length})
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal da Central de Diretrizes do Robô (IA) */}
+      {isDiretrizesModalOpen && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-[#10221c] border border-slate-200 dark:border-[#1a382e] rounded-2xl max-w-3xl w-full p-4 sm:p-6 shadow-2xl space-y-4 max-h-[92vh] flex flex-col">
+            {/* Cabeçalho do Modal */}
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 dark:border-[#1a382e] pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center shrink-0 border border-amber-500/30 shadow-inner">
+                  <Brain className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base sm:text-lg text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>🧠 Central de Diretrizes do Robô (IA)</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Defina como o robô deve pensar e montar os pedidos de venda, sem precisar alterar código.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDiretrizesModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-[#162f27] transition cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Abas: Diretrizes Gerais vs Diretrizes do Grupo */}
+            <div className="flex border-b border-slate-200 dark:border-[#1a382e] gap-2 pt-1">
+              <button
+                type="button"
+                onClick={() => setAbaDiretrizesAtiva('gerais')}
+                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-black border-b-2 transition cursor-pointer ${
+                  abaDiretrizesAtiva === 'gerais'
+                    ? 'border-amber-400 text-amber-500 dark:text-amber-400 bg-amber-500/10 rounded-t-lg'
+                    : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <BookOpen className="w-4 h-4" />
+                <span>🌐 Diretrizes Gerais da Empresa (Todos os Grupos)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setAbaDiretrizesAtiva('grupo')}
+                className={`flex items-center gap-2 px-4 py-2.5 text-xs font-black border-b-2 transition cursor-pointer ${
+                  abaDiretrizesAtiva === 'grupo'
+                    ? 'border-[#11d493] text-[#11d493] bg-emerald-500/10 rounded-t-lg'
+                    : 'border-transparent text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+              >
+                <Target className="w-4 h-4" />
+                <span>🎯 Diretrizes Deste Grupo ({grupoAtivo?.nome || 'Grupo Ativo'})</span>
+              </button>
+            </div>
+
+            {/* Corpo da Aba Ativa */}
+            <div className="flex-1 overflow-y-auto space-y-3 pr-1 min-h-[300px]">
+              {abaDiretrizesAtiva === 'gerais' ? (
+                <div className="space-y-3">
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/25 rounded-xl text-xs text-amber-300 dark:text-amber-200 space-y-1">
+                    <p className="font-bold flex items-center gap-1.5">
+                      <span>💡 Como funcionam as Diretrizes Gerais:</span>
+                    </p>
+                    <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                      Estas regras são enviadas em <strong>todos os orçamentos</strong> gerados pela IA para qualquer grupo desta empresa. Aqui fica estabelecida a <strong>Regra de Ouro</strong> de quantidades quebradas e naturais (nunca terminando em zero ex: 20, 30), a margem de segurança de até 5% e o equilíbrio entre produtos de alto valor e complementos.
+                    </p>
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                        Texto de Instruções para o Cérebro IA (Prompt Geral):
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleRestaurarDiretrizesGeraisPadrao}
+                        className="inline-flex items-center gap-1 text-[11px] text-amber-500 hover:text-amber-400 hover:underline font-bold transition cursor-pointer"
+                        title="Restaurar o texto oficial de instruções"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Restaurar Padrão</span>
+                      </button>
+                    </div>
+                    <textarea
+                      value={diretrizesGeraisTemp}
+                      onChange={(e) => setDiretrizesGeraisTemp(e.target.value)}
+                      rows={12}
+                      className="w-full bg-slate-50 dark:bg-[#162f27]/60 border border-slate-300 dark:border-[#214739] rounded-xl p-3 text-xs font-mono text-slate-800 dark:text-slate-100 focus:outline-none focus:border-amber-400 shadow-inner resize-y leading-relaxed"
+                      placeholder="Insira as diretrizes gerais..."
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="p-3 bg-emerald-500/10 border border-emerald-500/25 rounded-xl text-xs text-[#11d493] space-y-1">
+                    <p className="font-bold flex items-center gap-1.5">
+                      <span>🎯 Diretrizes Exclusivas para "{grupoAtivo?.nome || 'Grupo Ativo'}":</span>
+                    </p>
+                    <p className="text-[11px] leading-relaxed text-slate-600 dark:text-slate-300">
+                      Estas instruções são somadas às diretrizes gerais <strong>apenas para este grupo específico</strong>. Use para orientar a IA a focar em famílias específicas de produtos, atender requisitos comerciais deste lote ou focar em itens com alta margem ou giro.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 dark:text-slate-300 block mb-1.5">
+                      Instruções Particulares Deste Grupo:
+                    </label>
+                    <textarea
+                      value={diretrizesGrupoTemp}
+                      onChange={(e) => setDiretrizesGrupoTemp(e.target.value)}
+                      rows={10}
+                      className="w-full bg-slate-50 dark:bg-[#162f27]/60 border border-slate-300 dark:border-[#214739] rounded-xl p-3 text-xs font-mono text-slate-800 dark:text-slate-100 focus:outline-none focus:border-[#11d493] shadow-inner resize-y leading-relaxed"
+                      placeholder="Ex: Priorizar tubos soldáveis 25mm e conexões tigre. Evitar itens de iluminação neste grupo. Sempre incluir fita veda rosca e adesivo plástico como miudezas..."
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Feedback de salvamento */}
+            {feedbackSalvarDiretrizes && (
+              <div className="p-2.5 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-[#11d493] text-xs font-black flex items-center justify-center gap-2 animate-in fade-in">
+                <Check className="w-4 h-4" />
+                <span>{feedbackSalvarDiretrizes}</span>
+              </div>
+            )}
+
+            {/* Rodapé com Ações */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-200 dark:border-[#1a382e]">
+              <span className="text-[11px] text-slate-400">
+                As alterações passarão a valer imediatamente nas próximas gerações do robô.
+              </span>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsDiretrizesModalOpen(false)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-[#162f27] text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-[#1f4337] transition cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSalvarDiretrizes}
+                  className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl text-xs font-black bg-gradient-to-r from-amber-400 to-[#11d493] text-slate-950 hover:brightness-110 shadow-md shadow-emerald-500/20 transition cursor-pointer"
+                >
+                  <Check className="w-4 h-4 stroke-[2.5]" />
+                  <span>Salvar Diretrizes</span>
                 </button>
               </div>
             </div>

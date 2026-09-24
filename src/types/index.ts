@@ -329,6 +329,7 @@ export interface GrupoClientes {
   primeiroVencimentoPadrao?: string;
   intervaloDiasPadrao?: number;
   grupoProdutoPadraoId?: string; // Vinculo padrao para todos do grupo
+  diretrizesGrupo?: string; // Diretrizes especificas comerciais deste grupo para a IA
   clientes: GrupoClienteItem[];
   criadoEm: string;
   atualizadoEm: string;
