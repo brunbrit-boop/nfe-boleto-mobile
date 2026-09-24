@@ -688,7 +688,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
               ...grupoEmProcessamento,
               clientes: grupoEmProcessamento.clientes.map((c) =>
                 c.clienteId === item.clienteId
-                  ? { ...c, nfeEmitida: res.nfe, idNotaBling: res.nfe?.numeroNFe, erro: undefined }
+                  ? { ...c, nfeEmitida: res.nfe, idNotaBling: res.idNotaBling || c.idNotaBling, erro: undefined }
                   : c
               ),
             };
@@ -832,7 +832,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
             ...grupoAtivo,
             clientes: grupoAtivo.clientes.map((c) =>
               c.clienteId === item.clienteId
-                ? { ...c, nfeEmitida: res.nfe, idNotaBling: res.nfe?.numeroNFe, erro: undefined }
+                ? { ...c, nfeEmitida: res.nfe, idNotaBling: res.idNotaBling || c.idNotaBling, erro: undefined }
                 : c
             ),
           };
@@ -896,7 +896,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
               ...grupoEmProcessamento,
               clientes: grupoEmProcessamento.clientes.map((c) =>
                 c.clienteId === item.clienteId
-                  ? { ...c, nfeEmitida: res.nfe, idNotaBling: res.nfe?.numeroNFe, erro: undefined }
+                  ? { ...c, nfeEmitida: res.nfe, idNotaBling: res.idNotaBling || c.idNotaBling, erro: undefined }
                   : c
               ),
             };

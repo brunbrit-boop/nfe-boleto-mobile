@@ -480,7 +480,7 @@ export async function emitirNFeItemGrupo(
   company: CompanyProfile,
   bancoAtual: BankProvider,
   nomeGrupo?: string
-): Promise<{ sucesso: boolean; nfe?: NFeData; erro?: string }> {
+): Promise<{ sucesso: boolean; nfe?: NFeData; idNotaBling?: number | string; erro?: string }> {
   if (!item.ofertaGerada || !item.ofertaGerada.itens || item.ofertaGerada.itens.length === 0) {
     return { sucesso: false, erro: 'Este cliente ainda não possui orçamento gerado pela IA.' };
   }
@@ -594,5 +594,5 @@ export async function emitirNFeItemGrupo(
     };
   }
 
-  return { sucesso: true, nfe: novaNFe };
+  return { sucesso: true, nfe: novaNFe, idNotaBling: item.idNotaBling };
 }

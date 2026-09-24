@@ -682,16 +682,43 @@ export async function gravarEsbocoNFeNoBling(
           payload.serie = Number(dataAtual.serie);
         }
       } else {
-        // Se a nota não for encontrada ou o ID não for válido no Bling, cria um novo rascunho via POST
+        throw new Error('Nota não encontrada diretamente pelo ID');
+      }
+    } catch {
+      // O idExistenteStr pode ter sido o número fiscal (ex: 12) em vez do ID interno (ex: 19482938472)
+      // Localiza a nota verdadeira nas notas recentes do Bling pelo número ou documento do cliente
+      try {
+        const buscaRecente = await callBlingApi('/nfe?limite=50&criterio=1', {
+          method: 'GET',
+          customToken: empresaToken,
+        });
+        const notas = buscaRecente?.data || [];
+        const encontrada = notas.find((n: any) => {
+          const doc = (n.contato?.numeroDocumento || '').replace(/\D/g, '');
+          const mesmoDoc = doc && doc === docLimpo;
+          const mesmoNumero = idExistenteStr && String(n.numero) === idExistenteStr;
+          const mesmoId = idExistenteStr && String(n.id) === idExistenteStr;
+          const situacaoRascunho = !n.situacao || n.situacao === 1 || n.situacao === '1'; // 1 = Pendente
+          return (mesmoNumero || mesmoId || (mesmoDoc && situacaoRascunho));
+        });
+
+        if (encontrada && encontrada.id) {
+          isEdicao = true;
+          endpoint = `/nfe/${encontrada.id}`;
+          method = 'PUT';
+          if (encontrada.numero) payload.numero = Number(encontrada.numero);
+          if (encontrada.serie) payload.serie = Number(encontrada.serie);
+        } else {
+          // Se não encontrou nota pendente existente, cria um novo rascunho via POST
+          isEdicao = false;
+          endpoint = '/nfe';
+          method = 'POST';
+        }
+      } catch {
         isEdicao = false;
         endpoint = '/nfe';
         method = 'POST';
       }
-    } catch {
-      // Se der 404 ou erro na consulta da nota anterior (ex: nota de sessão antiga ou já apagada), faz fallback para POST
-      isEdicao = false;
-      endpoint = '/nfe';
-      method = 'POST';
     }
   }
 
@@ -703,7 +730,8 @@ export async function gravarEsbocoNFeNoBling(
     });
 
     const data = resposta?.data;
-    const idGerado = data?.id || resposta?.id || (isEdicao ? Number(idExistenteStr) : undefined);
+    const realIdBling = endpoint.startsWith('/nfe/') && endpoint !== '/nfe' ? endpoint.replace('/nfe/', '') : '';
+    const idGerado = data?.id || resposta?.id || (realIdBling ? Number(realIdBling) : (isEdicao ? Number(idExistenteStr) : undefined));
     const numeroGerado = data?.numero ? String(data.numero) : (payload.numero ? String(payload.numero) : undefined);
     const serieGerada = data?.serie ? String(data.serie) : (payload.serie ? String(payload.serie) : undefined);
 
@@ -726,30 +754,7 @@ export async function gravarEsbocoNFeNoBling(
       raw: data || resposta,
     };
   } catch (error: any) {
-    // Se tentou atualizar via PUT e deu erro (404, validação de número ou restrição de status), cria um novo esboço via POST
-    if (isEdicao) {
-      try {
-        const payloadPost = { ...payload };
-        delete payloadPost.numero; // No POST /nfe o Bling gera a numeração automaticamente
-        delete payloadPost.serie;
-        const respostaCriacao = await callBlingApi('/nfe', {
-          method: 'POST',
-          body: payloadPost,
-          customToken: empresaToken,
-        });
-        const idNovo = respostaCriacao?.data?.id || respostaCriacao?.id;
-        if (idNovo) {
-          return {
-            sucesso: true,
-            idNotaBling: idNovo,
-            numeroNota: respostaCriacao?.data?.numero ? String(respostaCriacao.data.numero) : undefined,
-            serie: respostaCriacao?.data?.serie ? String(respostaCriacao.data.serie) : undefined,
-            mensagem: `Novo esboço de NF-e criado com sucesso no Bling (ID: ${idNovo}).`,
-            raw: respostaCriacao,
-          };
-        }
-      } catch {}
-    }
+    // Se a chamada demorou ou a conexão foi interrompida, verifica se o Bling já gravou a nota recentemente
 
     // Se a chamada demorou ou a conexão foi interrompida, verifica se o Bling já gravou a nota recentemente
     try {
