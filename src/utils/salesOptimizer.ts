@@ -50,7 +50,9 @@ export function gerarOfertaComIA(
   valorAlvo: number,
   margemMax: number = 0.05,
   catalogo: CatalogoProduto[] = CATALOGO_PRODUTOS_PADRAO,
-  diretrizComercial?: string
+  diretrizComercial?: string,
+  itensMin: number = 10,
+  itensMax: number = 35
 ): OfertaGeradaResult {
   if (valorAlvo <= 0) {
     return {
@@ -62,6 +64,12 @@ export function gerarOfertaComIA(
     };
   }
 
+  const minEfetivo = Math.max(10, Math.min(50, itensMin));
+  const maxEfetivo = Math.max(minEfetivo, Math.min(50, itensMax));
+  const metaItensDistintos = Math.min(
+    catalogo.length,
+    Math.floor(Math.random() * (maxEfetivo - minEfetivo + 1)) + minEfetivo
+  );
   const limiteMaximo = valorAlvo * (1 + margemMax);
   const itensCompostos: Map<string, PedidoItemVenda> = new Map();
   let totalAcumulado = 0;
@@ -213,7 +221,7 @@ export function gerarOfertaComIA(
     valorTotal: valorTotalFinal,
     valorAlvoOriginal: valorAlvo,
     margemPercentual: margem,
-    razaoExplicativa: `Oferta composta com ${itensFinais.length} itens em mix equilibrado (proporção de obra realista, sem distorção de acessórios). Total R$ ${valorTotalFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${margem >= 0 ? `+${margem}%` : `${margem}%`} em relação ao alvo de R$ ${valorAlvo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).`,
+    razaoExplicativa: `Oferta composta com ${itensFinais.length} itens distintos (meta sortida de ${metaItensDistintos}, faixa ${minEfetivo} a ${maxEfetivo}) em mix equilibrado. Total R$ ${valorTotalFinal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (${margem >= 0 ? `+${margem}%` : `${margem}%`} em relação ao alvo de R$ ${valorAlvo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}).`,
   };
 }
 

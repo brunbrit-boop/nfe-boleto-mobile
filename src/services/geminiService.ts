@@ -116,7 +116,9 @@ export async function gerarOfertaComGeminiOuLocal(
   catalogo: CatalogoProduto[] = CATALOGO_PRODUTOS_PADRAO,
   diretrizComercial?: string,
   diretrizesGeraisPersonalizadas?: string,
-  diretrizesGrupoPersonalizadas?: string
+  diretrizesGrupoPersonalizadas?: string,
+  itensMin: number = 10,
+  itensMax: number = 35
 ): Promise<OfertaGeradaResult & { motor: 'gemini' }> {
   const apiKey = getStoredGeminiApiKey().trim();
 
@@ -128,6 +130,8 @@ export async function gerarOfertaComGeminiOuLocal(
   }
 
   const limiteMaximo = Number((valorAlvo * (1 + margemMax)).toFixed(2));
+  const minEfetivo = Math.max(10, Math.min(50, itensMin));
+  const maxEfetivo = Math.max(minEfetivo, Math.min(50, itensMax));
 
   // Catálogo simplificado para prompt
   const catalogoResumido = catalogo.map((p) => ({
@@ -159,6 +163,7 @@ DADOS DA SOLICITAÇÃO:
 - Valor Alvo Pretendido: R$ ${valorAlvo.toFixed(2)}
 - Valor Máximo Permitido (com margem de até ${margemMax * 100}%): R$ ${limiteMaximo.toFixed(2)}
 - Margem Aceitável: O valor total do pedido (soma de qtd * precoUnitario) DEVE ficar estritamente entre R$ ${valorAlvo.toFixed(2)} e R$ ${limiteMaximo.toFixed(2)}.
+- QUANTIDADE DE PRODUTOS DISTINTOS (SKUs): O pedido DEVE conter OBRIGATORIAMENTE entre ${minEfetivo} e ${maxEfetivo} itens diferentes do catálogo (sortimento equilibrado).
 ${diretrizComercial ? `- DIRETRIZ DE FOCO / NICHO COMERCIAL: "${diretrizComercial}".` : ''}
 
 🎯 MODALIDADES DE ORÇAMENTO (SIGA CONFORME A DIRETRIZ ACIMA):
@@ -280,6 +285,8 @@ export interface ClienteLoteInput {
   valorAlvo: number;
   foco?: string;
   catalogoEspecifico?: CatalogoProduto[];
+  itensMin?: number;
+  itensMax?: number;
 }
 
 /**
@@ -291,7 +298,9 @@ export async function gerarOfertasLoteUnificadoGemini(
   catalogoGeral: CatalogoProduto[] = CATALOGO_PRODUTOS_PADRAO,
   margemMax: number = 0.05,
   diretrizesGeraisPersonalizadas?: string,
-  diretrizesGrupoPersonalizadas?: string
+  diretrizesGrupoPersonalizadas?: string,
+  itensMinGeral: number = 10,
+  itensMaxGeral: number = 35
 ): Promise<Record<number, OfertaGeradaResult & { motor: 'gemini' }>> {
   if (clientesInput.length === 0) return {};
 
@@ -311,7 +320,9 @@ export async function gerarOfertasLoteUnificadoGemini(
       c.catalogoEspecifico || catalogoGeral,
       c.foco,
       diretrizesGeraisPersonalizadas,
-      diretrizesGrupoPersonalizadas
+      diretrizesGrupoPersonalizadas,
+      c.itensMin ?? itensMinGeral,
+      c.itensMax ?? itensMaxGeral
     );
     return { [c.clienteId]: oferta };
   }
@@ -325,14 +336,25 @@ export async function gerarOfertasLoteUnificadoGemini(
     categoria: p.categoria,
   }));
 
-  const listaClientesPrompt = clientesInput.map((c) => ({
-    clienteId: c.clienteId,
-    nome: c.nome,
-    valorAlvo: c.valorAlvo,
-    limiteMaximo: Number((c.valorAlvo * (1 + margemMax)).toFixed(2)),
-    foco: c.foco || 'Geral / Mix comercial equilibrado',
-    produtosPermitidos: c.catalogoEspecifico ? c.catalogoEspecifico.map((p) => p.id) : undefined,
-  }));
+  const listaClientesPrompt = clientesInput.map((c, idx) => {
+    const minClamped = Math.max(10, Math.min(50, c.itensMin ?? itensMinGeral ?? 10));
+    const maxClamped = Math.max(minClamped, Math.min(50, c.itensMax ?? itensMaxGeral ?? 35));
+    // Alterna a meta de quantidade de itens entre os clientes de forma sortida e harmoniosa
+    const range = maxClamped - minClamped;
+    const fatores = [0.1, 0.85, 0.4, 0.95, 0.25, 0.65];
+    const fator = range > 0 ? fatores[idx % fatores.length] : 0;
+    const metaItensSugerida = Math.round(minClamped + fator * range);
+
+    return {
+      clienteId: c.clienteId,
+      nome: c.nome,
+      valorAlvo: c.valorAlvo,
+      limiteMaximo: Number((c.valorAlvo * (1 + margemMax)).toFixed(2)),
+      foco: c.foco || 'Geral / Mix comercial equilibrado',
+      faixaItensDistintos: `Entre ${minClamped} e ${maxClamped} itens diferentes (meta sugerida para este cliente: aprox. ${metaItensSugerida} itens)`,
+      produtosPermitidos: c.catalogoEspecifico ? c.catalogoEspecifico.map((p) => p.id) : undefined,
+    };
+  });
 
   const diretrizesGeraisEfetivas =
     diretrizesGeraisPersonalizadas?.trim() ||
@@ -372,6 +394,10 @@ INSTRUÇÕES CRÍTICAS DE RETORNO E VARIAÇÃO DE NICHOS:
 - Para CADA cliente da lista, selecione uma combinação técnica de produtos.
 - Se o cliente tiver "produtosPermitidos", use EXCLUSIVAMENTE IDs dessa lista para ele.
 - O valor total de cada proposta deve atingir o "valorAlvo" com desvio máximo de até ${margemMax * 100}%.
+
+🎲 VARIAÇÃO E SORTIMENTO DA QUANTIDADE DE ITENS (REGRA OBRIGATÓRIA):
+- Cada cliente tem sua "faixaItensDistintos" informada acima. Respeite RIGOROSAMENTE o mínimo e o máximo de itens diferentes (SKUs) em cada proposta.
+- ALTERNE e DIVERSIFIQUE a quantidade de linhas entre as notas: clientes diferentes devem receber quantidades variadas de itens (algumas notas mais enxutas com itens de maior valor, outras notas com sortimento extenso de produtos variados). NUNCA gere notas com o mesmo número idêntico de itens!
 
 🎲 ROTAÇÃO AUTOMÁTICA E DIVERSIDADE ENTRE CLIENTES (REGRA SUPREMA):
 - Quando os clientes tiverem foco "Mix Rotativo Automático", foco livre ou "Geral", a IA DEVE ALTERNAR os nichos comerciais entre os clientes!
@@ -488,7 +514,9 @@ INSTRUÇÕES CRÍTICAS DE RETORNO E VARIAÇÃO DE NICHOS:
                 c.catalogoEspecifico || catalogoGeral,
                 c.foco,
                 diretrizesGeraisPersonalizadas,
-                diretrizesGrupoPersonalizadas
+                diretrizesGrupoPersonalizadas,
+                c.itensMin ?? itensMinGeral,
+                c.itensMax ?? itensMaxGeral
               );
               resultadoFinal[c.clienteId] = individual;
             } catch (errFallback) {

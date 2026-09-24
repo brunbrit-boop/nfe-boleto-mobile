@@ -164,6 +164,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
   const [modoEscalaSemanal, setModoEscalaSemanal] = useState<'continuo' | 'mesma_semana'>(() => {
     return grupoAtivo?.modoEscalaSemanal || 'mesma_semana';
   });
+  // Quantidade de Itens Distintos em Massa (Mínimo 10 • Máximo 50)
+  const [itensMinMassa, setItensMinMassa] = useState<number>(() => grupoAtivo?.itensMinPadrao || 10);
+  const [itensMaxMassa, setItensMaxMassa] = useState<number>(() => grupoAtivo?.itensMaxPadrao || 35);
   const [isEmitindoLote, setIsEmitindoLote] = useState<boolean>(false);
   const [progressoEmissaoLote, setProgressoEmissaoLote] = useState<{ atual: number; total: number }>({ atual: 0, total: 0 });
 
@@ -280,6 +283,8 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       if (grupoAtivo.modoEscalaSemanal) {
         setModoEscalaSemanal(grupoAtivo.modoEscalaSemanal);
       }
+      setItensMinMassa(grupoAtivo.itensMinPadrao || 10);
+      setItensMaxMassa(grupoAtivo.itensMaxPadrao || 35);
       setIsEditandoNomeGrupo(false);
       setNovoNomeGrupoTemp(grupoAtivo.nome || '');
       setDiretrizesGrupoTemp(grupoAtivo.diretrizesGrupo || '');
@@ -346,6 +351,24 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         ...c,
         filtroFoco: filtro,
         grupoProdutoId: undefined,
+      })),
+    };
+    atualizarGrupo(atualizado);
+  };
+
+  // Aplica faixa de itens distintos (SKUs) para todos os clientes do grupo
+  const handleAplicarItensParaTodos = (minVal = itensMinMassa, maxVal = itensMaxMassa) => {
+    if (!grupoAtivo) return;
+    const minClamped = Math.max(10, Math.min(50, Number(minVal) || 10));
+    const maxClamped = Math.max(minClamped, Math.min(50, Number(maxVal) || 35));
+    const atualizado: GrupoClientes = {
+      ...grupoAtivo,
+      itensMinPadrao: minClamped,
+      itensMaxPadrao: maxClamped,
+      clientes: grupoAtivo.clientes.map((c) => ({
+        ...c,
+        itensMin: minClamped,
+        itensMax: maxClamped,
       })),
     };
     atualizarGrupo(atualizado);
@@ -595,7 +618,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         0.05,
         gruposProdutos,
         diretrizesGerais,
-        grupoAtivo.diretrizesGrupo
+        grupoAtivo.diretrizesGrupo,
+        item.itensMin ?? itensMinMassa,
+        item.itensMax ?? itensMaxMassa
       );
       atualizado = {
         ...grupoAtivo,
@@ -663,7 +688,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         0.05,
         gruposProdutos,
         diretrizesGerais,
-        grupoAtivo.diretrizesGrupo
+        grupoAtivo.diretrizesGrupo,
+        itensMinMassa,
+        itensMaxMassa
       );
 
       // 3. Atualiza todos os membros selecionados de uma só vez na tabela
@@ -836,7 +863,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
             0.05,
             gruposProdutos,
             diretrizesGerais,
-            grupoAtivo.diretrizesGrupo
+            grupoAtivo.diretrizesGrupo,
+            item.itensMin ?? itensMinMassa,
+            item.itensMax ?? itensMaxMassa
           );
           grupoEmProcessamento = {
             ...grupoEmProcessamento,
@@ -1832,7 +1861,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         {/* Linha de Definição Rápida em Massa */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3 pt-3 border-t border-slate-800">
           {/* Valor Padrão para Todos */}
-          <div className="lg:col-span-4 flex items-center gap-2 bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
+          <div className="lg:col-span-3 flex items-center gap-2 bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
             <span className="text-xs font-bold text-slate-400 shrink-0 pl-1">Valor Padrão:</span>
             <div className="relative flex-1">
               <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">R$</span>
@@ -1854,7 +1883,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
           </div>
 
           {/* Filtro Rápido de Categoria / Nicho para Todos */}
-          <div className="lg:col-span-4 flex items-center gap-2 bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
+          <div className="lg:col-span-3 flex items-center gap-2 bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
             <span className="text-xs font-bold text-slate-400 shrink-0 pl-1">Foco / Nicho:</span>
             <select
               value={
@@ -1903,7 +1932,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
           </div>
 
           {/* Vincular Grupo de Produtos (Kit) para Todos */}
-          <div className="lg:col-span-4 flex items-center gap-2 bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
+          <div className="lg:col-span-3 flex items-center gap-2 bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
             <span className="text-xs font-bold text-amber-400 shrink-0 pl-1 flex items-center gap-1">
               <Package className="w-3.5 h-3.5" />
               <span>Kit/Grupo:</span>
@@ -1920,6 +1949,58 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                 </option>
               ))}
             </select>
+          </div>
+
+          {/* Quantidade de Itens Distintos (Mínimo 10 • Máximo 50) */}
+          <div className="lg:col-span-3 flex flex-col justify-between bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
+            <div className="flex items-center justify-between px-1 mb-1">
+              <span className="text-xs font-bold text-slate-400">Qtd Itens:</span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                Mínimo 10 • Máximo 50
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1 flex-1 bg-slate-900/90 px-2 py-1 rounded-lg border border-slate-700">
+                <span className="text-[10px] font-bold text-slate-400">Mín</span>
+                <input
+                  type="number"
+                  min={10}
+                  max={itensMaxMassa}
+                  value={itensMinMassa}
+                  onChange={(e) => setItensMinMassa(Number(e.target.value))}
+                  onBlur={() => {
+                    const clamped = Math.max(10, Math.min(50, itensMinMassa));
+                    setItensMinMassa(clamped);
+                    if (clamped > itensMaxMassa) setItensMaxMassa(clamped);
+                  }}
+                  className="w-full bg-transparent text-white font-mono font-bold text-xs text-center focus:outline-none"
+                />
+              </div>
+              <span className="text-slate-500 text-xs font-bold">a</span>
+              <div className="flex items-center gap-1 flex-1 bg-slate-900/90 px-2 py-1 rounded-lg border border-slate-700">
+                <span className="text-[10px] font-bold text-slate-400">Máx</span>
+                <input
+                  type="number"
+                  min={itensMinMassa}
+                  max={50}
+                  value={itensMaxMassa}
+                  onChange={(e) => setItensMaxMassa(Number(e.target.value))}
+                  onBlur={() => {
+                    const clamped = Math.max(itensMinMassa, Math.min(50, itensMaxMassa));
+                    setItensMaxMassa(clamped);
+                  }}
+                  className="w-full bg-transparent text-white font-mono font-bold text-xs text-center focus:outline-none"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => handleAplicarItensParaTodos()}
+                className="px-2.5 py-1 rounded-lg text-xs font-bold bg-[#11d493]/20 hover:bg-[#11d493]/30 text-[#11d493] border border-[#11d493]/40 transition shrink-0 cursor-pointer"
+                title="Aplica a faixa de itens para todos os clientes do grupo"
+              >
+                Aplicar
+              </button>
+            </div>
           </div>
         </div>
 
@@ -2209,6 +2290,47 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                       </>
                     )}
                   </button>
+
+                  {/* Faixa de Itens Sortida para Selecionados */}
+                  <div className="flex items-center gap-1.5 bg-slate-900/90 px-2.5 py-1 rounded-xl border border-amber-500/40">
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                      Mín 10 • Máx 50
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-bold text-slate-400">Mín:</span>
+                      <input
+                        type="number"
+                        min={10}
+                        max={itensMaxMassa}
+                        value={itensMinMassa}
+                        onChange={(e) => setItensMinMassa(Number(e.target.value))}
+                        onBlur={() => {
+                          const clamped = Math.max(10, Math.min(50, itensMinMassa));
+                          setItensMinMassa(clamped);
+                          if (clamped > itensMaxMassa) setItensMaxMassa(clamped);
+                        }}
+                        className="w-10 bg-slate-800 text-white font-mono font-bold text-xs text-center py-0.5 rounded border border-slate-700 focus:outline-none"
+                        title="Quantidade mínima de itens distintos"
+                      />
+                    </div>
+                    <span className="text-slate-500 text-xs font-bold">a</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-bold text-slate-400">Máx:</span>
+                      <input
+                        type="number"
+                        min={itensMinMassa}
+                        max={50}
+                        value={itensMaxMassa}
+                        onChange={(e) => setItensMaxMassa(Number(e.target.value))}
+                        onBlur={() => {
+                          const clamped = Math.max(itensMinMassa, Math.min(50, itensMaxMassa));
+                          setItensMaxMassa(clamped);
+                        }}
+                        className="w-10 bg-slate-800 text-white font-mono font-bold text-xs text-center py-0.5 rounded border border-slate-700 focus:outline-none"
+                        title="Quantidade máxima de itens distintos"
+                      />
+                    </div>
+                  </div>
 
                   {/* Botão Refazer Orçamento em Requisição Única Unificada */}
                   <button

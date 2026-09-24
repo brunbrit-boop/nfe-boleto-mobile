@@ -288,7 +288,9 @@ export async function gerarOfertaParaItem(
   margemMax: number = 0.05,
   gruposProdutos: GrupoProdutos[] = [],
   diretrizesGerais?: string,
-  diretrizesGrupo?: string
+  diretrizesGrupo?: string,
+  itensMin?: number,
+  itensMax?: number
 ): Promise<OfertaGeradaResult> {
   let catalogoEfetivo = catalogoDisponivel;
   let diretriz: string | undefined = undefined;
@@ -348,7 +350,9 @@ export async function gerarOfertaParaItem(
     catalogoEfetivo,
     diretriz,
     diretrizesGerais,
-    diretrizesGrupo
+    diretrizesGrupo,
+    item.itensMin ?? itensMin ?? 10,
+    item.itensMax ?? itensMax ?? 35
   );
 }
 
@@ -362,7 +366,9 @@ export async function gerarOfertasEmLoteUnificado(
   margemMax: number = 0.05,
   gruposProdutos: GrupoProdutos[] = [],
   diretrizesGerais?: string,
-  diretrizesGrupo?: string
+  diretrizesGrupo?: string,
+  itensMinGeral: number = 10,
+  itensMaxGeral: number = 35
 ): Promise<Record<number, OfertaGeradaResult>> {
   if (itens.length === 0) return {};
 
@@ -418,6 +424,8 @@ export async function gerarOfertasEmLoteUnificado(
       valorAlvo: item.valorAlvo,
       foco: diretriz || item.filtroFoco,
       catalogoEspecifico: catalogoEfetivo !== catalogoDisponivel ? catalogoEfetivo : undefined,
+      itensMin: item.itensMin ?? itensMinGeral,
+      itensMax: item.itensMax ?? itensMaxGeral,
     };
   });
 
@@ -426,7 +434,9 @@ export async function gerarOfertasEmLoteUnificado(
     catalogoDisponivel,
     margemMax,
     diretrizesGerais,
-    diretrizesGrupo
+    diretrizesGrupo,
+    itensMinGeral,
+    itensMaxGeral
   );
 }
 
@@ -466,7 +476,9 @@ export async function executarGeracaoEmLote(
         0.05,
         [],
         diretrizesGerais,
-        grupo.diretrizesGrupo
+        grupo.diretrizesGrupo,
+        item.itensMin ?? grupo.itensMinPadrao,
+        item.itensMax ?? grupo.itensMaxPadrao
       );
 
       item.status = 'gerado';
