@@ -73,12 +73,25 @@ export async function testarChaveGemini(
       }
 
       const errData = await response.json().catch(() => ({}));
+      if (response.status === 402) {
+        return {
+          success: false,
+          message:
+            'Seus créditos pré-pagos do Google Gemini esgotaram (Erro 402: Prepayment credits depleted). Acesse https://aistudio.google.com para adicionar créditos ou crie uma chave em um projeto gratuito.',
+        };
+      }
       if (response.status === 400 || response.status === 403) {
         return {
           success: false,
           message:
             errData?.error?.message ||
             'Chave de API inválida ou sem permissão de acesso ao Gemini.',
+        };
+      }
+      if (response.status === 429) {
+        return {
+          success: false,
+          message: 'Limite de requisições excedido no Google Gemini (Quota 429). Aguarde alguns instantes.',
         };
       }
     } catch (e: any) {
@@ -94,7 +107,7 @@ export async function testarChaveGemini(
 
   return {
     success: false,
-    message: 'Não foi possível validar a chave com os modelos do Google Gemini.',
+    message: 'Não foi possível validar a chave com os modelos do Google Gemini. Verifique os créditos da sua conta no Google AI Studio.',
   };
 }
 
@@ -192,6 +205,8 @@ Retorne ESTRITAMENTE um objeto JSON válido (sem blocos markdown) com a seguinte
   "razaoExplicativa": "Explicação comercial concisa de como o mix foi estruturado (itens principais + complementos) e como o valor foi atingido com até 5% de margem."
 }`;
 
+  let ultimoErroIndividual = '';
+
   for (const model of GEMINI_MODELS) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
@@ -207,7 +222,14 @@ Retorne ESTRITAMENTE um objeto JSON válido (sem blocos markdown) com a seguinte
         }),
       });
 
-      if (!response.ok) continue;
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        if (response.status === 402) {
+          throw new Error('Seus créditos pré-pagos do Google Gemini esgotaram (Erro 402: Prepayment credits depleted). Acesse https://aistudio.google.com para adicionar saldo ou use uma nova chave em um projeto gratuito.');
+        }
+        ultimoErroIndividual = errData?.error?.message || `HTTP ${response.status} (${model})`;
+        continue;
+      }
 
       const data = await response.json();
       const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -275,7 +297,8 @@ Retorne ESTRITAMENTE um objeto JSON válido (sem blocos markdown) com a seguinte
 
   // TRAVA DE SEGURANÇA: Se todos os modelos falharem, NUNCA recorre ao motor matemático aleatório
   throw new Error(
-    'Não foi possível obter a resposta do Google Gemini. O orçamento foi bloqueado com segurança para evitar o envio de produtos aleatórios ao cliente. Verifique sua conexão e tente novamente.'
+    ultimoErroIndividual ||
+      'Não foi possível obter a resposta do Google Gemini. O orçamento foi bloqueado com segurança para evitar o envio de produtos aleatórios ao cliente. Verifique sua chave e créditos no Google AI Studio.'
   );
 }
 
@@ -432,6 +455,8 @@ INSTRUÇÕES CRÍTICAS DE RETORNO E VARIAÇÃO DE NICHOS:
   ]
 }`;
 
+  let ultimoErroLote = '';
+
   for (const model of GEMINI_MODELS) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
@@ -447,7 +472,14 @@ INSTRUÇÕES CRÍTICAS DE RETORNO E VARIAÇÃO DE NICHOS:
         }),
       });
 
-      if (!response.ok) continue;
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        if (response.status === 402) {
+          throw new Error('Seus créditos pré-pagos do Google Gemini esgotaram (Erro 402: Prepayment credits depleted). Acesse https://aistudio.google.com para adicionar saldo ou use uma nova chave em um projeto gratuito.');
+        }
+        ultimoErroLote = errData?.error?.message || `HTTP ${response.status} (${model})`;
+        continue;
+      }
 
       const data = await response.json();
       const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
@@ -545,7 +577,8 @@ INSTRUÇÕES CRÍTICAS DE RETORNO E VARIAÇÃO DE NICHOS:
   }
 
   throw new Error(
-    'Não foi possível obter a resposta unificada do Google Gemini. Tente novamente ou reduza o número de clientes selecionados.'
+    ultimoErroLote ||
+      'Não foi possível obter a resposta unificada do Google Gemini. Verifique os créditos da sua chave no Google AI Studio e tente novamente.'
   );
 }
 
