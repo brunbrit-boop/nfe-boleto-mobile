@@ -121,6 +121,106 @@ export function isCerebroIAConectado(): boolean {
 }
 
 /**
+ * Equalizador Matemático Proporcional Simétrico (± Tolerância)
+ * Garante que a soma total dos itens fique estritamente dentro da janela [alvo - margem, alvo + margem]
+ * escalando produtos estruturais sem descaracterizar a inteligência e coerência da IA.
+ */
+export function equalizarItensParaMargemSimetrica(
+  itens: PedidoItemVenda[],
+  valorAlvo: number,
+  margemTol: number = 0.05
+): { itens: PedidoItemVenda[]; valorTotal: number; margemPercentual: number } {
+  if (itens.length === 0) return { itens: [], valorTotal: 0, margemPercentual: 0 };
+
+  const tolClamped = Math.max(0.01, Math.min(0.20, margemTol));
+  const minAceitavel = valorAlvo * (1 - tolClamped);
+  const maxAceitavel = valorAlvo * (1 + tolClamped);
+
+  let totalAtual = itens.reduce((acc, it) => acc + it.valorTotal, 0);
+
+  // Se já estiver perfeitamente dentro da margem estipulada
+  if (totalAtual >= minAceitavel && totalAtual <= maxAceitavel) {
+    const margem = Number((((totalAtual - valorAlvo) / valorAlvo) * 100).toFixed(1));
+    return { itens, valorTotal: Number(totalAtual.toFixed(2)), margemPercentual: margem };
+  }
+
+  // Clona os itens para ajuste
+  const itensAjustados = itens.map((it) => ({ ...it }));
+
+  // Separa itens estruturais / ticket relevante (>= R$ 18) de itens pequenos de miudeza (< R$ 18)
+  const itensEscalaveis = itensAjustados.filter((it) => it.valorUnitario >= 18);
+  const listaAlvoEscala = itensEscalaveis.length > 0 ? itensEscalaveis : itensAjustados;
+
+  // Fator de escala base
+  const fatorEscala = valorAlvo / Math.max(1, totalAtual);
+
+  // Ajusta as quantidades dos itens escaláveis proporcionalmente
+  for (const it of listaAlvoEscala) {
+    let novaQtd = Math.max(1, Math.round(it.quantidade * fatorEscala));
+
+    // Regra humanizada: se for múltiplo de 10, quebra suavemente
+    if (novaQtd > 5 && novaQtd % 10 === 0) {
+      const delta = (Math.random() > 0.5 ? 1 : -1) * (1 + Math.floor(Math.random() * 3));
+      novaQtd = Math.max(1, novaQtd + delta);
+    }
+
+    // Trava de segurança para itens baratos
+    if (it.valorUnitario < 18 && novaQtd > 35) {
+      novaQtd = 27;
+    }
+
+    it.quantidade = novaQtd;
+    it.valorTotal = Number((it.quantidade * it.valorUnitario).toFixed(2));
+  }
+
+  // Recalcula o total
+  totalAtual = itensAjustados.reduce((acc, it) => acc + it.valorTotal, 0);
+
+  // Ajuste fino cirúrgico passo a passo para cravar dentro da janela
+  let tentativasAjuste = 0;
+  const itensOrdenadosPorPreco = [...itensAjustados].sort((a, b) => b.valorUnitario - a.valorUnitario);
+
+  while ((totalAtual < minAceitavel || totalAtual > maxAceitavel) && tentativasAjuste < 20) {
+    tentativasAjuste++;
+    const diferenca = valorAlvo - totalAtual;
+
+    if (diferenca > 0) {
+      // Falta valor: incrementa o item mais adequado
+      const candidato =
+        itensOrdenadosPorPreco.find((it) => it.valorUnitario <= diferenca * 1.2 && it.valorUnitario >= 15) ||
+        itensOrdenadosPorPreco[0];
+      if (candidato) {
+        candidato.quantidade += 1;
+        candidato.valorTotal = Number((candidato.quantidade * candidato.valorUnitario).toFixed(2));
+      } else {
+        break;
+      }
+    } else {
+      // Sobrou valor: decrementa o item mais adequado (mantendo qtd >= 1)
+      const candidato =
+        itensOrdenadosPorPreco.find((it) => it.quantidade > 1 && it.valorUnitario <= Math.abs(diferenca) * 1.2) ||
+        itensOrdenadosPorPreco.find((it) => it.quantidade > 1);
+      if (candidato) {
+        candidato.quantidade -= 1;
+        candidato.valorTotal = Number((candidato.quantidade * candidato.valorUnitario).toFixed(2));
+      } else {
+        break;
+      }
+    }
+    totalAtual = itensAjustados.reduce((acc, it) => acc + it.valorTotal, 0);
+  }
+
+  const totalFinal = Number(totalAtual.toFixed(2));
+  const margemFinal = Number((((totalFinal - valorAlvo) / valorAlvo) * 100).toFixed(1));
+
+  return {
+    itens: itensAjustados,
+    valorTotal: totalFinal,
+    margemPercentual: margemFinal,
+  };
+}
+
+/**
  * Gera proposta comercial inteligente utilizando Google Gemini API
  * TRAVA DE SEGURANÇA: NUNCA gera itens por matemática cega sem a IA ativa.
  */
@@ -297,15 +397,14 @@ Retorne ESTRITAMENTE um objeto JSON válido (sem blocos markdown) com a seguinte
       }
 
       if (itensCompostos.length > 0) {
-        const totalFinal = Number(totalCalculado.toFixed(2));
-        const margem = Number((((totalFinal - valorAlvo) / valorAlvo) * 100).toFixed(1));
+        const equalizado = equalizarItensParaMargemSimetrica(itensCompostos, valorAlvo, margemMax);
 
         return {
-          itens: itensCompostos,
-          valorTotal: totalFinal,
+          itens: equalizado.itens,
+          valorTotal: equalizado.valorTotal,
           valorAlvoOriginal: valorAlvo,
-          margemPercentual: margem,
-          razaoExplicativa: `[Google Gemini • ${model}] ${parsed.razaoExplicativa || `Mix inteligente gerado com ${itensCompostos.length} itens.`}`,
+          margemPercentual: equalizado.margemPercentual,
+          razaoExplicativa: `[Google Gemini • ${model}] ${parsed.razaoExplicativa || `Mix inteligente gerado com ${equalizado.itens.length} itens.`}`,
           motor: 'gemini',
         };
       }
@@ -570,15 +669,14 @@ INSTRUÇÕES CRÍTICAS DE RETORNO E VARIAÇÃO DE NICHOS:
         }
 
         if (itensCompostos.length > 0) {
-          const totalFinal = Number(totalCalculado.toFixed(2));
-          const margem = Number((((totalFinal - clienteInput.valorAlvo) / clienteInput.valorAlvo) * 100).toFixed(1));
+          const equalizado = equalizarItensParaMargemSimetrica(itensCompostos, clienteInput.valorAlvo, margemMax);
 
           resultadoFinal[clienteId] = {
-            itens: itensCompostos,
-            valorTotal: totalFinal,
+            itens: equalizado.itens,
+            valorTotal: equalizado.valorTotal,
             valorAlvoOriginal: clienteInput.valorAlvo,
-            margemPercentual: margem,
-            razaoExplicativa: `[Google Gemini • ${model} • Lote Unificado] ${prop.razaoExplicativa || `Mix inteligente gerado com ${itensCompostos.length} itens.`}`,
+            margemPercentual: equalizado.margemPercentual,
+            razaoExplicativa: `[Google Gemini • ${model} • Lote Unificado] ${prop.razaoExplicativa || `Mix inteligente gerado com ${equalizado.itens.length} itens.`}`,
             motor: 'gemini',
           };
         }

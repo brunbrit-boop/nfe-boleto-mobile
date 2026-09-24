@@ -26,6 +26,7 @@ import {
   Send,
   Calendar,
   CalendarDays,
+  SlidersHorizontal,
 } from 'lucide-react';
 import type {
   EmpresaTenant,
@@ -167,6 +168,10 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
   // Quantidade de Itens Distintos em Massa (Mínimo 10 • Máximo 50)
   const [itensMinMassa, setItensMinMassa] = useState<number>(() => grupoAtivo?.itensMinPadrao || 10);
   const [itensMaxMassa, setItensMaxMassa] = useState<number>(() => grupoAtivo?.itensMaxPadrao || 35);
+  // Tolerância Simétrica de Margem (± 1% a ± 15%, padrão 5%)
+  const [toleranciaMargem, setToleranciaMargem] = useState<number>(() => {
+    return grupoAtivo?.margemToleranciaPadrao ? Math.round(grupoAtivo.margemToleranciaPadrao * 100) : 5;
+  });
   const [isEmitindoLote, setIsEmitindoLote] = useState<boolean>(false);
   const [progressoEmissaoLote, setProgressoEmissaoLote] = useState<{ atual: number; total: number }>({ atual: 0, total: 0 });
 
@@ -285,6 +290,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       }
       setItensMinMassa(grupoAtivo.itensMinPadrao || 10);
       setItensMaxMassa(grupoAtivo.itensMaxPadrao || 35);
+      if (grupoAtivo.margemToleranciaPadrao) {
+        setToleranciaMargem(Math.round(grupoAtivo.margemToleranciaPadrao * 100));
+      }
       setIsEditandoNomeGrupo(false);
       setNovoNomeGrupoTemp(grupoAtivo.nome || '');
       setDiretrizesGrupoTemp(grupoAtivo.diretrizesGrupo || '');
@@ -615,7 +623,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       const oferta = await gerarOfertaParaItem(
         item,
         catalogoProdutos,
-        0.05,
+        toleranciaMargem / 100,
         gruposProdutos,
         diretrizesGerais,
         grupoAtivo.diretrizesGrupo,
@@ -685,7 +693,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       const mapaOfertas = await gerarOfertasEmLoteUnificado(
         itensParaGerar,
         catalogoProdutos,
-        0.05,
+        toleranciaMargem / 100,
         gruposProdutos,
         diretrizesGerais,
         grupoAtivo.diretrizesGrupo,
@@ -863,7 +871,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
           const mapaOfertas = await gerarOfertasEmLoteUnificado(
             chunk,
             catalogoProdutos,
-            0.05,
+            toleranciaMargem / 100,
             gruposProdutos,
             diretrizesGerais,
             grupoAtivo.diretrizesGrupo,
@@ -2024,6 +2032,90 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
               >
                 Aplicar
               </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Seletor Simétrico de Tolerância de Margem (Centro em Zero: -X% a +X%) */}
+        <div className="bg-slate-800/80 p-3 sm:p-3.5 rounded-xl border border-slate-700/60 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-cyan-500/10 text-cyan-400 flex items-center justify-center shrink-0 border border-cyan-500/20">
+              <SlidersHorizontal className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-black text-white">Tolerância Simétrica:</span>
+                <span className="text-xs font-mono font-black px-2 py-0.5 rounded-md bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                  ± {toleranciaMargem}%
+                </span>
+                <span className="text-[11px] text-slate-400">
+                  (-{toleranciaMargem}% a +{toleranciaMargem}% do valor alvo)
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                O calibrador matemático garante que nenhum orçamento saia fora dessa faixa permitida.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 flex-1 max-w-lg w-full">
+            {/* Marcador Esquerda (-%) */}
+            <span className="text-xs font-mono font-bold text-rose-400 shrink-0">
+              -{toleranciaMargem}%
+            </span>
+
+            {/* Slider com Centro Visual em Zero */}
+            <div className="relative flex-1 flex flex-col items-center">
+              <div className="w-full flex items-center justify-between text-[9px] font-bold text-slate-400 mb-1 select-none pointer-events-none">
+                <span>-15%</span>
+                <span className="text-cyan-400 font-black">0% (Alvo)</span>
+                <span>+15%</span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={15}
+                step={1}
+                value={toleranciaMargem}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setToleranciaMargem(val);
+                  if (grupoAtivo) {
+                    atualizarGrupo({ ...grupoAtivo, margemToleranciaPadrao: val / 100 });
+                  }
+                }}
+                className="w-full accent-cyan-400 cursor-pointer h-1.5 bg-slate-700 rounded-lg appearance-none"
+                title={`Tolerância simétrica de ± ${toleranciaMargem}%`}
+              />
+            </div>
+
+            {/* Marcador Direita (+%) */}
+            <span className="text-xs font-mono font-bold text-emerald-400 shrink-0">
+              +{toleranciaMargem}%
+            </span>
+
+            {/* Botões Rápidos */}
+            <div className="flex items-center gap-1 shrink-0 bg-slate-900/90 p-1 rounded-lg border border-slate-700">
+              {[3, 5, 8, 10].map((perc) => (
+                <button
+                  key={perc}
+                  type="button"
+                  onClick={() => {
+                    setToleranciaMargem(perc);
+                    if (grupoAtivo) {
+                      atualizarGrupo({ ...grupoAtivo, margemToleranciaPadrao: perc / 100 });
+                    }
+                  }}
+                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold transition cursor-pointer ${
+                    toleranciaMargem === perc
+                      ? 'bg-cyan-400 text-slate-950 font-black'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                  title={`Definir tolerância para ± ${perc}%`}
+                >
+                  ±{perc}%
+                </button>
+              ))}
             </div>
           </div>
         </div>

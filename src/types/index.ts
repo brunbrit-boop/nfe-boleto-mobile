@@ -339,6 +339,7 @@ export interface GrupoClientes {
   modoEscalaSemanal?: 'continuo' | 'mesma_semana';
   itensMinPadrao?: number;
   itensMaxPadrao?: number;
+  margemToleranciaPadrao?: number; // Tolerância simétrica percentual (ex: 0.05 para ±5%)
   grupoProdutoPadraoId?: string; // Vinculo padrao para todos do grupo
   diretrizesGrupo?: string; // Diretrizes especificas comerciais deste grupo para a IA
   clientes: GrupoClienteItem[];
