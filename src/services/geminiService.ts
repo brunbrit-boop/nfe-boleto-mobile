@@ -168,8 +168,21 @@ export async function gerarOfertaComGeminiOuLocal(
    - Aprox. metade dos pedidos pode ter base estrutural de maior valor, e a outra metade DEVE ser COMPLETAMENTE SORTIDA e multicategoria (cruzando de 3 a 5 departamentos diferentes, NUNCA monocromático).
 4. CUMPRIMENTO RÍGIDO DA QUANTIDADE DE ITENS (ANTI-ACOMODAÇÃO):
    - O pedido DEVE atingir a quantidade estipulada de itens distintos (${minEfetivo} a ${maxEfetivo}). Nunca pare antes de preencher as linhas solicitadas! Fracione as quantidades unitárias para que todos os itens caibam no valor pretendido.
-5. PROPORÇÃO TÉCNICA E COERÊNCIA DE COMPRA:
-   - Produtos devem ter relação técnica realista e coesão prática de obra.`;
+5. MATRIZ DE PROPORÇÃO TÉCNICA E COERÊNCIA DE COMPRA (LEI DA COESÃO DE OBRA):
+   - Casais e Trios Técnicos Naturais:
+     * Pintura: Tinta ou massa corrida deve vir com insumos de aplicação (lixas, rolo, trincha, fita crepe ou solvente/thinner). Nunca colocar muitas latas de tinta com zero itens de pintura.
+     * Hidráulica: Tubos soldáveis puxam conexões da mesma bitola (ex: tubo 25mm puxa joelho/luva/tê 25mm) + adesivo plástico/cola PVC ou fita veda-rosca para roscáveis.
+     * Elétrica: Cabos flexíveis puxam disjuntores compatíveis com a bitola, fita isolante e eletrodutos/conduítes.
+     * Assentamento: Argamassa/rejunte puxa espaçadores de piso, desempenadeira ou colher de pedreiro.
+     * Fixação: Buchas e parafusos de medidas correlatas (ex: bucha 6mm ou 8mm com parafusos compatíveis).
+   - Proporção Numérica Realista:
+     * Tubos x Conexões: Proporção natural de 4 a 12 conexões para cada 2 a 5 barras de tubo (nunca dezenas de conexões para poucas barras).
+     * Consumíveis de apoio (fita isolante, fita veda-rosca, cola PVC, silicone): Ficam sempre entre 1 e 4 unidades por pedido. Servem para dar acabamento, nunca para inflar o valor do pedido.
+   - Coerência da Cesta Sortida (Pedidos Multicategoria):
+     * Estruturar a cesta como uma compra plausível de "Fase de Obra" ou "Manutenção e Reforma Predial Geral", integrando de 3 a 5 departamentos (ex: 1 ferramenta + 1 item hidráulico + 1 elétrico + 1 pintura + 1 fixador/químico).
+   - Bloqueio de Incompatibilidades Óbvias:
+     * Não misturar bitolas desconexas sem função (ex: tubos de esgoto 100mm com joelho de água fria 20mm no mesmo sub-circuito).
+     * Não duplicar ferramentas manuais pesadas idênticas em um mesmo pedido de reforma (ex: evitar 3 marretas ou 4 serrotes iguais).`;
 
   const prompt = `Você é um diretor comercial sênior e especialista em orçamentos B2B e vendas de materiais de construção.
 Sua missão é selecionar uma combinação técnica e comercialmente IMPECÁVEL de produtos do catálogo para compor um pedido de venda no valor pretendido.
@@ -405,8 +418,21 @@ export async function gerarOfertasLoteUnificadoGemini(
 4. CUMPRIMENTO RÍGIDO DA QUANTIDADE DE ITENS (ANTI-ACOMODAÇÃO):
    - A IA DEVE cumprir a "metaExataItensDistintos" de cada cliente (ex: se a meta for 35 ou 40 itens, preencha exatamente 35 ou 40 itens diferentes!).
    - NUNCA pare em 15 ou 20 itens por ter atingido o valor financeiro: reduza as quantidades unitárias de cada produto para que todas as linhas caibam no orçamento.
-5. PROPORÇÃO TÉCNICA E COERÊNCIA DE MIX:
-   - Produtos estruturais e miudezas devem ter relação técnica realista e coerência prática de compra de obra.`;
+5. MATRIZ DE PROPORÇÃO TÉCNICA E COERÊNCIA DE COMPRA (LEI DA COESÃO DE OBRA):
+   - Casais e Trios Técnicos Naturais:
+     * Pintura: Tinta ou massa corrida deve vir com insumos de aplicação (lixas, rolo, trincha, fita crepe ou solvente/thinner). Nunca colocar muitas latas de tinta com zero itens de pintura.
+     * Hidráulica: Tubos soldáveis puxam conexões da mesma bitola (ex: tubo 25mm puxa joelho/luva/tê 25mm) + adesivo plástico/cola PVC ou fita veda-rosca para roscáveis.
+     * Elétrica: Cabos flexíveis puxam disjuntores compatíveis com a bitola, fita isolante e eletrodutos/conduítes.
+     * Assentamento: Argamassa/rejunte puxa espaçadores de piso, desempenadeira ou colher de pedreiro.
+     * Fixação: Buchas e parafusos de medidas correlatas (ex: bucha 6mm ou 8mm com parafusos compatíveis).
+   - Proporção Numérica Realista:
+     * Tubos x Conexões: Proporção natural de 4 a 12 conexões para cada 2 a 5 barras de tubo (nunca dezenas de conexões para poucas barras).
+     * Consumíveis de apoio (fita isolante, fita veda-rosca, cola PVC, silicone): Ficam sempre entre 1 e 4 unidades por pedido. Servem para dar acabamento, nunca para inflar o valor do pedido.
+   - Coerência da Cesta Sortida (Pedidos Multicategoria):
+     * Estruturar a cesta como uma compra plausível de "Fase de Obra" ou "Manutenção e Reforma Predial Geral", integrando de 3 a 5 departamentos (ex: 1 ferramenta + 1 item hidráulico + 1 elétrico + 1 pintura + 1 fixador/químico).
+   - Bloqueio de Incompatibilidades Óbvias:
+     * Não misturar bitolas desconexas sem função (ex: tubos de esgoto 100mm com joelho de água fria 20mm no mesmo sub-circuito).
+     * Não duplicar ferramentas manuais pesadas idênticas em um mesmo pedido de reforma (ex: evitar 3 marretas ou 4 serrotes iguais).`;
 
   const prompt = `Você é um diretor comercial sênior e especialista em orçamentos B2B e vendas de materiais de construção.
 Sua missão é gerar propostas comerciais personalizadas para uma LISTA DE CLIENTES em uma única resposta unificada.
