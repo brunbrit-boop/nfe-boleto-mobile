@@ -313,6 +313,7 @@ export interface GrupoClienteItem {
   status: 'pendente' | 'gerando' | 'gerado' | 'erro';
   ofertaGerada?: any; // OfertaGeradaResult
   nfeEmitida?: NFeData;
+  idNotaBling?: number | string; // ID oficial da NF-e no Bling para permitir edições via PUT
   erro?: string;
 }
 

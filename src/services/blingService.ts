@@ -505,6 +505,7 @@ export interface GravarEsbocoBlingParams {
   primeiroVencimento?: string;
   intervaloDias?: number;
   observacoesAdicionais?: string;
+  idNotaBlingExistente?: number | string;
 }
 
 export interface ResultadoEsbocoBling {
@@ -517,7 +518,8 @@ export interface ResultadoEsbocoBling {
 }
 
 /**
- * Grava um Esboço de Nota Fiscal no Bling (Vendas > Notas Fiscais / Notas de Saída)
+ * Grava ou Atualiza um Esboço de Nota Fiscal no Bling (Vendas > Notas Fiscais / Notas de Saída)
+ * Se idNotaBlingExistente for informado, executa PUT /nfe/{id} para atualizar em vez de duplicar.
  * Cria o rascunho com status 'Pendente / Em digitação', sem transmissão imediata à SEFAZ.
  */
 export async function gravarEsbocoNFeNoBling(
@@ -531,6 +533,7 @@ export async function gravarEsbocoNFeNoBling(
     primeiroVencimento,
     intervaloDias = 15,
     observacoesAdicionais,
+    idNotaBlingExistente,
   } = params;
 
   if (!empresaToken || !empresaToken.trim()) {
@@ -658,22 +661,27 @@ export async function gravarEsbocoNFeNoBling(
     payload.parcelas = parcelasPayload;
   }
 
+  const idExistenteStr = idNotaBlingExistente ? String(idNotaBlingExistente).trim() : '';
+  const isEdicao = Boolean(idExistenteStr && /^\d+$/.test(idExistenteStr));
+  const endpoint = isEdicao ? `/nfe/${idExistenteStr}` : '/nfe';
+  const method = isEdicao ? 'PUT' : 'POST';
+
   try {
-    const resposta = await callBlingApi('/nfe', {
-      method: 'POST',
+    const resposta = await callBlingApi(endpoint, {
+      method,
       body: payload,
       customToken: empresaToken,
     });
 
     const data = resposta?.data;
-    const idGerado = data?.id || resposta?.id;
+    const idGerado = data?.id || resposta?.id || (isEdicao ? Number(idExistenteStr) : undefined);
     const numeroGerado = data?.numero ? String(data.numero) : undefined;
     const serieGerada = data?.serie ? String(data.serie) : undefined;
 
     if (!idGerado) {
       return {
         sucesso: false,
-        mensagem: resposta?.mensagem || resposta?.error?.description || 'O Bling não retornou o ID da nota fiscal criada.',
+        mensagem: resposta?.mensagem || resposta?.error?.description || 'O Bling não retornou o ID da nota fiscal.',
         raw: data || resposta,
       };
     }
@@ -683,10 +691,34 @@ export async function gravarEsbocoNFeNoBling(
       idNotaBling: idGerado,
       numeroNota: numeroGerado,
       serie: serieGerada,
-      mensagem: `Esboço de NF-e gravado com sucesso no Bling (ID: ${idGerado}). Localize em Vendas > Notas Fiscais.`,
+      mensagem: isEdicao
+        ? `Esboço de NF-e (ID: ${idGerado}) atualizado com sucesso no Bling via PUT. Localize em Vendas > Notas Fiscais.`
+        : `Esboço de NF-e gravado com sucesso no Bling (ID: ${idGerado}). Localize em Vendas > Notas Fiscais.`,
       raw: data || resposta,
     };
   } catch (error: any) {
+    // Se tentou atualizar via PUT e a nota não foi encontrada no Bling (404), tenta criar um novo esboço via POST
+    if (isEdicao && (error?.status === 404 || error?.message?.includes('404') || error?.message?.includes('não encontrada'))) {
+      try {
+        const respostaCriacao = await callBlingApi('/nfe', {
+          method: 'POST',
+          body: payload,
+          customToken: empresaToken,
+        });
+        const idNovo = respostaCriacao?.data?.id || respostaCriacao?.id;
+        if (idNovo) {
+          return {
+            sucesso: true,
+            idNotaBling: idNovo,
+            numeroNota: respostaCriacao?.data?.numero ? String(respostaCriacao.data.numero) : undefined,
+            serie: respostaCriacao?.data?.serie ? String(respostaCriacao.data.serie) : undefined,
+            mensagem: `Nota anterior não existia mais no Bling. Novo esboço de NF-e criado com sucesso (ID: ${idNovo}).`,
+            raw: respostaCriacao,
+          };
+        }
+      } catch {}
+    }
+
     // Se a chamada demorou ou a conexão foi interrompida, verifica se o Bling já gravou a nota recentemente
     try {
       const buscaRecente = await callBlingApi('/nfe?limite=5&criterio=1', {
@@ -718,7 +750,7 @@ export async function gravarEsbocoNFeNoBling(
 
     return {
       sucesso: false,
-      mensagem: error.message || 'Erro ao gravar esboço de nota fiscal no Bling.',
+      mensagem: error.message || 'Erro ao processar nota fiscal no Bling.',
     };
   }
 }

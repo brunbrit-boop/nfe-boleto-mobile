@@ -258,3 +258,230 @@ Retorne ESTRITAMENTE um objeto JSON válido (sem blocos markdown) com a seguinte
     'Não foi possível obter a resposta do Google Gemini. O orçamento foi bloqueado com segurança para evitar o envio de produtos aleatórios ao cliente. Verifique sua conexão e tente novamente.'
   );
 }
+
+export interface ClienteLoteInput {
+  clienteId: number;
+  nome: string;
+  valorAlvo: number;
+  foco?: string;
+  catalogoEspecifico?: CatalogoProduto[];
+}
+
+/**
+ * Gera propostas comerciais para múltiplos clientes em UMA ÚNICA chamada de IA unificada ao Google Gemini.
+ * Elimina múltiplas requisições sequenciais, reduzindo latência e evitando sobrecarga da API.
+ */
+export async function gerarOfertasLoteUnificadoGemini(
+  clientesInput: ClienteLoteInput[],
+  catalogoGeral: CatalogoProduto[] = CATALOGO_PRODUTOS_PADRAO,
+  margemMax: number = 0.05,
+  diretrizesGeraisPersonalizadas?: string,
+  diretrizesGrupoPersonalizadas?: string
+): Promise<Record<number, OfertaGeradaResult & { motor: 'gemini' }>> {
+  if (clientesInput.length === 0) return {};
+
+  const apiKey = getStoredGeminiApiKey().trim();
+  if (!apiKey) {
+    throw new Error(
+      'Cérebro de Inteligência Artificial desconectado. Conecte sua chave do Google Gemini para gerar propostas comerciais inteligentes com segurança.'
+    );
+  }
+
+  // Se for apenas 1 cliente, reaproveita o fluxo individual
+  if (clientesInput.length === 1) {
+    const c = clientesInput[0];
+    const oferta = await gerarOfertaComGeminiOuLocal(
+      c.valorAlvo,
+      margemMax,
+      c.catalogoEspecifico || catalogoGeral,
+      c.foco,
+      diretrizesGeraisPersonalizadas,
+      diretrizesGrupoPersonalizadas
+    );
+    return { [c.clienteId]: oferta };
+  }
+
+  const catalogoResumido = catalogoGeral.map((p) => ({
+    id: p.id,
+    codigo: p.codigo,
+    descricao: p.descricao,
+    unidade: p.unidade,
+    precoUnitario: p.precoUnitario,
+    categoria: p.categoria,
+  }));
+
+  const listaClientesPrompt = clientesInput.map((c) => ({
+    clienteId: c.clienteId,
+    nome: c.nome,
+    valorAlvo: c.valorAlvo,
+    limiteMaximo: Number((c.valorAlvo * (1 + margemMax)).toFixed(2)),
+    foco: c.foco || 'Geral / Mix comercial equilibrado',
+    produtosPermitidos: c.catalogoEspecifico ? c.catalogoEspecifico.map((p) => p.id) : undefined,
+  }));
+
+  const diretrizesGeraisEfetivas =
+    diretrizesGeraisPersonalizadas?.trim() ||
+    `1. QUANTIDADES HUMANIZADAS E QUEBRADAS (REGRA DE OURO):
+   - NUNCA use quantidades perfeitamente redondas ou terminadas em zero (evite expressamente 10, 20, 30, 40, 50, 100).
+   - Use SEMPRE quantidades comerciais quebradas e naturais, típicas de compras reais de obra (ex: 7, 13, 16, 19, 23, 27, 31, 38, 44 unidades).
+2. LEI DA TRAVA DE QUANTIDADE PARA ACESSÓRIOS E ITENS BARATOS (< R$ 18,00):
+   - Itens de baixo ticket (joelhos, luvas, curvas, buchas, fita veda-rosca) NUNCA podem ter quantidades absurdas. Teto entre 5 e 35 unidades por item.
+   - É ABSOLUTAMENTE PROIBIDO usar um produto barato com centenas de unidades apenas para fechar o valor do pedido!
+3. LEI DE PARETO (80/20 DO VALOR DA VENDA):
+   - Pelo menos 75% a 85% do valor total do pedido DEVE ser construído pelos itens estruturais ou de maior valor unitário.
+   - Itens baratos servem exclusivamente como complementos funcionais do kit.
+4. PROPORÇÃO TÉCNICA E COERÊNCIA DE MIX:
+   - Produtos estruturais e miudezas devem ter relação técnica realista.`;
+
+  const prompt = `Você é um diretor comercial sênior e especialista em orçamentos B2B e vendas de materiais de construção.
+Sua missão é gerar propostas comerciais personalizadas para uma LISTA DE CLIENTES em uma única resposta unificada.
+
+LISTA DE CLIENTES E RESPECTIVAS METAS (JSON):
+${JSON.stringify(listaClientesPrompt, null, 2)}
+
+🌐 DIRETRIZES GERAIS DA EMPRESA (LEIS OBRIGATÓRIAS):
+${diretrizesGeraisEfetivas}
+
+${
+  diretrizesGrupoPersonalizadas?.trim()
+    ? `🎯 DIRETRIZES ESPECÍFICAS DESTE GRUPO DE VENDAS:
+${diretrizesGrupoPersonalizadas.trim()}
+`
+    : ''
+}
+
+CATÁLOGO GERAL DISPONÍVEL (JSON):
+${JSON.stringify(catalogoResumido, null, 2)}
+
+INSTRUÇÕES CRÍTICAS DE RETORNO:
+- Para CADA cliente da lista, selecione uma combinação técnica de produtos.
+- Se o cliente tiver "produtosPermitidos", use EXCLUSIVAMENTE IDs dessa lista para ele.
+- O valor total de cada proposta deve atingir o "valorAlvo" com desvio máximo de até ${margemMax * 100}%.
+- Retorne ESTRITAMENTE um objeto JSON válido (sem blocos markdown) com a seguinte estrutura exata:
+{
+  "propostas": [
+    {
+      "clienteId": 123,
+      "itens": [
+        { "id": "prod_1", "quantidade": 23 }
+      ],
+      "razaoExplicativa": "Resumo comercial objetivo do mix montado para este cliente."
+    }
+  ]
+}`;
+
+  for (const model of GEMINI_MODELS) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.2,
+            responseMimeType: 'application/json',
+          },
+        }),
+      });
+
+      if (!response.ok) continue;
+
+      const data = await response.json();
+      const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (!rawText) continue;
+
+      const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleanJson);
+      if (!parsed?.propostas || !Array.isArray(parsed.propostas)) continue;
+
+      const resultadoFinal: Record<number, OfertaGeradaResult & { motor: 'gemini' }> = {};
+
+      for (const prop of parsed.propostas) {
+        const clienteId = Number(prop.clienteId);
+        const clienteInput = clientesInput.find((c) => c.clienteId === clienteId);
+        if (!clienteInput) continue;
+
+        const catCliente = clienteInput.catalogoEspecifico || catalogoGeral;
+        const itensCompostos: PedidoItemVenda[] = [];
+        let totalCalculado = 0;
+
+        for (const itemGemini of prop.itens || []) {
+          const prod = catCliente.find((p) => p.id === itemGemini.id);
+          if (!prod) continue;
+
+          let qtd = Math.max(1, Math.floor(Number(itemGemini.quantidade) || 1));
+
+          // Regra de quantidades humanizadas quebradas
+          if (qtd > 5 && qtd % 10 === 0) {
+            const delta = (Math.random() > 0.5 ? 1 : -1) * (1 + Math.floor(Math.random() * 3));
+            qtd = Math.max(1, qtd + delta);
+          }
+
+          // Trava de segurança para itens baratos
+          if (prod.precoUnitario < 18 && qtd > 35) {
+            qtd = 27;
+          }
+
+          const itemTotal = Number((qtd * prod.precoUnitario).toFixed(2));
+          itensCompostos.push({
+            id: prod.id,
+            codigo: prod.codigo,
+            descricao: prod.descricao,
+            quantidade: qtd,
+            unidade: prod.unidade,
+            valorUnitario: prod.precoUnitario,
+            valorTotal: itemTotal,
+            ncm: prod.ncm,
+            cfop: prod.cfop,
+            categoria: prod.categoria,
+          });
+          totalCalculado += itemTotal;
+        }
+
+        if (itensCompostos.length > 0) {
+          const totalFinal = Number(totalCalculado.toFixed(2));
+          const margem = Number((((totalFinal - clienteInput.valorAlvo) / clienteInput.valorAlvo) * 100).toFixed(1));
+
+          resultadoFinal[clienteId] = {
+            itens: itensCompostos,
+            valorTotal: totalFinal,
+            valorAlvoOriginal: clienteInput.valorAlvo,
+            margemPercentual: margem,
+            razaoExplicativa: `[Google Gemini • ${model} • Lote Unificado] ${prop.razaoExplicativa || `Mix inteligente gerado com ${itensCompostos.length} itens.`}`,
+            motor: 'gemini',
+          };
+        }
+      }
+
+      // Se atendeu pelo menos a maioria dos clientes do lote, preenche eventuais faltantes de forma segura
+      if (Object.keys(resultadoFinal).length > 0) {
+        for (const c of clientesInput) {
+          if (!resultadoFinal[c.clienteId]) {
+            try {
+              const individual = await gerarOfertaComGeminiOuLocal(
+                c.valorAlvo,
+                margemMax,
+                c.catalogoEspecifico || catalogoGeral,
+                c.foco,
+                diretrizesGeraisPersonalizadas,
+                diretrizesGrupoPersonalizadas
+              );
+              resultadoFinal[c.clienteId] = individual;
+            } catch (errFallback) {
+              console.warn(`Fallback individual para cliente ${c.clienteId} falhou:`, errFallback);
+            }
+          }
+        }
+        return resultadoFinal;
+      }
+    } catch (err: any) {
+      console.warn(`Tentativa unificada com ${model} falhou:`, err);
+    }
+  }
+
+  throw new Error(
+    'Não foi possível obter a resposta unificada do Google Gemini. Tente novamente ou reduza o número de clientes selecionados.'
+  );
+}
+

@@ -23,6 +23,7 @@ import {
   Brain,
   BookOpen,
   RotateCcw,
+  Send,
 } from 'lucide-react';
 import type {
   EmpresaTenant,
@@ -46,6 +47,7 @@ import {
   salvarGruposProdutosCacheLocal,
   criarNovoGrupoProdutos,
   gerarOfertaParaItem,
+  gerarOfertasEmLoteUnificado,
   emitirNFeItemGrupo,
   distribuirMetaEscalonada,
   obterDiretrizesGeraisEmpresa,
@@ -194,6 +196,8 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
   // Seleção de Clientes na Tabela para Operações em Lote / Fila
   const [clientesSelecionadosTabela, setClientesSelecionadosTabela] = useState<number[]>([]);
   const [itemGerandoIndividualId, setItemGerandoIndividualId] = useState<number | null>(null);
+  const [isReenviandoLote, setIsReenviandoLote] = useState<boolean>(false);
+  const [progressoReenvioLote, setProgressoReenvioLote] = useState<{ atual: number; total: number } | null>(null);
 
   // Atualiza cache de grupos de produtos
   const atualizarGruposProdutos = (novos: GrupoProdutos[]) => {
@@ -394,13 +398,41 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     atualizarGrupo(atualizado);
   };
 
-  const handleRemoverCliente = (clienteId: number) => {
+  // Descarta o orçamento gerado do cliente (desfaz o vínculo com o Bling e mantém a empresa no grupo)
+  // Ou remove a empresa do grupo se ela já estiver sem orçamento
+  const handleDescartarOuRemoverCliente = (clienteId: number) => {
     if (!grupoAtivo) return;
-    const atualizado: GrupoClientes = {
-      ...grupoAtivo,
-      clientes: grupoAtivo.clientes.filter((c) => c.clienteId !== clienteId),
-    };
-    atualizarGrupo(atualizado);
+    const target = grupoAtivo.clientes.find((c) => c.clienteId === clienteId);
+    if (!target) return;
+
+    if (target.ofertaGerada || target.nfeEmitida || target.idNotaBling) {
+      // Tem orçamento/nota ativa: descarta o orçamento e desvincula do Bling, mantendo a empresa no grupo
+      const atualizado: GrupoClientes = {
+        ...grupoAtivo,
+        clientes: grupoAtivo.clientes.map((c) =>
+          c.clienteId === clienteId
+            ? {
+                ...c,
+                status: 'pendente' as const,
+                ofertaGerada: undefined,
+                nfeEmitida: undefined,
+                idNotaBling: undefined,
+                erro: undefined,
+              }
+            : c
+        ),
+      };
+      atualizarGrupo(atualizado);
+    } else {
+      // Sem orçamento ativo: remove a empresa do grupo com confirmação
+      if (confirm(`Deseja remover "${target.nome}" deste grupo de clientes?`)) {
+        const atualizado: GrupoClientes = {
+          ...grupoAtivo,
+          clientes: grupoAtivo.clientes.filter((c) => c.clienteId !== clienteId),
+        };
+        atualizarGrupo(atualizado);
+      }
+    }
   };
 
   // Handlers da Central de Diretrizes do Robô
@@ -477,11 +509,19 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
 
     setItemGerandoIndividualId(clienteId);
 
-    // Marca como gerando
+    // Marca como gerando e desvincula de qualquer nota anterior do Bling (novo mix = novo ciclo)
     let atualizado: GrupoClientes = {
       ...grupoAtivo,
       clientes: grupoAtivo.clientes.map((c) =>
-        c.clienteId === clienteId ? { ...c, status: 'gerando' } : c
+        c.clienteId === clienteId
+          ? {
+              ...c,
+              status: 'gerando',
+              idNotaBling: undefined,
+              nfeEmitida: undefined,
+              erro: undefined,
+            }
+          : c
       ),
     };
     atualizarGrupo(atualizado);
@@ -515,9 +555,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     atualizarGrupo(atualizado);
   };
 
-  // Executa Geração em Fila Segura (1 a 1) para Clientes Selecionados via Checkbox
+  // Executa Geração Unificada (1 única requisição consolidada à IA) para Clientes Selecionados via Checkbox
   const handleGerarSelecionadosLote = async () => {
-    if (!grupoAtivo || clientesSelecionadosTabela.length === 0 || isGerandoLote || itemGerandoIndividualId !== null) return;
+    if (!grupoAtivo || clientesSelecionadosTabela.length === 0 || isGerandoLote || isReenviandoLote || itemGerandoIndividualId !== null) return;
 
     if (!isCerebroIAConectado()) {
       alert(
@@ -535,67 +575,158 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     setIsGerandoLote(true);
     setProgressoLote({ atual: 0, total: itensParaGerar.length });
 
+    // 1. Marca todos os clientes selecionados com o status "gerando" e desvincula notas anteriores no Bling
+    let grupoEmProcessamento = {
+      ...grupoAtivo,
+      clientes: grupoAtivo.clientes.map((c) =>
+        selecionadosSet.has(c.clienteId)
+          ? {
+              ...c,
+              status: 'gerando' as const,
+              idNotaBling: undefined,
+              nfeEmitida: undefined,
+              erro: undefined,
+            }
+          : c
+      ),
+    };
+    atualizarGrupo(grupoEmProcessamento);
+
     const diretrizesGerais = obterDiretrizesGeraisEmpresa(empresa.id);
 
     try {
+      // 2. Dispara UMA ÚNICA chamada unificada à API do Gemini contendo todas as empresas selecionadas
+      const mapaOfertas = await gerarOfertasEmLoteUnificado(
+        itensParaGerar,
+        catalogoProdutos,
+        0.05,
+        gruposProdutos,
+        diretrizesGerais,
+        grupoAtivo.diretrizesGrupo
+      );
+
+      // 3. Atualiza todos os membros selecionados de uma só vez na tabela
+      grupoEmProcessamento = {
+        ...grupoEmProcessamento,
+        clientes: grupoEmProcessamento.clientes.map((c) => {
+          if (!selecionadosSet.has(c.clienteId)) return c;
+          const oferta = mapaOfertas[c.clienteId];
+          if (oferta && oferta.itens && oferta.itens.length > 0) {
+            return {
+              ...c,
+              status: 'gerado' as const,
+              ofertaGerada: oferta,
+              erro: undefined,
+            };
+          } else {
+            return {
+              ...c,
+              status: 'erro' as const,
+              erro: 'IA não retornou itens para esta empresa no lote unificado.',
+            };
+          }
+        }),
+      };
+      atualizarGrupo(grupoEmProcessamento);
+    } catch (err: any) {
+      console.error('Falha na geração unificada de lote:', err);
+      grupoEmProcessamento = {
+        ...grupoEmProcessamento,
+        clientes: grupoEmProcessamento.clientes.map((c) =>
+          selecionadosSet.has(c.clienteId)
+            ? { ...c, status: 'erro' as const, erro: err.message || 'Falha na requisição unificada da IA.' }
+            : c
+        ),
+      };
+      atualizarGrupo(grupoEmProcessamento);
+    } finally {
+      setIsGerandoLote(false);
+      cancelarGeracaoRef.current = false;
+      setClientesSelecionadosTabela([]);
+    }
+  };
+
+  // Reenvia Orçamentos dos Clientes Selecionados para o Bling ERP
+  const handleReenviarSelecionadosLote = async () => {
+    if (!grupoAtivo || clientesSelecionadosTabela.length === 0 || isReenviandoLote || isGerandoLote) return;
+
+    const selecionadosSet = new Set(clientesSelecionadosTabela);
+    const itensComOferta = grupoAtivo.clientes.filter((c) => selecionadosSet.has(c.clienteId) && c.ofertaGerada);
+
+    if (itensComOferta.length === 0) {
+      alert(
+        '⚠️ Nenhum dos clientes selecionados possui orçamento gerado para reenvio.\n\nSelecione empresas que já possuem propostas geradas ou clique em "Refazer Selecionados" primeiro.'
+      );
+      return;
+    }
+
+    const token = empresa.blingAccessToken?.trim();
+    if (!token) {
+      alert(
+        `⚠️ Bling Desconectado!\n\nA empresa "${empresa.nomeFantasia || empresa.razaoSocial}" não possui Token de Acesso do Bling conectado. Conecte o Bling nas configurações da empresa antes de reenviar orçamentos.`
+      );
+      return;
+    }
+
+    setIsReenviandoLote(true);
+    setProgressoReenvioLote({ atual: 0, total: itensComOferta.length });
+
+    try {
       let grupoEmProcessamento = { ...grupoAtivo };
-      for (let i = 0; i < itensParaGerar.length; i++) {
-        if (cancelarGeracaoRef.current) break;
+      let sucessoCount = 0;
 
-        const item = itensParaGerar[i];
-        setProgressoLote({ atual: i + 1, total: itensParaGerar.length });
-
-        grupoEmProcessamento = {
-          ...grupoEmProcessamento,
-          clientes: grupoEmProcessamento.clientes.map((c) =>
-            c.clienteId === item.clienteId ? { ...c, status: 'gerando' } : c
-          ),
-        };
-        atualizarGrupo(grupoEmProcessamento);
+      for (let i = 0; i < itensComOferta.length; i++) {
+        const item = itensComOferta[i];
+        setProgressoReenvioLote({ atual: i + 1, total: itensComOferta.length });
+        setItemEmitindoNFeId(item.clienteId);
 
         try {
-          const oferta = await gerarOfertaParaItem(
-            item,
-            catalogoProdutos,
-            0.05,
-            gruposProdutos,
-            diretrizesGerais,
-            grupoAtivo.diretrizesGrupo
-          );
-          grupoEmProcessamento = {
-            ...grupoEmProcessamento,
-            clientes: grupoEmProcessamento.clientes.map((c) =>
-              c.clienteId === item.clienteId
-                ? { ...c, status: 'gerado', ofertaGerada: oferta, erro: undefined }
-                : c
-            ),
-          };
+          const res = await emitirNFeItemGrupo(item, empresa, company, bancoAtual, grupoAtivo?.nome);
+          if (res.sucesso && res.nfe) {
+            sucessoCount++;
+            grupoEmProcessamento = {
+              ...grupoEmProcessamento,
+              clientes: grupoEmProcessamento.clientes.map((c) =>
+                c.clienteId === item.clienteId
+                  ? { ...c, nfeEmitida: res.nfe, idNotaBling: res.nfe?.numeroNFe, erro: undefined }
+                  : c
+              ),
+            };
+            atualizarGrupo(grupoEmProcessamento);
+            if (onEmitirNFe) {
+              onEmitirNFe(res.nfe);
+            }
+          } else {
+            grupoEmProcessamento = {
+              ...grupoEmProcessamento,
+              clientes: grupoEmProcessamento.clientes.map((c) =>
+                c.clienteId === item.clienteId ? { ...c, erro: res.erro || 'Falha no reenvio ao Bling' } : c
+              ),
+            };
+            atualizarGrupo(grupoEmProcessamento);
+          }
         } catch (err: any) {
           grupoEmProcessamento = {
             ...grupoEmProcessamento,
             clientes: grupoEmProcessamento.clientes.map((c) =>
-              c.clienteId === item.clienteId
-                ? { ...c, status: 'erro', erro: err.message || 'Falha na IA' }
-                : c
+              c.clienteId === item.clienteId ? { ...c, erro: err.message || 'Erro no reenvio' } : c
             ),
           };
+          atualizarGrupo(grupoEmProcessamento);
         }
-        atualizarGrupo(grupoEmProcessamento);
-        await new Promise((r) => setTimeout(r, 200));
+
+        setItemEmitindoNFeId(null);
+        await new Promise((r) => setTimeout(r, 400));
       }
-    } finally {
-      if (cancelarGeracaoRef.current && grupoAtivo) {
-        const revertido: GrupoClientes = {
-          ...grupoAtivo,
-          clientes: grupoAtivo.clientes.map((c) =>
-            c.status === 'gerando' ? { ...c, status: 'pendente' as const } : c
-          ),
-        };
-        atualizarGrupo(revertido);
-      }
-      setIsGerandoLote(false);
-      cancelarGeracaoRef.current = false;
+
+      alert(
+        `✅ Reenvio Concluído!\n\n${sucessoCount} de ${itensComOferta.length} orçamentos foram processados e reenviados ao Bling com sucesso.`
+      );
       setClientesSelecionadosTabela([]);
+    } finally {
+      setIsReenviandoLote(false);
+      setProgressoReenvioLote(null);
+      setItemEmitindoNFeId(null);
     }
   };
 
@@ -700,7 +831,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
           const atualizado: GrupoClientes = {
             ...grupoAtivo,
             clientes: grupoAtivo.clientes.map((c) =>
-              c.clienteId === item.clienteId ? { ...c, nfeEmitida: res.nfe, erro: undefined } : c
+              c.clienteId === item.clienteId
+                ? { ...c, nfeEmitida: res.nfe, idNotaBling: res.nfe?.numeroNFe, erro: undefined }
+                : c
             ),
           };
           atualizarGrupo(atualizado);
@@ -762,7 +895,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
             grupoEmProcessamento = {
               ...grupoEmProcessamento,
               clientes: grupoEmProcessamento.clientes.map((c) =>
-                c.clienteId === item.clienteId ? { ...c, nfeEmitida: res.nfe, erro: undefined } : c
+                c.clienteId === item.clienteId
+                  ? { ...c, nfeEmitida: res.nfe, idNotaBling: res.nfe?.numeroNFe, erro: undefined }
+                  : c
               ),
             };
             atualizarGrupo(grupoEmProcessamento);
@@ -1824,24 +1959,58 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
                     onClick={() => setClientesSelecionadosTabela([])}
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-800 transition cursor-pointer"
+                    disabled={isGerandoLote || isReenviandoLote}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-200/50 dark:hover:bg-slate-800 transition cursor-pointer disabled:opacity-50"
                   >
                     Desmarcar Todos
                   </button>
 
+                  {/* Botão Reenviar Orçamento para Selecionados */}
+                  <button
+                    type="button"
+                    onClick={handleReenviarSelecionadosLote}
+                    disabled={isGerandoLote || isReenviandoLote || itemEmitindoNFeId !== null}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-black bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 shadow-md shadow-emerald-500/20 transition active:scale-95 cursor-pointer disabled:opacity-50"
+                    title="Reenvia os orçamentos e rascunhos das empresas selecionadas para o Bling ERP"
+                  >
+                    {isReenviandoLote ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>
+                          Reenviando {progressoReenvioLote ? `${progressoReenvioLote.atual}/${progressoReenvioLote.total}` : '...'}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        <span>📨 Reenviar Orçamento ({clientesSelecionadosTabela.length})</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Botão Refazer Orçamento em Requisição Única Unificada */}
                   <button
                     type="button"
                     onClick={handleGerarSelecionadosLote}
-                    disabled={isGerandoLote || itemGerandoIndividualId !== null}
-                    className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-black bg-gradient-to-r from-amber-400 to-[#11d493] text-slate-950 hover:brightness-110 shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer disabled:opacity-50"
-                    title="Gera os orçamentos dos clientes marcados em fila única segura (sem travar a IA)"
+                    disabled={isGerandoLote || isReenviandoLote || itemGerandoIndividualId !== null}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-black bg-gradient-to-r from-amber-400 to-[#11d493] text-slate-950 hover:brightness-110 shadow-md shadow-amber-500/20 transition active:scale-95 cursor-pointer disabled:opacity-50"
+                    title="Refaz os orçamentos de todos os selecionados em UMA ÚNICA requisição unificada à IA do Gemini"
                   >
-                    <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
-                    <span>⚡ Refazer Selecionados ({clientesSelecionadosTabela.length}) em Fila</span>
+                    {isGerandoLote ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Gerando Lote Unificado...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5 fill-slate-950" />
+                        <span>⚡ Refazer Selecionados ({clientesSelecionadosTabela.length}) [Req. Única]</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </div>
@@ -2093,9 +2262,12 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                                 <span>Refazer</span>
                               </button>
                             </div>
-                            {item.nfeEmitida && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 font-bold text-[10px] border border-emerald-500/30 w-fit">
-                                <span>✓ No Bling #{item.nfeEmitida.numeroNFe} (Pendente)</span>
+                            {(item.nfeEmitida || item.idNotaBling) && (
+                              <span
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-400 font-bold text-[10px] border border-emerald-500/30 w-fit"
+                                title="Vinculado ao rascunho de nota de saída no Bling ERP"
+                              >
+                                <span>✓ No Bling #{item.idNotaBling || item.nfeEmitida?.numeroNFe} (Rascunho)</span>
                               </span>
                             )}
                             {item.erro && (
@@ -2125,21 +2297,25 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                               {itemEmitindoNFeId === item.clienteId ? (
                                 <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/20 text-amber-300 font-bold text-[11px] border border-amber-500/30 animate-pulse">
                                   <RefreshCw className="w-3 h-3 animate-spin" />
-                                  <span>Gravando...</span>
+                                  <span>{item.nfeEmitida || item.idNotaBling ? 'Corrigindo...' : 'Gravando...'}</span>
                                 </span>
                               ) : (
                                 <button
                                   type="button"
                                   onClick={() => handleEmitirLinha(item)}
                                   className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] shadow-sm transition active:scale-95 cursor-pointer ${
-                                    item.nfeEmitida
-                                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700'
+                                    item.nfeEmitida || item.idNotaBling
+                                      ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 border border-amber-400/40'
                                       : 'bg-[#11d493] hover:bg-[#0eb880] text-slate-950'
                                   }`}
-                                  title={item.nfeEmitida ? 'Gravar novamente no Bling' : 'Gravar rascunho de nota de saída no Bling'}
+                                  title={
+                                    item.nfeEmitida || item.idNotaBling
+                                      ? 'Atualizar e corrigir o esboço existente no Bling (PUT)'
+                                      : 'Transmitir novo esboço de nota de saída no Bling (POST)'
+                                  }
                                 >
                                   <FileText className="w-3 h-3" />
-                                  <span>{item.nfeEmitida ? 'Reenviar' : 'Emitir'}</span>
+                                  <span>{item.nfeEmitida || item.idNotaBling ? 'Corrigir no Bling' : 'Transmitir Esboço'}</span>
                                 </button>
                               )}
 
@@ -2190,9 +2366,17 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
 
                           <button
                             type="button"
-                            onClick={() => handleRemoverCliente(item.clienteId)}
-                            className="p-1.5 rounded-lg text-slate-300 dark:text-slate-600 hover:text-rose-500 hover:bg-rose-500/10 transition cursor-pointer"
-                            title="Remover deste grupo"
+                            onClick={() => handleDescartarOuRemoverCliente(item.clienteId)}
+                            className={`p-1.5 rounded-lg transition cursor-pointer ${
+                              item.ofertaGerada || item.nfeEmitida || item.idNotaBling
+                                ? 'text-amber-500/70 hover:text-amber-400 hover:bg-amber-500/10'
+                                : 'text-slate-300 dark:text-slate-600 hover:text-rose-500 hover:bg-rose-500/10'
+                            }`}
+                            title={
+                              item.ofertaGerada || item.nfeEmitida || item.idNotaBling
+                                ? 'Descartar este orçamento e desvincular do Bling (mantém a empresa no grupo)'
+                                : 'Remover esta empresa do grupo'
+                            }
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -2514,11 +2698,23 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                 <span>Refazer com IA</span>
               </button>
 
-              <div className="flex gap-2">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const targetId = itemVisualizandoOferta.clienteId;
+                    setItemVisualizandoOferta(null);
+                    handleDescartarOuRemoverCliente(targetId);
+                  }}
+                  className="px-3 py-2 rounded-xl text-xs font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 transition cursor-pointer"
+                  title="Descartar este orçamento e desvincular do Bling (mantém a empresa no grupo)"
+                >
+                  Descartar Orçamento
+                </button>
                 <button
                   type="button"
                   onClick={() => setItemVisualizandoOferta(null)}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-[#162f27] text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-[#1f4337] transition"
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 dark:bg-[#162f27] text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-[#1f4337] transition cursor-pointer"
                 >
                   Fechar
                 </button>
@@ -2529,9 +2725,20 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                     setItemVisualizandoOferta(null);
                     handleEmitirLinha(target);
                   }}
-                  className="px-4 py-2 rounded-xl text-xs font-bold bg-[#11d493] text-slate-950 hover:bg-[#0eb880] transition"
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition cursor-pointer shadow-md ${
+                    itemVisualizandoOferta.nfeEmitida || itemVisualizandoOferta.idNotaBling
+                      ? 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-black'
+                      : 'bg-[#11d493] text-slate-950 hover:bg-[#0eb880]'
+                  }`}
+                  title={
+                    itemVisualizandoOferta.nfeEmitida || itemVisualizandoOferta.idNotaBling
+                      ? 'Atualizar o rascunho existente no Bling com estes novos itens/quantidades (PUT /nfe/{id})'
+                      : 'Transmitir novo rascunho de NF-e ao Bling (POST /nfe)'
+                  }
                 >
-                  Emitir NF-e e Boleto Deste Orçamento
+                  {itemVisualizandoOferta.nfeEmitida || itemVisualizandoOferta.idNotaBling
+                    ? '✏️ Salvar Alterações e Corrigir no Bling (PUT)'
+                    : '📤 Transmitir Esboço ao Bling (POST)'}
                 </button>
               </div>
             </div>

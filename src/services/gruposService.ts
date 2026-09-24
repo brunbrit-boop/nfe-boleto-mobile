@@ -5,7 +5,7 @@
 
 import type { GrupoClientes, GrupoClienteItem, GrupoProdutos, BlingCliente, CompanyProfile, EmpresaTenant, NFeData, BankProvider } from '../types';
 import type { CatalogoProduto, OfertaGeradaResult } from '../utils/salesOptimizer';
-import { gerarOfertaComGeminiOuLocal, isCerebroIAConectado } from './geminiService';
+import { gerarOfertaComGeminiOuLocal, isCerebroIAConectado, gerarOfertasLoteUnificadoGemini, type ClienteLoteInput } from './geminiService';
 import { CATALOGO_PRODUTOS_PADRAO } from '../utils/salesOptimizer';
 import { sleep, gravarEsbocoNFeNoBling } from './blingService';
 import { formatCurrency, gerarChaveAcessoNFe, calcularDivisaoParcelas } from '../utils/financeEngine';
@@ -345,6 +345,77 @@ export async function gerarOfertaParaItem(
 }
 
 /**
+ * Executa a geração de orçamentos para uma lista de membros do grupo em UMA ÚNICA chamada unificada à IA.
+ * Em vez de N requisições separadas, envia todos os clientes selecionados de uma só vez no mesmo payload.
+ */
+export async function gerarOfertasEmLoteUnificado(
+  itens: GrupoClienteItem[],
+  catalogoDisponivel: CatalogoProduto[],
+  margemMax: number = 0.05,
+  gruposProdutos: GrupoProdutos[] = [],
+  diretrizesGerais?: string,
+  diretrizesGrupo?: string
+): Promise<Record<number, OfertaGeradaResult>> {
+  if (itens.length === 0) return {};
+
+  const inputs: ClienteLoteInput[] = itens.map((item) => {
+    let catalogoEfetivo = catalogoDisponivel;
+    let diretriz: string | undefined = undefined;
+
+    // 1. Kit ou Grupo de Produtos vinculado
+    if (item.grupoProdutoId && gruposProdutos.length > 0) {
+      const gp = gruposProdutos.find((g) => g.id === item.grupoProdutoId);
+      if (gp && gp.produtosCodigos && gp.produtosCodigos.length > 0) {
+        const codigosSet = new Set(gp.produtosCodigos.map((c) => c.toLowerCase().trim()));
+        const filtradosPorGrupo = catalogoDisponivel.filter(
+          (p) =>
+            codigosSet.has((p.codigo || '').toLowerCase().trim()) ||
+            codigosSet.has((p.id || '').toLowerCase().trim())
+        );
+        if (filtradosPorGrupo.length > 0) {
+          catalogoEfetivo = filtradosPorGrupo;
+          diretriz = `Compor pedido utilizando exclusivamente os produtos do Grupo/Kit: "${gp.nome}".`;
+        }
+      }
+    }
+
+    // 2. Filtro de foco ou texto
+    if (!diretriz) {
+      const foco = (item.filtroFoco || '').trim().toLowerCase();
+      if (foco) {
+        const filtrados = catalogoDisponivel.filter(
+          (p) =>
+            p.descricao.toLowerCase().includes(foco) ||
+            p.categoria.toLowerCase().includes(foco) ||
+            (p.codigo && p.codigo.toLowerCase().includes(foco))
+        );
+        if (filtrados.length >= 2) {
+          catalogoEfetivo = filtrados;
+        }
+        diretriz = `Foco em produtos da linha: "${item.filtroFoco}".`;
+      }
+    }
+
+    return {
+      clienteId: item.clienteId,
+      nome: item.nome,
+      valorAlvo: item.valorAlvo,
+      foco: diretriz || item.filtroFoco,
+      catalogoEspecifico: catalogoEfetivo !== catalogoDisponivel ? catalogoEfetivo : undefined,
+    };
+  });
+
+  return await gerarOfertasLoteUnificadoGemini(
+    inputs,
+    catalogoDisponivel,
+    margemMax,
+    diretrizesGerais,
+    diretrizesGrupo
+  );
+}
+
+
+/**
  * Executa a geração em lote para todos os clientes selecionados de um grupo
  */
 export async function executarGeracaoEmLote(
@@ -477,6 +548,12 @@ export async function emitirNFeItemGrupo(
   }
 
   try {
+    const idExistente =
+      item.idNotaBling ||
+      (item.nfeEmitida?.numeroNFe && /^\d+$/.test(item.nfeEmitida.numeroNFe)
+        ? item.nfeEmitida.numeroNFe
+        : undefined);
+
     const resBling = await gravarEsbocoNFeNoBling({
       empresaToken: token,
       cliente: {
@@ -495,17 +572,19 @@ export async function emitirNFeItemGrupo(
       intervaloDias: intervaloDias,
       primeiroVencimento: primeiroVenc,
       observacoesAdicionais: nomeGrupo?.trim(),
+      idNotaBlingExistente: idExistente,
     });
 
     if (!resBling.sucesso) {
       return {
         sucesso: false,
-        erro: resBling.mensagem || 'Falha ao gravar rascunho de nota fiscal no Bling.',
+        erro: resBling.mensagem || 'Falha ao processar nota fiscal no Bling.',
       };
     }
 
     if (resBling.idNotaBling) {
       novaNFe.numeroNFe = String(resBling.idNotaBling);
+      item.idNotaBling = resBling.idNotaBling;
     }
     novaNFe.status = 'rascunho';
   } catch (err: any) {
