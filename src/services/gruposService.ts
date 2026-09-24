@@ -311,17 +311,25 @@ export async function gerarOfertaParaItem(
 
   // 2. Se não encontrou grupo ou não tem grupo vinculado, aplica o filtro de texto/foco
   if (!diretriz) {
-    const foco = (item.filtroFoco || '').trim().toLowerCase();
+    const focoRaw = (item.filtroFoco || '').trim();
+    const foco = focoRaw.toLowerCase();
     if (foco) {
-      const filtrados = catalogoDisponivel.filter((p) =>
-        p.descricao.toLowerCase().includes(foco) ||
-        p.categoria.toLowerCase().includes(foco) ||
-        (p.codigo && p.codigo.toLowerCase().includes(foco))
-      );
-      if (filtrados.length >= 2) {
-        catalogoEfetivo = filtrados;
+      if (foco.includes('rotativo') || foco.includes('livre')) {
+        diretriz = 'Mix Rotativo Automático: escolha um nicho ou combinação variada criativa, evitando repetições.';
+      } else if (foco.includes('cesta balanceada') || foco.includes('multicategoria') || foco.includes('variad')) {
+        diretriz = 'Cesta Balanceada Multicategoria: obrigatório mesclar produtos de 2 a 4 nichos distintos (ex: estrutural + instalação + acabamento).';
+      } else {
+        const filtrados = catalogoDisponivel.filter((p) =>
+          (p.categoria && p.categoria.toLowerCase() === foco) ||
+          p.descricao.toLowerCase().includes(foco) ||
+          (p.categoria && p.categoria.toLowerCase().includes(foco)) ||
+          (p.codigo && p.codigo.toLowerCase().includes(foco))
+        );
+        if (filtrados.length >= 2) {
+          catalogoEfetivo = filtrados;
+        }
+        diretriz = `Foco no nicho comercial: "${focoRaw}". Priorize itens desta categoria e complementos diretos.`;
       }
-      diretriz = `Foco em produtos da linha: "${item.filtroFoco}".`;
     }
   }
 
@@ -381,18 +389,26 @@ export async function gerarOfertasEmLoteUnificado(
 
     // 2. Filtro de foco ou texto
     if (!diretriz) {
-      const foco = (item.filtroFoco || '').trim().toLowerCase();
+      const focoRaw = (item.filtroFoco || '').trim();
+      const foco = focoRaw.toLowerCase();
       if (foco) {
-        const filtrados = catalogoDisponivel.filter(
-          (p) =>
-            p.descricao.toLowerCase().includes(foco) ||
-            p.categoria.toLowerCase().includes(foco) ||
-            (p.codigo && p.codigo.toLowerCase().includes(foco))
-        );
-        if (filtrados.length >= 2) {
-          catalogoEfetivo = filtrados;
+        if (foco.includes('rotativo') || foco.includes('livre')) {
+          diretriz = 'Mix Rotativo Automático: alternar nichos entre clientes para máxima variedade.';
+        } else if (foco.includes('cesta balanceada') || foco.includes('multicategoria') || foco.includes('variad')) {
+          diretriz = 'Cesta Balanceada Multicategoria: obrigatório mesclar produtos de 2 a 4 categorias distintas.';
+        } else {
+          const filtrados = catalogoDisponivel.filter(
+            (p) =>
+              (p.categoria && p.categoria.toLowerCase() === foco) ||
+              p.descricao.toLowerCase().includes(foco) ||
+              (p.categoria && p.categoria.toLowerCase().includes(foco)) ||
+              (p.codigo && p.codigo.toLowerCase().includes(foco))
+          );
+          if (filtrados.length >= 2) {
+            catalogoEfetivo = filtrados;
+          }
+          diretriz = `Foco no nicho comercial: "${focoRaw}".`;
         }
-        diretriz = `Foco em produtos da linha: "${item.filtroFoco}".`;
       }
     }
 

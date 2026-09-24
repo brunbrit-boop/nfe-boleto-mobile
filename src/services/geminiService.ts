@@ -152,7 +152,15 @@ DADOS DA SOLICITAÇÃO:
 - Valor Alvo Pretendido: R$ ${valorAlvo.toFixed(2)}
 - Valor Máximo Permitido (com margem de até ${margemMax * 100}%): R$ ${limiteMaximo.toFixed(2)}
 - Margem Aceitável: O valor total do pedido (soma de qtd * precoUnitario) DEVE ficar estritamente entre R$ ${valorAlvo.toFixed(2)} e R$ ${limiteMaximo.toFixed(2)}.
-${diretrizComercial ? `- FOCO DE PRODUTOS ESPECÍFICO DESTE CLIENTE: "${diretrizComercial}". Priorize itens e complementos desta linha!` : ''}
+${diretrizComercial ? `- DIRETRIZ DE FOCO / NICHO COMERCIAL: "${diretrizComercial}".` : ''}
+
+🎯 MODALIDADES DE ORÇAMENTO (SIGA CONFORME A DIRETRIZ ACIMA):
+1. SE FOR NICHO ESPECÍFICO (ex: "Cabos & Condutores", "Tubos & Conexões", "Disjuntores & Proteção", "Iluminação & Lâmpadas", "Cimento & Alvenaria", "Ferramentas & Fixação", "Tintas & Químicos"):
+   - Concentre pelo menos 85% a 100% do pedido em itens desta categoria/nicho e seus complementos técnicos diretos.
+2. SE FOR CESTA BALANCEADA MULTICATEGORIA (ex: "Cesta Balanceada", "Multicategoria", "Mix Variado"):
+   - OBRIGATÓRIO mesclar produtos de 2 a 4 nichos distintos (ex: 50%-60% estrutural principal + 25%-30% instalação/infra + 10%-15% acabamento/fixação). NUNCA concentre tudo em apenas uma categoria.
+3. SE FOR MIX ROTATIVO OU ABERTO (ex: "Mix Rotativo Automático" ou Geral):
+   - Varie a seleção de produtos com criatividade comercial e evite repetir sempre os mesmos itens convencionais.
 
 🌐 DIRETRIZES GERAIS DA EMPRESA (LEIS OBRIGATÓRIAS):
 ${diretrizesGeraisEfetivas}
@@ -181,7 +189,7 @@ Retorne ESTRITAMENTE um objeto JSON válido (sem blocos markdown) com a seguinte
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: 0.2,
+            temperature: 0.65,
             responseMimeType: 'application/json',
           },
         }),
@@ -353,10 +361,18 @@ ${diretrizesGrupoPersonalizadas.trim()}
 CATÁLOGO GERAL DISPONÍVEL (JSON):
 ${JSON.stringify(catalogoResumido, null, 2)}
 
-INSTRUÇÕES CRÍTICAS DE RETORNO:
+INSTRUÇÕES CRÍTICAS DE RETORNO E VARIAÇÃO DE NICHOS:
 - Para CADA cliente da lista, selecione uma combinação técnica de produtos.
 - Se o cliente tiver "produtosPermitidos", use EXCLUSIVAMENTE IDs dessa lista para ele.
 - O valor total de cada proposta deve atingir o "valorAlvo" com desvio máximo de até ${margemMax * 100}%.
+
+🎲 ROTAÇÃO AUTOMÁTICA E DIVERSIDADE ENTRE CLIENTES (REGRA SUPREMA):
+- Quando os clientes tiverem foco "Mix Rotativo Automático", foco livre ou "Geral", a IA DEVE ALTERNAR os nichos comerciais entre os clientes!
+  Exemplo: Se há 5 clientes, o Cliente 1 pode receber foco em Hidráulica/Tubos, o Cliente 2 em Elétrica/Cabos & Disjuntores, o Cliente 3 em Iluminação, o Cliente 4 em Cimento & Alvenaria, e o Cliente 5 em Cesta Multicategoria Balanceada.
+- NUNCA monte o mesmo kit repetido ou os mesmos produtos idênticos para clientes diferentes da lista!
+- SE O CLIENTE TIVER UM NICHO ESPECÍFICO (ex: "Cabos & Condutores" ou "Tubos & Conexões"): Monte o kit focado estritamente nesse nicho.
+- SE O CLIENTE TIVER "Cesta Balanceada Multicategoria": Mescle obrigatoriamente produtos de 2 a 4 categorias diferentes.
+
 - Retorne ESTRITAMENTE um objeto JSON válido (sem blocos markdown) com a seguinte estrutura exata:
 {
   "propostas": [
@@ -365,7 +381,7 @@ INSTRUÇÕES CRÍTICAS DE RETORNO:
       "itens": [
         { "id": "prod_1", "quantidade": 23 }
       ],
-      "razaoExplicativa": "Resumo comercial objetivo do mix montado para este cliente."
+      "razaoExplicativa": "Resumo comercial objetivo do mix montado para este cliente e qual nicho foi priorizado."
     }
   ]
 }`;
@@ -379,7 +395,7 @@ INSTRUÇÕES CRÍTICAS DE RETORNO:
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: {
-            temperature: 0.2,
+            temperature: 0.7,
             responseMimeType: 'application/json',
           },
         }),

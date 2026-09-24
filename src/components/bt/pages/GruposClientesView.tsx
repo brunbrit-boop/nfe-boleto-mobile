@@ -54,6 +54,7 @@ import {
   salvarDiretrizesGeraisEmpresa,
   DIRETRIZES_GERAIS_PADRAO,
 } from '../../../services/gruposService';
+import { NICHOS_COMERCIAIS_PADRAO } from '../../../services/catalogClassificationService';
 
 interface GruposClientesViewProps {
   empresa: EmpresaTenant;
@@ -312,13 +313,18 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     atualizarGrupo(atualizado);
   };
 
-  const handleAplicarFiltroParaTodos = () => {
+  const handleAplicarFiltroParaTodos = (focoEscolhido?: string) => {
     if (!grupoAtivo) return;
-    const filtro = filtroMassa.trim();
+    const filtro = (focoEscolhido !== undefined ? focoEscolhido : filtroMassa).trim();
     const atualizado: GrupoClientes = {
       ...grupoAtivo,
       filtroPadrao: filtro,
-      clientes: grupoAtivo.clientes.map((c) => ({ ...c, filtroFoco: filtro })),
+      grupoProdutoPadraoId: undefined,
+      clientes: grupoAtivo.clientes.map((c) => ({
+        ...c,
+        filtroFoco: filtro,
+        grupoProdutoId: undefined,
+      })),
     };
     atualizarGrupo(atualizado);
   };
@@ -1792,20 +1798,50 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
             </button>
           </div>
 
-          {/* Filtro Rápido de Categoria para Todos */}
+          {/* Filtro Rápido de Categoria / Nicho para Todos */}
           <div className="lg:col-span-4 flex items-center gap-2 bg-slate-800/80 p-2 rounded-xl border border-slate-700/60">
-            <span className="text-xs font-bold text-slate-400 shrink-0 pl-1">Foco Livre:</span>
-            <input
-              type="text"
-              value={filtroMassa}
-              onChange={(e) => setFiltroMassa(e.target.value)}
-              className="flex-1 bg-slate-900/90 text-white text-xs px-3 py-1.5 rounded-lg border border-slate-700 focus:outline-none focus:border-[#11d493]"
-              placeholder="Ex: Elétrica, Hidráulica"
-            />
+            <span className="text-xs font-bold text-slate-400 shrink-0 pl-1">Foco / Nicho:</span>
+            <select
+              value={
+                filtroMassa === 'Mix Rotativo Automático' || !filtroMassa
+                  ? 'rotativo'
+                  : filtroMassa === 'Cesta Balanceada Multicategoria'
+                  ? 'cesta_balanceada'
+                  : NICHOS_COMERCIAIS_PADRAO.some((n) => n.nome === filtroMassa)
+                  ? `nicho_${filtroMassa}`
+                  : 'custom'
+              }
+              onChange={(e) => {
+                const val = e.target.value;
+                let novoFoco = '';
+                if (val === 'rotativo') novoFoco = 'Mix Rotativo Automático';
+                else if (val === 'cesta_balanceada') novoFoco = 'Cesta Balanceada Multicategoria';
+                else if (val.startsWith('nicho_')) novoFoco = val.replace('nicho_', '');
+                else if (val === 'custom') novoFoco = filtroMassa;
+                setFiltroMassa(novoFoco);
+              }}
+              className="flex-1 bg-slate-900/90 text-white font-bold text-xs px-2.5 py-1.5 rounded-lg border border-slate-700 focus:outline-none focus:border-[#11d493] cursor-pointer"
+            >
+              <optgroup label="MODOS INTELIGENTES (IA)">
+                <option value="rotativo">🌐 Mix Rotativo Automático (Variar)</option>
+                <option value="cesta_balanceada">🌈 Cesta Multicategoria (Misto)</option>
+              </optgroup>
+              <optgroup label="NICHOS ESPECÍFICOS">
+                {NICHOS_COMERCIAIS_PADRAO.map((nicho) => (
+                  <option key={nicho.id} value={`nicho_${nicho.nome}`}>
+                    {nicho.icone} {nicho.nome}
+                  </option>
+                ))}
+              </optgroup>
+              <optgroup label="OUTRO">
+                <option value="custom">✏️ Outro (digitar livremente)</option>
+              </optgroup>
+            </select>
             <button
               type="button"
-              onClick={handleAplicarFiltroParaTodos}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-700 hover:bg-slate-600 text-white transition shrink-0 cursor-pointer"
+              onClick={() => handleAplicarFiltroParaTodos()}
+              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-[#11d493]/20 hover:bg-[#11d493]/30 text-[#11d493] border border-[#11d493]/40 transition shrink-0 cursor-pointer"
+              title="Aplica este modo/nicho para todos os clientes do grupo"
             >
               Aplicar
             </button>
@@ -2095,47 +2131,94 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                         </div>
                       </td>
 
-                      {/* Foco / Linha de Produtos (Grupo de Produtos ou Foco Livre) */}
+                      {/* Foco / Linha de Produtos (Nichos Comerciais, Cesta Balanceada ou Kit) */}
                       <td className="py-3 px-3">
                         <div className="space-y-1">
                           <select
-                            value={item.grupoProdutoId || ''}
+                            value={
+                              item.grupoProdutoId
+                                ? `gp_${item.grupoProdutoId}`
+                                : item.filtroFoco === 'Mix Rotativo Automático' || !item.filtroFoco
+                                ? 'rotativo'
+                                : item.filtroFoco === 'Cesta Balanceada Multicategoria'
+                                ? 'cesta_balanceada'
+                                : NICHOS_COMERCIAIS_PADRAO.some((n) => n.nome === item.filtroFoco)
+                                ? `nicho_${item.filtroFoco}`
+                                : 'custom'
+                            }
                             onChange={(e) => {
                               const val = e.target.value;
-                              const gp = gruposProdutos.find((g) => g.id === val);
+                              let novoGpId: string | undefined = undefined;
+                              let novoFoco: string | undefined = undefined;
+
+                              if (val.startsWith('gp_')) {
+                                novoGpId = val.replace('gp_', '');
+                                const gp = gruposProdutos.find((g) => g.id === novoGpId);
+                                novoFoco = gp ? gp.nome : undefined;
+                              } else if (val === 'rotativo') {
+                                novoFoco = 'Mix Rotativo Automático';
+                              } else if (val === 'cesta_balanceada') {
+                                novoFoco = 'Cesta Balanceada Multicategoria';
+                              } else if (val.startsWith('nicho_')) {
+                                novoFoco = val.replace('nicho_', '');
+                              } else if (val === 'custom') {
+                                novoFoco = item.filtroFoco || '';
+                              }
+
                               const atualizado: GrupoClientes = {
                                 ...grupoAtivo,
                                 clientes: grupoAtivo.clientes.map((c) =>
                                   c.clienteId === item.clienteId
                                     ? {
                                         ...c,
-                                        grupoProdutoId: val || undefined,
-                                        filtroFoco: gp ? gp.nome : c.filtroFoco,
+                                        grupoProdutoId: novoGpId,
+                                        filtroFoco: novoFoco,
                                       }
                                     : c
                                 ),
                               };
                               atualizarGrupo(atualizado);
                             }}
-                            className="w-full bg-slate-50 dark:bg-[#162f27]/60 border border-slate-200 dark:border-[#214739] rounded-lg py-1 px-2 text-[11px] font-bold text-slate-800 dark:text-white focus:outline-none focus:border-[#11d493]"
+                            className="w-full bg-slate-50 dark:bg-[#162f27]/60 border border-slate-200 dark:border-[#214739] rounded-lg py-1 px-2 text-[11px] font-bold text-slate-800 dark:text-white focus:outline-none focus:border-[#11d493] cursor-pointer"
                           >
-                            <option value="">🌐 Catálogo Livre</option>
-                            {gruposProdutos.map((gp) => (
-                              <option key={gp.id} value={gp.id}>
-                                📦 {gp.nome} ({gp.produtosCodigos.length} itens)
-                              </option>
-                            ))}
+                            <optgroup label="MODOS INTELIGENTES (IA)">
+                              <option value="rotativo">🌐 Mix Rotativo Automático (Variar)</option>
+                              <option value="cesta_balanceada">🌈 Cesta Multicategoria (Misto)</option>
+                            </optgroup>
+                            <optgroup label="NICHOS ESPECÍFICOS">
+                              {NICHOS_COMERCIAIS_PADRAO.map((nicho) => (
+                                <option key={nicho.id} value={`nicho_${nicho.nome}`}>
+                                  {nicho.icone} {nicho.nome}
+                                </option>
+                              ))}
+                            </optgroup>
+                            {gruposProdutos.length > 0 && (
+                              <optgroup label="KITS / GRUPOS PERSONALIZADOS">
+                                {gruposProdutos.map((gp) => (
+                                  <option key={gp.id} value={`gp_${gp.id}`}>
+                                    📦 {gp.nome} ({gp.produtosCodigos.length} itens)
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+                            <optgroup label="PERSONALIZADO">
+                              <option value="custom">✏️ Foco Livre (Texto manual)</option>
+                            </optgroup>
                           </select>
 
-                          {!item.grupoProdutoId && (
-                            <input
-                              type="text"
-                              value={item.filtroFoco || ''}
-                              onChange={(e) => handleUpdateItemFoco(item.clienteId, e.target.value)}
-                              placeholder="Foco livre (ex: Hidráulica)"
-                              className="w-full bg-slate-50 dark:bg-[#162f27]/40 border border-slate-200 dark:border-[#214739] rounded-lg py-1 px-2 text-[10px] text-slate-700 dark:text-slate-300 placeholder:text-slate-400 focus:outline-none focus:border-[#11d493]"
-                            />
-                          )}
+                          {/* Se for foco livre ou texto personalizado que não coincide com nicho/modo, mostra input */}
+                          {!item.grupoProdutoId &&
+                            item.filtroFoco !== 'Mix Rotativo Automático' &&
+                            item.filtroFoco !== 'Cesta Balanceada Multicategoria' &&
+                            !NICHOS_COMERCIAIS_PADRAO.some((n) => n.nome === item.filtroFoco) && (
+                              <input
+                                type="text"
+                                value={item.filtroFoco || ''}
+                                onChange={(e) => handleUpdateItemFoco(item.clienteId, e.target.value)}
+                                placeholder="Digite a linha ou palavra-chave..."
+                                className="w-full bg-slate-50 dark:bg-[#162f27]/40 border border-slate-200 dark:border-[#214739] rounded-lg py-1 px-2 text-[10px] text-slate-700 dark:text-slate-300 placeholder:text-slate-400 focus:outline-none focus:border-[#11d493]"
+                              />
+                            )}
                         </div>
                       </td>
 
