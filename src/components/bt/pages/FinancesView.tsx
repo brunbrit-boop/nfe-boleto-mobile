@@ -567,10 +567,12 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
   // Abre o card modal de detalhes do Bling com busca e fallback garantido
   const handleAbrirDetalhesReceber = (tx: FinanceTransaction) => {
-    if (tx.originalBlingReceber) {
-      setSelectedContaReceberModal(tx.originalBlingReceber);
-      return;
-    }
+    try {
+      console.log('📌 Abrindo card de detalhes da conta a receber:', tx);
+      if (tx.originalBlingReceber) {
+        setSelectedContaReceberModal(tx.originalBlingReceber);
+        return;
+      }
 
     const crList = modoConsolidado ? contasConsolidadasReceber : (contasReceber || []);
     const docClean = (tx.numeroDocumento || '').trim();
@@ -614,6 +616,9 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     };
 
     setSelectedContaReceberModal(contaFallback);
+    } catch (err) {
+      console.error('Erro ao abrir card de detalhes da conta a receber:', err);
+    }
   };
 
   // Mapa de ID -> Nome da empresa

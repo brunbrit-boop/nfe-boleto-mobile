@@ -1,13 +1,18 @@
 import type { BlingContaPagar, BlingContaReceber, EmpresaTenant } from '../types';
 
-const DEFAULT_PB_URL = 'https://juice-titled-lying-enterprises.trycloudflare.com';
+const DEFAULT_PB_URL = '';
 
 let isPocketBaseOfflineCache = false;
 let lastHealthCheckTime = 0;
 
 export function getPocketBaseUrl(): string {
   if (typeof window !== 'undefined') {
-    return localStorage.getItem('nfe_pocketbase_url') || DEFAULT_PB_URL;
+    const stored = localStorage.getItem('nfe_pocketbase_url');
+    if (stored && (stored.includes('juice-titled-lying-enterprises') || !stored.startsWith('http'))) {
+      localStorage.removeItem('nfe_pocketbase_url');
+      return '';
+    }
+    return stored || '';
   }
   return DEFAULT_PB_URL;
 }
@@ -24,13 +29,17 @@ export function setPocketBaseUrl(url: string): void {
  * Verifica rapidamente se o PocketBase está acessível sem travar a aplicação
  */
 export async function isPocketBaseOnline(): Promise<boolean> {
+  const baseUrl = getPocketBaseUrl();
+  if (!baseUrl || !baseUrl.trim()) {
+    return false;
+  }
+
   const now = Date.now();
   // Se falhou há menos de 20 segundos, não tenta de novo para não floodar de requisições
   if (isPocketBaseOfflineCache && now - lastHealthCheckTime < 20000) {
     return false;
   }
 
-  const baseUrl = getPocketBaseUrl();
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 1200);
@@ -353,6 +362,9 @@ export async function obterContasPagarDoBanco(empresaId?: string): Promise<Bling
  */
 export async function testarConexaoPocketBase(): Promise<{ ok: boolean; url: string; mensagem: string }> {
   const baseUrl = getPocketBaseUrl();
+  if (!baseUrl || !baseUrl.trim()) {
+    return { ok: false, url: '', mensagem: 'PocketBase não configurado' };
+  }
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 1200);
