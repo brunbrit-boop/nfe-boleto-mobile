@@ -310,6 +310,8 @@ export interface GrupoClienteItem {
   parcelasCount?: number;
   primeiroVencimento?: string; // YYYY-MM-DD
   intervaloDias?: number;
+  diasSemana?: number[]; // [1, 3, 5] por exemplo (0=Dom, 1=Seg, ..., 6=Sáb)
+  tipoCronograma?: 'data_fixa' | 'semanal';
   status: 'pendente' | 'gerando' | 'gerado' | 'erro';
   ofertaGerada?: any; // OfertaGeradaResult
   nfeEmitida?: NFeData;
@@ -329,6 +331,8 @@ export interface GrupoClientes {
   parcelasPadrao?: number;
   primeiroVencimentoPadrao?: string;
   intervaloDiasPadrao?: number;
+  tipoCronogramaPadrao?: 'data_fixa' | 'semanal';
+  diasSemanaPadrao?: number[];
   grupoProdutoPadraoId?: string; // Vinculo padrao para todos do grupo
   diretrizesGrupo?: string; // Diretrizes especificas comerciais deste grupo para a IA
   clientes: GrupoClienteItem[];

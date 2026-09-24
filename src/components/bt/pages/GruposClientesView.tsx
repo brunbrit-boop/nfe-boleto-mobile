@@ -24,6 +24,8 @@ import {
   BookOpen,
   RotateCcw,
   Send,
+  Calendar,
+  CalendarDays,
 } from 'lucide-react';
 import type {
   EmpresaTenant,
@@ -37,7 +39,7 @@ import type {
   Installment,
 } from '../../../types';
 import type { CatalogoProduto, OfertaGeradaResult } from '../../../utils/salesOptimizer';
-import { formatCurrency } from '../../../utils/financeEngine';
+import { formatCurrency, gerarDatasEscalonadasSemanais } from '../../../utils/financeEngine';
 import { isCerebroIAConectado } from '../../../services/geminiService';
 import {
   obterGruposCacheLocal,
@@ -151,6 +153,14 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     return d.toISOString().split('T')[0];
   });
   const [intervaloDiasMassa, setIntervaloDiasMassa] = useState<number>(grupoAtivo?.intervaloDiasPadrao || 30);
+  const [modoCronogramaMassa, setModoCronogramaMassa] = useState<'data_fixa' | 'semanal'>(() => {
+    return grupoAtivo?.tipoCronogramaPadrao || 'semanal';
+  });
+  const [diasSemanaMassa, setDiasSemanaMassa] = useState<number[]>(() => {
+    return grupoAtivo?.diasSemanaPadrao && grupoAtivo.diasSemanaPadrao.length > 0
+      ? grupoAtivo.diasSemanaPadrao
+      : [1, 3, 5]; // Padrão: Segunda (1), Quarta (3), Sexta (5)
+  });
   const [isEmitindoLote, setIsEmitindoLote] = useState<boolean>(false);
   const [progressoEmissaoLote, setProgressoEmissaoLote] = useState<{ atual: number; total: number }>({ atual: 0, total: 0 });
 
@@ -258,6 +268,12 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         setPrimeiroVencMassa(grupoAtivo.primeiroVencimentoPadrao);
       }
       setIntervaloDiasMassa(grupoAtivo.intervaloDiasPadrao || 30);
+      if (grupoAtivo.tipoCronogramaPadrao) {
+        setModoCronogramaMassa(grupoAtivo.tipoCronogramaPadrao);
+      }
+      if (grupoAtivo.diasSemanaPadrao && grupoAtivo.diasSemanaPadrao.length > 0) {
+        setDiasSemanaMassa(grupoAtivo.diasSemanaPadrao);
+      }
       setIsEditandoNomeGrupo(false);
       setNovoNomeGrupoTemp(grupoAtivo.nome || '');
       setDiretrizesGrupoTemp(grupoAtivo.diretrizesGrupo || '');
@@ -329,20 +345,48 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     atualizarGrupo(atualizado);
   };
 
-  // Aplicar Condições de Pagamento Padrão para Todos no Grupo
+  // Aplicar Condições de Pagamento Padrão para Todos no Grupo (Data Fixa ou Cronograma Semanal)
   const handleAplicarCondicoesParaTodos = () => {
     if (!grupoAtivo) return;
+
+    let clientesAtualizados: GrupoClienteItem[] = [];
+
+    if (modoCronogramaMassa === 'semanal' && diasSemanaMassa.length > 0) {
+      // Caminho 2: Gera datas escalonadas pelos dias da semana selecionados (ex: Seg, Qua, Sex)
+      const datasEscalonadas = gerarDatasEscalonadasSemanais(
+        primeiroVencMassa || obterDataPadraoD30(),
+        grupoAtivo.clientes.length,
+        diasSemanaMassa
+      );
+
+      clientesAtualizados = grupoAtivo.clientes.map((c, idx) => ({
+        ...c,
+        parcelasCount: parcelasMassa,
+        primeiroVencimento: datasEscalonadas[idx],
+        intervaloDias: intervaloDiasMassa,
+        diasSemana: [...diasSemanaMassa],
+        tipoCronograma: 'semanal',
+      }));
+    } else {
+      // Modo Data Fixa
+      clientesAtualizados = grupoAtivo.clientes.map((c) => ({
+        ...c,
+        parcelasCount: parcelasMassa,
+        primeiroVencimento: primeiroVencMassa,
+        intervaloDias: intervaloDiasMassa,
+        diasSemana: undefined,
+        tipoCronograma: 'data_fixa',
+      }));
+    }
+
     const atualizado: GrupoClientes = {
       ...grupoAtivo,
       parcelasPadrao: parcelasMassa,
       primeiroVencimentoPadrao: primeiroVencMassa,
       intervaloDiasPadrao: intervaloDiasMassa,
-      clientes: grupoAtivo.clientes.map((c) => ({
-        ...c,
-        parcelasCount: parcelasMassa,
-        primeiroVencimento: primeiroVencMassa,
-        intervaloDias: intervaloDiasMassa,
-      })),
+      tipoCronogramaPadrao: modoCronogramaMassa,
+      diasSemanaPadrao: modoCronogramaMassa === 'semanal' ? diasSemanaMassa : undefined,
+      clientes: clientesAtualizados,
     };
     atualizarGrupo(atualizado);
   };
@@ -1868,91 +1912,177 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
           </div>
         </div>
 
-        {/* Linha de Condição de Pagamento em Massa (Parcelas, 1º Vencimento, Intervalo) */}
-        <div className="bg-slate-800/80 p-3 sm:p-3.5 rounded-xl border border-slate-700/60 flex flex-col xl:flex-row xl:items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-[#11d493] flex items-center justify-center shrink-0 border border-emerald-500/20">
-              <CreditCard className="w-4 h-4" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-black text-white">Condição de Pagamento do Lote</span>
-                <span className="text-[10px] px-2 py-0.2 rounded-full font-bold bg-[#11d493]/15 text-[#11d493]">
-                  Em Massa
-                </span>
+        {/* Linha de Condição de Pagamento em Massa (Parcelas, 1º Vencimento, Intervalo, Cronograma) */}
+        <div className="bg-slate-800/80 p-3.5 sm:p-4 rounded-xl border border-slate-700/60 flex flex-col gap-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-[#11d493] flex items-center justify-center shrink-0 border border-emerald-500/20">
+                <CreditCard className="w-4 h-4" />
               </div>
-              <p className="text-[11px] text-slate-400">
-                Defina o padrão de parcelamento para aplicar a todos com 1 clique (você também pode personalizar cada cliente na tabela abaixo).
-              </p>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-black text-white">Condição de Pagamento do Lote</span>
+                  <span className="text-[10px] px-2 py-0.2 rounded-full font-bold bg-[#11d493]/15 text-[#11d493]">
+                    Em Massa
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400">
+                  Configure parcelamento único ou escale os 1º vencimentos e parcelas futuras em dias fixos da semana.
+                </p>
+              </div>
+            </div>
+
+            {/* Alternador de Modo: Cronograma Semanal vs Data Fixa */}
+            <div className="flex items-center bg-slate-900/90 p-1 rounded-xl border border-slate-700/80 self-start md:self-auto">
+              <button
+                type="button"
+                onClick={() => setModoCronogramaMassa('semanal')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  modoCronogramaMassa === 'semanal'
+                    ? 'bg-[#11d493] text-slate-950 shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <CalendarDays className="w-3.5 h-3.5" />
+                <span>🗓️ Cronograma Semanal</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setModoCronogramaMassa('data_fixa')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  modoCronogramaMassa === 'data_fixa'
+                    ? 'bg-slate-700 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                <span>📅 Data Fixa</span>
+              </button>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            {/* Parcelas */}
-            <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-700">
-              <span className="text-[10px] font-bold text-slate-400">Parcelas:</span>
-              <select
-                value={parcelasMassa}
-                onChange={(e) => setParcelasMassa(Number(e.target.value))}
-                className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
-              >
-                <option value={1} className="bg-slate-900">1x (À vista)</option>
-                <option value={2} className="bg-slate-900">2x</option>
-                <option value={3} className="bg-slate-900">3x</option>
-                <option value={4} className="bg-slate-900">4x</option>
-                <option value={5} className="bg-slate-900">5x</option>
-                <option value={6} className="bg-slate-900">6x</option>
-                <option value={7} className="bg-slate-900">7x</option>
-                <option value={8} className="bg-slate-900">8x</option>
-                <option value={9} className="bg-slate-900">9x</option>
-                <option value={10} className="bg-slate-900">10x</option>
-                <option value={12} className="bg-slate-900">12x</option>
-              </select>
-            </div>
+          {/* Controles de Configuração */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-700/50">
+            <div className="flex flex-wrap items-center gap-2.5">
+              {/* Parcelas */}
+              <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-700">
+                <span className="text-[10px] font-bold text-slate-400">Parcelas:</span>
+                <select
+                  value={parcelasMassa}
+                  onChange={(e) => setParcelasMassa(Number(e.target.value))}
+                  className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
+                >
+                  <option value={1} className="bg-slate-900">1x (À vista)</option>
+                  <option value={2} className="bg-slate-900">2x</option>
+                  <option value={3} className="bg-slate-900">3x</option>
+                  <option value={4} className="bg-slate-900">4x</option>
+                  <option value={5} className="bg-slate-900">5x</option>
+                  <option value={6} className="bg-slate-900">6x</option>
+                  <option value={7} className="bg-slate-900">7x</option>
+                  <option value={8} className="bg-slate-900">8x</option>
+                  <option value={9} className="bg-slate-900">9x</option>
+                  <option value={10} className="bg-slate-900">10x</option>
+                  <option value={12} className="bg-slate-900">12x</option>
+                </select>
+              </div>
 
-            {/* 1º Vencimento */}
-            <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-700">
-              <span className="text-[10px] font-bold text-slate-400">1º Venc.:</span>
-              <input
-                type="date"
-                value={primeiroVencMassa}
-                onChange={(e) => setPrimeiroVencMassa(e.target.value)}
-                onClick={(e) => {
-                  try {
-                    e.currentTarget.showPicker?.();
-                  } catch {}
-                }}
-                className="bg-slate-900 text-white font-mono font-bold text-xs focus:outline-none cursor-pointer [color-scheme:dark]"
-              />
-            </div>
+              {/* Intervalo */}
+              <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-700">
+                <span className="text-[10px] font-bold text-slate-400">Intervalo:</span>
+                <select
+                  value={intervaloDiasMassa}
+                  onChange={(e) => setIntervaloDiasMassa(Number(e.target.value))}
+                  className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
+                >
+                  <option value={15} className="bg-slate-900">15 dias</option>
+                  <option value={21} className="bg-slate-900">21 dias</option>
+                  <option value={28} className="bg-slate-900">28 dias</option>
+                  <option value={30} className="bg-slate-900">30 dias</option>
+                  <option value={45} className="bg-slate-900">45 dias</option>
+                  <option value={60} className="bg-slate-900">60 dias</option>
+                </select>
+              </div>
 
-            {/* Intervalo */}
-            <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1.5 rounded-lg border border-slate-700">
-              <span className="text-[10px] font-bold text-slate-400">Intervalo:</span>
-              <select
-                value={intervaloDiasMassa}
-                onChange={(e) => setIntervaloDiasMassa(Number(e.target.value))}
-                className="bg-transparent text-white font-bold text-xs focus:outline-none cursor-pointer"
-              >
-                <option value={15} className="bg-slate-900">15 dias</option>
-                <option value={21} className="bg-slate-900">21 dias</option>
-                <option value={28} className="bg-slate-900">28 dias</option>
-                <option value={30} className="bg-slate-900">30 dias</option>
-                <option value={45} className="bg-slate-900">45 dias</option>
-                <option value={60} className="bg-slate-900">60 dias</option>
-              </select>
+              {/* Data Inicial / 1º Vencimento */}
+              <div className="flex items-center gap-1.5 bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-700">
+                <span className="text-[10px] font-bold text-slate-400">
+                  {modoCronogramaMassa === 'semanal' ? 'A partir de:' : '1º Venc.:'}
+                </span>
+                <input
+                  type="date"
+                  value={primeiroVencMassa}
+                  onChange={(e) => setPrimeiroVencMassa(e.target.value)}
+                  onClick={(e) => {
+                    try {
+                      e.currentTarget.showPicker?.();
+                    } catch {}
+                  }}
+                  className="bg-slate-900 text-white font-mono font-bold text-xs focus:outline-none cursor-pointer [color-scheme:dark]"
+                />
+              </div>
+
+              {/* Chips de Seleção de Dias da Semana (Modo Cronograma Semanal) */}
+              {modoCronogramaMassa === 'semanal' && (
+                <div className="flex items-center gap-1 bg-slate-900 px-2 py-1 rounded-lg border border-slate-700">
+                  <span className="text-[10px] font-bold text-slate-400 mr-1">Dias:</span>
+                  {[
+                    { id: 1, label: 'Seg' },
+                    { id: 2, label: 'Ter' },
+                    { id: 3, label: 'Qua' },
+                    { id: 4, label: 'Qui' },
+                    { id: 5, label: 'Sex' },
+                    { id: 6, label: 'Sáb' },
+                  ].map((dia) => {
+                    const isSelected = diasSemanaMassa.includes(dia.id);
+                    return (
+                      <button
+                        key={dia.id}
+                        type="button"
+                        onClick={() => {
+                          if (isSelected) {
+                            if (diasSemanaMassa.length > 1) {
+                              setDiasSemanaMassa(diasSemanaMassa.filter((d) => d !== dia.id));
+                            }
+                          } else {
+                            setDiasSemanaMassa([...diasSemanaMassa, dia.id].sort((a, b) => a - b));
+                          }
+                        }}
+                        className={`px-2 py-0.5 rounded text-[11px] font-bold transition cursor-pointer ${
+                          isSelected
+                            ? 'bg-[#11d493] text-slate-950 font-black shadow-xs'
+                            : 'bg-slate-800 text-slate-400 hover:text-white hover:bg-slate-700'
+                        }`}
+                        title={`Alternar ${dia.label}`}
+                      >
+                        {dia.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Botão Aplicar a Todos */}
             <button
               type="button"
               onClick={handleAplicarCondicoesParaTodos}
-              className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-[#11d493] hover:bg-[#0eb880] text-slate-950 transition active:scale-95 cursor-pointer shadow-sm flex items-center gap-1.5"
-              title="Aplica este parcelamento e vencimento a todos os clientes do grupo"
+              className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-[#11d493] hover:bg-[#0eb880] text-slate-950 transition active:scale-95 cursor-pointer shadow-sm flex items-center gap-1.5 whitespace-nowrap"
+              title="Aplica este parcelamento e cronograma a todos os clientes do grupo"
             >
-              <span>Aplicar Condição a Todos</span>
+              <Check className="w-3.5 h-3.5 stroke-[3]" />
+              <span>{modoCronogramaMassa === 'semanal' ? 'Escalonar e Aplicar a Todos' : 'Aplicar Condição a Todos'}</span>
             </button>
           </div>
+
+          {/* Banner Informativo do Cronograma Semanal */}
+          {modoCronogramaMassa === 'semanal' && (
+            <div className="flex items-center gap-2 text-[11px] text-slate-300 bg-slate-900/60 px-3 py-1.5 rounded-lg border border-slate-700/60">
+              <span className="text-amber-400 font-bold shrink-0">ℹ️ Escala Semanal Ativa:</span>
+              <span>
+                1º vencimento distribuído cliente a cliente nos dias: <strong className="text-white">{diasSemanaMassa.map(d => ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'][d]).join(', ')}</strong>. Parcelas futuras (+{intervaloDiasMassa}d) avançam para o próximo dia útil da escala (Caminho 2).
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -2267,7 +2397,24 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
 
                           {/* Linha 2: 1º Vencimento */}
                           <div>
-                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">1º Vencimento</span>
+                            <div className="flex items-center justify-between mb-0.5">
+                              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">1º Vencimento</span>
+                              {(() => {
+                                const vDateStr = item.primeiroVencimento !== undefined ? item.primeiroVencimento : (primeiroVencMassa || obterDataPadraoD30());
+                                if (vDateStr && /^\d{4}-\d{2}-\d{2}$/.test(vDateStr)) {
+                                  const [ano, mes, dia] = vDateStr.split('-').map(Number);
+                                  const d = new Date(ano, mes - 1, dia);
+                                  const diasCurto = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+                                  const diaNome = diasCurto[d.getDay()];
+                                  return (
+                                    <span className="text-[9px] font-black px-1.5 py-0.2 rounded bg-[#11d493]/15 text-[#11d493]">
+                                      {diaNome}
+                                    </span>
+                                  );
+                                }
+                                return null;
+                              })()}
+                            </div>
                             <input
                               type="date"
                               value={item.primeiroVencimento !== undefined ? item.primeiroVencimento : (primeiroVencMassa || obterDataPadraoD30())}

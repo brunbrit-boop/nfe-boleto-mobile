@@ -219,16 +219,73 @@ export function gerarPixCopiaECola(
 }
 
 /**
+ * Retorna a próxima data válida (ou a própria se já for válida) que caia em um dos dias da semana permitidos.
+ * 0 = Domingo, 1 = Segunda, 2 = Terça, 3 = Quarta, 4 = Quinta, 5 = Sexta, 6 = Sábado.
+ */
+export function ajustarParaProximoDiaPermitido(data: Date, diasPermitidos: number[]): Date {
+  if (!diasPermitidos || diasPermitidos.length === 0) return data;
+  const d = new Date(data.getFullYear(), data.getMonth(), data.getDate());
+  for (let step = 0; step < 7; step++) {
+    if (diasPermitidos.includes(d.getDay())) {
+      return d;
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  return d;
+}
+
+/**
+ * Gera uma sequência de datas de primeiro vencimento escalonadas pelos dias da semana selecionados.
+ * A primeira data será >= dataInicialStr caindo em um dos dias permitidos.
+ * As datas subsequentes avançam nos próximos dias permitidos sucessivos da semana.
+ */
+export function gerarDatasEscalonadasSemanais(
+  dataInicialStr: string,
+  quantidade: number,
+  diasPermitidos: number[]
+): string[] {
+  if (quantidade <= 0) return [];
+  if (!diasPermitidos || diasPermitidos.length === 0) {
+    return Array(quantidade).fill(dataInicialStr);
+  }
+
+  let baseDate = new Date();
+  if (dataInicialStr && /^\d{4}-\d{2}-\d{2}$/.test(dataInicialStr)) {
+    const [ano, mes, dia] = dataInicialStr.split('-').map(Number);
+    baseDate = new Date(ano, mes - 1, dia);
+  }
+
+  let cursor = ajustarParaProximoDiaPermitido(baseDate, diasPermitidos);
+  const resultado: string[] = [];
+
+  for (let k = 0; k < quantidade; k++) {
+    const yyyy = cursor.getFullYear();
+    const mm = String(cursor.getMonth() + 1).padStart(2, '0');
+    const dd = String(cursor.getDate()).padStart(2, '0');
+    resultado.push(`${yyyy}-${mm}-${dd}`);
+
+    if (k < quantidade - 1) {
+      cursor.setDate(cursor.getDate() + 1);
+      cursor = ajustarParaProximoDiaPermitido(cursor, diasPermitidos);
+    }
+  }
+
+  return resultado;
+}
+
+/**
  * Motor de Divisão Exata de Parcelas
  * Garante que a soma das parcelas seja rigorosamente igual ao valor total,
  * ajustando qualquer dízima periódica/centavos na 1ª parcela.
+ * Suporta Caminho 2: parcelas futuras somam intervalo e caem sempre no próximo dia permitido.
  */
 export function calcularDivisaoParcelas(
   valorTotal: number,
   qtdParcelas: number,
   banco: BankProvider = 'inter',
   intervaloDias: number = 30,
-  dataPrimeiroVencimento?: Date
+  dataPrimeiroVencimento?: Date,
+  diasSemanaPermitidos?: number[]
 ): Installment[] {
   const parcelasValidas = Math.max(1, Math.min(qtdParcelas, 48));
   
@@ -243,21 +300,43 @@ export function calcularDivisaoParcelas(
   // Timestamp base para geração de nosso número único
   const seqBase = Math.floor(Date.now() / 1000) % 900000;
 
+  // Caminho 2: Data corrente evolui a cada parcela
+  let dataCorrente = new Date(baseDate.getFullYear(), baseDate.getMonth(), baseDate.getDate());
+  if (diasSemanaPermitidos && diasSemanaPermitidos.length > 0) {
+    dataCorrente = ajustarParaProximoDiaPermitido(dataCorrente, diasSemanaPermitidos);
+  }
+
   for (let i = 1; i <= parcelasValidas; i++) {
     // Adiciona os centavos restantes na primeira parcela
     const centavosParcela = i === 1 ? centavosBase + centavosResto : centavosBase;
     const valorParcela = centavosParcela / 100;
 
-    // Cálculo da data de vencimento
-    const dataVenc = new Date(baseDate);
-    dataVenc.setDate(dataVenc.getDate() + (i === 1 && !dataPrimeiroVencimento ? intervaloDias : (i - 1) * intervaloDias));
-    
-    // Se cair em Sábado (6) ou Domingo (0), prorroga para a Segunda-feira útil bancária
-    if (dataVenc.getDay() === 6) {
-      dataVenc.setDate(dataVenc.getDate() + 2);
-    } else if (dataVenc.getDay() === 0) {
-      dataVenc.setDate(dataVenc.getDate() + 1);
+    if (i === 1) {
+      if (!dataPrimeiroVencimento) {
+        dataCorrente.setDate(dataCorrente.getDate() + intervaloDias);
+        if (diasSemanaPermitidos && diasSemanaPermitidos.length > 0) {
+          dataCorrente = ajustarParaProximoDiaPermitido(dataCorrente, diasSemanaPermitidos);
+        } else {
+          if (dataCorrente.getDay() === 6) dataCorrente.setDate(dataCorrente.getDate() + 2);
+          else if (dataCorrente.getDay() === 0) dataCorrente.setDate(dataCorrente.getDate() + 1);
+        }
+      }
+    } else {
+      // Parcela 2, 3, etc.: soma intervaloDias e avança para o próximo dia permitido (Caminho 2)
+      dataCorrente.setDate(dataCorrente.getDate() + intervaloDias);
+      if (diasSemanaPermitidos && diasSemanaPermitidos.length > 0) {
+        dataCorrente = ajustarParaProximoDiaPermitido(dataCorrente, diasSemanaPermitidos);
+      } else {
+        // Se cair em Sábado (6) ou Domingo (0), prorroga para a Segunda-feira útil bancária
+        if (dataCorrente.getDay() === 6) {
+          dataCorrente.setDate(dataCorrente.getDate() + 2);
+        } else if (dataCorrente.getDay() === 0) {
+          dataCorrente.setDate(dataCorrente.getDate() + 1);
+        }
+      }
     }
+
+    const dataVenc = new Date(dataCorrente);
 
     const yyyy = dataVenc.getFullYear();
     const mm = String(dataVenc.getMonth() + 1).padStart(2, '0');

@@ -504,10 +504,10 @@ export async function emitirNFeItemGrupo(
   const token = empresa.blingAccessToken?.trim();
   const valorTotal = item.ofertaGerada.valorTotal;
 
-  // Condição de pagamento personalizada do cliente (ou padrão)
   const numParcelas = Math.max(1, Math.min(item.parcelasCount || 1, 48));
   const intervaloDias = Math.max(1, item.intervaloDias || 30);
   const primeiroVenc = item.primeiroVencimento; // YYYY-MM-DD
+  const diasSemanaPermitidos = item.diasSemana;
 
   let baseDate: Date | undefined;
   if (primeiroVenc && /^\d{4}-\d{2}-\d{2}$/.test(primeiroVenc)) {
@@ -520,7 +520,8 @@ export async function emitirNFeItemGrupo(
     numParcelas,
     bancoAtual,
     intervaloDias,
-    baseDate
+    baseDate,
+    diasSemanaPermitidos
   );
 
   const condicoesTexto = `Condições de Pagamento: ${parcelasCalculadas.map((p, idx) => `Parcela ${idx + 1}/${numParcelas}: ${p.dataVencimento.split('-').reverse().join('/')} (${formatCurrency(p.valor)})`).join(' | ')}`;
@@ -587,6 +588,7 @@ export async function emitirNFeItemGrupo(
       banco: bancoAtual,
       intervaloDias: intervaloDias,
       primeiroVencimento: primeiroVenc,
+      diasSemanaPermitidos: diasSemanaPermitidos,
       observacoesAdicionais: nomeGrupo?.trim(),
       idNotaBlingExistente: idExistente,
     });

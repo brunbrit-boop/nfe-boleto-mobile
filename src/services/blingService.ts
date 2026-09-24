@@ -7,7 +7,7 @@ import type {
   BankProvider,
   EmpresaTenant,
 } from '../types';
-import { formatCurrency, gerarDadosBoletoFebraban, gerarPixCopiaECola } from '../utils/financeEngine';
+import { formatCurrency, gerarDadosBoletoFebraban, gerarPixCopiaECola, ajustarParaProximoDiaPermitido } from '../utils/financeEngine';
 import { renovarTokenBling, isTokenExpirando } from '../utils/blingApi';
 import {
   salvarContasReceberNoBanco,
@@ -504,6 +504,7 @@ export interface GravarEsbocoBlingParams {
   banco?: BankProvider;
   primeiroVencimento?: string;
   intervaloDias?: number;
+  diasSemanaPermitidos?: number[];
   observacoesAdicionais?: string;
   idNotaBlingExistente?: number | string;
 }
@@ -532,6 +533,7 @@ export async function gravarEsbocoNFeNoBling(
     parcelasCount = 1,
     primeiroVencimento,
     intervaloDias = 15,
+    diasSemanaPermitidos,
     observacoesAdicionais,
     idNotaBlingExistente,
   } = params;
@@ -621,13 +623,23 @@ export async function gravarEsbocoNFeNoBling(
 
   const parcelasDescricoes: string[] = [];
 
+  let dataCorrente = new Date(dataBase.getFullYear(), dataBase.getMonth(), dataBase.getDate());
+  if (diasSemanaPermitidos && diasSemanaPermitidos.length > 0) {
+    dataCorrente = ajustarParaProximoDiaPermitido(dataCorrente, diasSemanaPermitidos);
+  }
+
   for (let i = 1; i <= parcelasCount; i++) {
-    const d = new Date(dataBase);
     if (i > 1) {
-      d.setDate(d.getDate() + (i - 1) * (intervaloDias || 15));
+      dataCorrente.setDate(dataCorrente.getDate() + (intervaloDias || 15));
+      if (diasSemanaPermitidos && diasSemanaPermitidos.length > 0) {
+        dataCorrente = ajustarParaProximoDiaPermitido(dataCorrente, diasSemanaPermitidos);
+      } else {
+        if (dataCorrente.getDay() === 6) dataCorrente.setDate(dataCorrente.getDate() + 2);
+        else if (dataCorrente.getDay() === 0) dataCorrente.setDate(dataCorrente.getDate() + 1);
+      }
     }
-    const dataVenc = formatarDataIso(d);
-    const dataVencBr = formatarDataBr(d);
+    const dataVenc = formatarDataIso(dataCorrente);
+    const dataVencBr = formatarDataBr(dataCorrente);
 
     // Ajuste de centavos na última parcela
     const valorParcela = i === parcelasCount ? Number((valorTotal - acumulado).toFixed(2)) : valorParcelaBase;
