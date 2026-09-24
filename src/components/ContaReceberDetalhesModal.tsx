@@ -31,8 +31,14 @@ export const ContaReceberDetalhesModal: React.FC<ContaReceberDetalhesModalProps>
   if (!conta) return null;
 
   const hojeStr = new Date().toISOString().slice(0, 10);
-  const isAtrasada = conta.situacao === 1 && conta.vencimento < hojeStr;
+  const isAtrasada = conta.situacao === 1 && Boolean(conta.vencimento && conta.vencimento < hojeStr);
   const isLiquidada = conta.situacao === 2;
+
+  const clienteNome = conta.contato?.nome || (conta as any).clienteNome || 'Cliente não identificado';
+  const clienteDoc = conta.contato?.numeroDocumento || (conta as any).clienteDoc;
+  const valorFormatado = conta.valorFormatado || new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(conta.valor) || 0);
+  const vencFormatado = conta.vencimentoFormatado || (conta.vencimento ? conta.vencimento.split('-').reverse().join('/') : '-');
+  const categoriaFormatada = typeof conta.categoria === 'object' && conta.categoria !== null ? (conta.categoria as any).descricao : (conta.categoria || 'Vendas');
 
   const handleCopy = (text: string, key: string) => {
     navigator.clipboard.writeText(text);
@@ -42,9 +48,9 @@ export const ContaReceberDetalhesModal: React.FC<ContaReceberDetalhesModalProps>
 
   const handleShareWhatsApp = () => {
     const msg =
-      `Olá! Seguem os dados para pagamento ref. ao doc ${conta.numeroDocumento}:\n\n` +
-      `• Vencimento: ${conta.vencimentoFormatado}\n` +
-      `• Valor: ${conta.valorFormatado}\n` +
+      `Olá! Seguem os dados para pagamento ref. ao doc ${conta.numeroDocumento || conta.id}:\n\n` +
+      `• Vencimento: ${vencFormatado}\n` +
+      `• Valor: ${valorFormatado}\n` +
       (conta.linhaDigitavel ? `• Linha Digitável: ${conta.linhaDigitavel}\n` : '') +
       (conta.pixCopiaECola ? `\n• Pix Copia e Cola:\n${conta.pixCopiaECola}` : '');
 
@@ -104,7 +110,7 @@ export const ContaReceberDetalhesModal: React.FC<ContaReceberDetalhesModalProps>
                 Valor Total
               </span>
               <div className="text-2xl font-black text-slate-900 dark:text-white tracking-tight mt-0.5">
-                {conta.valorFormatado}
+                {valorFormatado}
               </div>
             </div>
 
@@ -114,7 +120,7 @@ export const ContaReceberDetalhesModal: React.FC<ContaReceberDetalhesModalProps>
               </span>
               <div className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-1 justify-end mt-0.5">
                 <Calendar className="w-3.5 h-3.5 text-emerald-600" />
-                <span>{conta.vencimentoFormatado}</span>
+                <span>{vencFormatado}</span>
               </div>
             </div>
           </div>
@@ -126,11 +132,11 @@ export const ContaReceberDetalhesModal: React.FC<ContaReceberDetalhesModalProps>
               <span>Cliente</span>
             </span>
             <div className="text-sm font-bold text-slate-900 dark:text-white">
-              {conta.contato.nome}
+              {clienteNome}
             </div>
-            {conta.contato.numeroDocumento && (
+            {clienteDoc && (
               <div className="text-[11px] font-mono text-slate-500">
-                CNPJ/CPF: {conta.contato.numeroDocumento}
+                CNPJ/CPF: {clienteDoc}
               </div>
             )}
           </div>
@@ -166,7 +172,7 @@ export const ContaReceberDetalhesModal: React.FC<ContaReceberDetalhesModalProps>
                 <span>Categoria</span>
               </span>
               <div className="text-xs font-semibold text-slate-800 dark:text-slate-200 truncate">
-                {conta.categoria || 'Vendas'}
+                {categoriaFormatada}
               </div>
             </div>
 
