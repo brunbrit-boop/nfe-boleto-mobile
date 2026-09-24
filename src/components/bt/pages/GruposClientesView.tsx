@@ -44,9 +44,7 @@ import type { CatalogoProduto, OfertaGeradaResult } from '../../../utils/salesOp
 import { formatCurrency, gerarDatasEscalonadasSemanais, BANKS } from '../../../utils/financeEngine';
 import { isCerebroIAConectado } from '../../../services/geminiService';
 import {
-  buscarFormasPagamentoBling,
   buscarContasFinanceirasBling,
-  type BlingFormaPagamento,
   type BlingContaFinanceira,
 } from '../../../services/blingService';
 import {
@@ -184,9 +182,6 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
   const [contaFinanceiraBlingId, setContaFinanceiraBlingId] = useState<number | undefined>(() => grupoAtivo?.idContaFinanceiraBling);
   const [contasFinanceirasBling, setContasFinanceirasBling] = useState<BlingContaFinanceira[]>([]);
   const [carregandoContasFinanceiras, setCarregandoContasFinanceiras] = useState<boolean>(false);
-  const [formaPagamentoBlingId, setFormaPagamentoBlingId] = useState<number | undefined>(() => grupoAtivo?.idFormaPagamentoBling);
-  const [formasPagamentoBling, setFormasPagamentoBling] = useState<BlingFormaPagamento[]>([]);
-  const [carregandoFormasBling, setCarregandoFormasBling] = useState<boolean>(false);
   const [isEmitindoLote, setIsEmitindoLote] = useState<boolean>(false);
   const [progressoEmissaoLote, setProgressoEmissaoLote] = useState<{ atual: number; total: number }>({ atual: 0, total: 0 });
 
@@ -283,27 +278,21 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     setDiretrizesGeraisTemp(obterDiretrizesGeraisEmpresa(empresa.id));
   }, [empresa.id]);
 
-  // Busca Contas Financeiras e Formas de Pagamento cadastradas no Bling para roteamento de previsão de caixa
+  // Busca Contas Financeiras cadastradas no Bling para roteamento de previsão de caixa
   useEffect(() => {
     let cancelado = false;
     const carregarDadosFinanceiros = async () => {
       setCarregandoContasFinanceiras(true);
-      setCarregandoFormasBling(true);
       try {
-        const [contas, formas] = await Promise.all([
-          buscarContasFinanceirasBling(empresa.blingAccessToken, empresa.id),
-          buscarFormasPagamentoBling(empresa.blingAccessToken, empresa.id),
-        ]);
+        const contas = await buscarContasFinanceirasBling(empresa.blingAccessToken, empresa.id);
         if (!cancelado) {
           setContasFinanceirasBling(contas);
-          setFormasPagamentoBling(formas);
         }
       } catch (err) {
-        console.error('Erro ao buscar contas financeiras e formas de pagamento do Bling:', err);
+        console.error('Erro ao buscar contas financeiras do Bling:', err);
       } finally {
         if (!cancelado) {
           setCarregandoContasFinanceiras(false);
-          setCarregandoFormasBling(false);
         }
       }
     };
@@ -340,7 +329,6 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       }
       setBancoMassa(grupoAtivo.bancoPadrao || bancoAtual || 'itau');
       setContaFinanceiraBlingId(grupoAtivo.idContaFinanceiraBling);
-      setFormaPagamentoBlingId(grupoAtivo.idFormaPagamentoBling);
       setIsEditandoNomeGrupo(false);
       setNovoNomeGrupoTemp(grupoAtivo.nome || '');
       setDiretrizesGrupoTemp(grupoAtivo.diretrizesGrupo || '');
@@ -350,7 +338,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
         setMetaTotalGrupo(soma);
       }
     }
-  }, [grupoAtivoId, grupoAtivo?.nome, grupoAtivo?.diretrizesGrupo, grupoAtivo?.bancoPadrao, grupoAtivo?.idContaFinanceiraBling, grupoAtivo?.idFormaPagamentoBling, bancoAtual]);
+  }, [grupoAtivoId, grupoAtivo?.nome, grupoAtivo?.diretrizesGrupo, grupoAtivo?.bancoPadrao, grupoAtivo?.idContaFinanceiraBling, bancoAtual]);
 
   // Distribuição de Meta Total Escalonada com Trava: Maior <= Menor * 1.5
   const handleDistribuirMetaEscalonada = () => {
@@ -515,36 +503,6 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
     atualizarGrupo(atualizado);
   };
 
-  // Alterar Banco e Forma de Pagamento no Bling em Massa para o Grupo
-  const handleAlterarBancoMassa = (novoBanco: BankProvider) => {
-    setBancoMassa(novoBanco);
-    if (!grupoAtivo) return;
-    const atualizado: GrupoClientes = {
-      ...grupoAtivo,
-      bancoPadrao: novoBanco,
-      clientes: grupoAtivo.clientes.map((c) => ({
-        ...c,
-        banco: novoBanco,
-      })),
-    };
-    atualizarGrupo(atualizado);
-  };
-
-  const handleAlterarFormaPagamentoMassa = (novoId?: number) => {
-    setFormaPagamentoBlingId(novoId);
-    if (!grupoAtivo) return;
-    const formaObj = formasPagamentoBling.find((f) => f.id === novoId);
-    const atualizado: GrupoClientes = {
-      ...grupoAtivo,
-      idFormaPagamentoBling: novoId,
-      nomeFormaPagamentoBling: formaObj?.descricao,
-      clientes: grupoAtivo.clientes.map((c) => ({
-        ...c,
-        idFormaPagamentoBling: novoId,
-      })),
-    };
-    atualizarGrupo(atualizado);
-  };
 
   const detectarBancoPorDescricao = (descricao: string): BankProvider | undefined => {
     const descLower = descricao.toLowerCase();
@@ -2511,9 +2469,9 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-black text-white">Conta Financeira & Banco</span>
+                  <span className="text-xs font-black text-white">Conta Financeira</span>
                   <span className="text-[10px] px-2 py-0.2 rounded-full font-bold bg-sky-500/15 text-sky-400">
-                    Previsão Bling
+                    Bling ERP
                   </span>
                   <button
                     type="button"
@@ -2534,87 +2492,41 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
             <button
               type="button"
               onClick={() => {
-                handleAlterarBancoMassa(bancoMassa);
                 handleAlterarContaFinanceiraMassa(contaFinanceiraBlingId);
-                handleAlterarFormaPagamentoMassa(formaPagamentoBlingId);
               }}
               className="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-sky-500 hover:bg-sky-400 text-slate-950 transition active:scale-95 cursor-pointer shadow-sm flex items-center gap-1.5 self-start md:self-auto"
-              title="Aplica o banco e a conta financeira do Bling para todos os clientes deste grupo"
+              title="Aplica a conta financeira do Bling para todos os clientes deste grupo"
             >
               <Check className="w-3.5 h-3.5 stroke-[3]" />
               <span>Aplicar Conta a Todos</span>
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-            {/* Conta Financeira no Bling (Principal) */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] font-bold uppercase tracking-wider text-sky-300 block">
-                  Conta Financeira (Bling)
-                </span>
-                {carregandoContasFinanceiras && (
-                  <span className="text-[9px] text-sky-400 animate-pulse">Carregando contas...</span>
-                )}
-              </div>
-              <select
-                value={contaFinanceiraBlingId ?? ''}
-                onChange={(e) => {
-                  const val = e.target.value ? Number(e.target.value) : undefined;
-                  handleAlterarContaFinanceiraMassa(val);
-                }}
-                disabled={carregandoContasFinanceiras}
-                className="w-full bg-slate-900 border border-sky-500/40 rounded-lg py-2 px-3 text-xs font-bold text-white focus:outline-none focus:border-sky-400 cursor-pointer disabled:opacity-50"
-              >
-                <option value="">Selecione a Conta Financeira...</option>
-                {contasFinanceirasBling.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.descricao} {c.tipo ? `(${c.tipo})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Banco Emissor (Boletos) */}
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
-                Banco Emissor (Boletos)
+          <div className="pt-1">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-sky-300 block">
+                Conta Financeira (Bling)
               </span>
-              <select
-                value={bancoMassa}
-                onChange={(e) => handleAlterarBancoMassa(e.target.value as BankProvider)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs font-bold text-white focus:outline-none focus:border-sky-400 cursor-pointer"
-              >
-                {Object.entries(BANKS).map(([k, b]) => (
-                  <option key={k} value={k}>
-                    {b.name} ({b.code})
-                  </option>
-                ))}
-              </select>
+              {carregandoContasFinanceiras && (
+                <span className="text-[9px] text-sky-400 animate-pulse">Carregando contas...</span>
+              )}
             </div>
-
-            {/* Forma de Pagamento Bling */}
-            <div>
-              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-300 block mb-1">
-                Forma de Pagamento (Bling)
-              </span>
-              <select
-                value={formaPagamentoBlingId ?? ''}
-                onChange={(e) => {
-                  const val = e.target.value ? Number(e.target.value) : undefined;
-                  handleAlterarFormaPagamentoMassa(val);
-                }}
-                disabled={carregandoFormasBling}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg py-2 px-3 text-xs font-bold text-white focus:outline-none focus:border-sky-400 cursor-pointer disabled:opacity-50"
-              >
-                <option value="">Padrão da Loja</option>
-                {formasPagamentoBling.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.descricao}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <select
+              value={contaFinanceiraBlingId ?? ''}
+              onChange={(e) => {
+                const val = e.target.value ? Number(e.target.value) : undefined;
+                handleAlterarContaFinanceiraMassa(val);
+              }}
+              disabled={carregandoContasFinanceiras}
+              className="w-full bg-slate-900 border border-sky-500/40 rounded-xl py-2.5 px-3.5 text-xs font-bold text-white focus:outline-none focus:border-sky-400 cursor-pointer disabled:opacity-50"
+            >
+              <option value="">Selecione a Conta Financeira...</option>
+              {contasFinanceirasBling.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.descricao} {c.tipo ? `(${c.tipo})` : ''}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
       </div>
