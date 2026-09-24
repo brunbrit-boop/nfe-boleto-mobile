@@ -95,22 +95,9 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
   const [newSegmento, setNewSegmento] = useState('');
   const [newEmail, setNewEmail] = useState('');
   const [newPhone, setNewPhone] = useState('');
-  const [newCep, setNewCep] = useState('');
-  const [newEndereco, setNewEndereco] = useState('');
-  const [newBairro, setNewBairro] = useState('');
   const [newCidade, setNewCidade] = useState('');
   const [newUf, setNewUf] = useState('SP');
   const [localClients, setLocalClients] = useState<BlingCliente[]>([]);
-
-  // Formata CEP com máscara
-  const formatarCep = (cep?: string) => {
-    if (!cep) return '-';
-    const limpo = cep.replace(/\D/g, '');
-    if (limpo.length === 8) {
-      return limpo.replace(/^(\d{5})(\d{3})$/, '$1-$2');
-    }
-    return cep;
-  };
 
   // Combina clientes do Bling + locais e mescla os dados enriquecidos da Receita
   const allClients = useMemo(() => {
@@ -206,7 +193,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     return Array.from(set);
   }, [allClients]);
 
-  // Filtragem dos clientes na tabela com suporte a Razão Social, E-mail, CEP, Endereço, Cidade e UF
+  // Filtragem dos clientes na tabela
   const filteredClients = useMemo(() => {
     return allClients.filter((c) => {
       const term = searchTerm.toLowerCase();
@@ -216,10 +203,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
       const email = (c.email || '').toLowerCase();
       const fone = (c.telefone || c.celular || '').replace(/\D/g, '');
       const cidade = (c.endereco?.geral?.municipio || '').toLowerCase();
-      const uf = (c.endereco?.geral?.uf || '').toLowerCase();
-      const cep = (c.endereco?.geral?.cep || '').replace(/\D/g, '');
-      const endereco = (c.endereco?.geral?.endereco || '').toLowerCase();
-      const bairro = (c.endereco?.geral?.bairro || '').toLowerCase();
       const segmento = (c.segmento || '').toLowerCase();
       const cod = (c.codigo || '').toLowerCase();
 
@@ -230,10 +213,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
         email.includes(term) ||
         fone.includes(term.replace(/\D/g, '')) ||
         cidade.includes(term) ||
-        uf.includes(term) ||
-        cep.includes(term.replace(/\D/g, '')) ||
-        endereco.includes(term) ||
-        bairro.includes(term) ||
         segmento.includes(term) ||
         cod.includes(term);
 
@@ -432,10 +411,10 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
       regimeTributario: 'Simples Nacional',
       endereco: {
         geral: {
-          endereco: newEndereco.trim(),
+          endereco: '',
           numero: '',
-          bairro: newBairro.trim(),
-          cep: newCep.trim(),
+          bairro: '',
+          cep: '',
           municipio: newCidade.trim() || 'São Paulo',
           uf: newUf || 'SP',
         },
@@ -451,9 +430,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
     setNewSegmento('');
     setNewEmail('');
     setNewPhone('');
-    setNewCep('');
-    setNewEndereco('');
-    setNewBairro('');
     setNewCidade('');
     setShowAddModal(false);
   };
@@ -502,7 +478,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
               </span>
             </div>
             <p className="text-gray-500 dark:text-gray-400 text-xs md:text-sm font-medium">
-              Base oficial com Razão Social, E-mail, CEP, Endereço, Cidade e Federação (UF).
+              Base oficial com Cartão CNPJ Receita Federal, Sintegra e limites financeiros.
             </p>
           </div>
 
@@ -600,13 +576,13 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar por Razão Social, Fantasia, CNPJ, E-mail, CEP, Endereço, Cidade ou UF..."
+                placeholder="Buscar por Nome, Fantasia, CNPJ, Cidade, Segmento, E-mail ou Fone..."
                 className="w-full pl-10 pr-9 py-2.5 rounded-xl border border-gray-200 dark:border-[#214739] bg-gray-50/50 dark:bg-[#10221c] text-gray-900 dark:text-white text-xs placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-[#11d493]/30 focus:border-[#11d493] transition"
               />
               {searchTerm && (
                 <button
                   onClick={() => setSearchTerm('')}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1 cursor-pointer"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 p-1"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -712,7 +688,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
           </div>
         </div>
 
-        {/* BARRA DE AÇÃO EM LOTE */}
+        {/* BARRA DE AÇÃO EM LOTE (Aparece quando há seleção) */}
         {selectedClientIds.size > 0 && (
           <div className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-emerald-500/15 border border-[#11d493]/30 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm animate-in fade-in slide-in-from-top-2">
             <div className="flex items-center gap-3">
@@ -766,7 +742,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
         )}
       </div>
 
-      {/* A TABELA DE CLIENTES COM COLUNAS SOLICITADAS */}
+      {/* A TABELA DE CLIENTES */}
       <div className="px-6 md:px-8 pb-10 flex-1">
         <div className="bg-white dark:bg-[#162f27] rounded-2xl border border-gray-200 dark:border-[#214739] shadow-sm overflow-hidden">
           {filteredClients.length === 0 ? (
@@ -792,7 +768,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs text-gray-600 dark:text-gray-300 border-collapse min-w-[1300px]">
+              <table className="w-full text-left text-xs text-gray-600 dark:text-gray-300 border-collapse min-w-[1050px]">
                 <thead className="bg-gray-50 dark:bg-[#10221c]/90 text-[11px] uppercase font-extrabold text-gray-500 dark:text-gray-400 border-b border-gray-200 dark:border-[#214739] sticky top-0 z-10">
                   <tr>
                     {/* Checkbox em Lote */}
@@ -811,16 +787,15 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                         )}
                       </button>
                     </th>
-                    <th className="px-3.5 py-3.5">Razão Social / Cliente</th>
-                    <th className="px-3.5 py-3.5">CNPJ / CPF</th>
-                    <th className="px-3.5 py-3.5">E-mail</th>
-                    <th className="px-3.5 py-3.5">Endereço</th>
-                    <th className="px-3.5 py-3.5">CEP</th>
-                    <th className="px-3.5 py-3.5">Cidade / Federação</th>
-                    <th className="px-3.5 py-3.5">Situação RFB</th>
-                    <th className="px-3.5 py-3.5">WhatsApp / Fone</th>
-                    <th className="px-3.5 py-3.5">Saldo em Aberto</th>
-                    <th className="px-3.5 py-3.5 text-right">Ações Fiscais</th>
+                    <th className="px-3 py-3.5">Cód / Cliente</th>
+                    <th className="px-3 py-3.5">CNPJ / CPF</th>
+                    <th className="px-3 py-3.5">Cartão CNPJ / Situação</th>
+                    <th className="px-3 py-3.5">Localidade</th>
+                    <th className="px-3 py-3.5">Contato & WhatsApp</th>
+                    <th className="px-3 py-3.5">Condição / Regime</th>
+                    <th className="px-3 py-3.5">Saldo em Aberto</th>
+                    <th className="px-3 py-3.5">Status</th>
+                    <th className="px-3 py-3.5 text-right">Ações Fiscais</th>
                   </tr>
                 </thead>
 
@@ -862,44 +837,36 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                           </button>
                         </td>
 
-                        {/* 1. Razão Social (com Código e Fantasia) */}
-                        <td className="px-3.5 py-3.5">
-                          <div className="flex items-center gap-2.5">
-                            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-600 text-slate-950 font-black text-xs flex items-center justify-center shadow-sm shrink-0">
+                        {/* 1. Cód & Nome do Cliente */}
+                        <td className="px-3 py-3.5">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-600 text-slate-950 font-black text-xs flex items-center justify-center shadow-sm shrink-0">
                               {iniciais}
                             </div>
-                            <div className="min-w-0 max-w-[220px]">
+                            <div className="min-w-0">
                               <div className="flex items-center gap-1.5">
                                 {c.codigo && (
-                                  <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
+                                  <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300">
                                     {c.codigo}
                                   </span>
                                 )}
-                                <span
-                                  className="font-extrabold text-gray-900 dark:text-white truncate group-hover:text-[#11d493] transition-colors"
-                                  title={c.nome}
-                                >
-                                  {c.nome}
+                                <span className="font-extrabold text-gray-900 dark:text-white truncate group-hover:text-[#11d493] transition-colors">
+                                  {c.fantasia || c.nome}
                                 </span>
                               </div>
-                              {c.fantasia && c.fantasia !== c.nome && (
-                                <span
-                                  className="block text-[11px] text-gray-500 dark:text-gray-400 truncate font-medium"
-                                  title={c.fantasia}
-                                >
-                                  {c.fantasia}
-                                </span>
-                              )}
+                              <span className="block text-[11px] text-gray-500 dark:text-gray-400 truncate max-w-xs font-medium">
+                                {c.nome}
+                              </span>
                             </div>
                           </div>
                         </td>
 
                         {/* 2. CNPJ / CPF com Cópia Rápida */}
-                        <td className="px-3.5 py-3.5">
+                        <td className="px-3 py-3.5">
                           <div
                             onClick={(e) => handleCopyDoc(e, c.id, c.numeroDocumento)}
                             className="inline-flex items-center gap-1.5 p-1.5 rounded-lg bg-gray-50 dark:bg-gray-800/60 hover:bg-gray-100 dark:hover:bg-gray-800 border border-gray-200/60 dark:border-gray-700 transition cursor-pointer"
-                            title="Clique para copiar documento"
+                            title="Clique para copiar o documento"
                           >
                             <span
                               className={`text-[9px] font-bold px-1 py-0.2 rounded uppercase ${
@@ -911,7 +878,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                               {c.tipoPessoa === 'J' ? 'PJ' : 'PF'}
                             </span>
                             <span className="font-mono text-xs font-semibold text-gray-800 dark:text-gray-200">
-                              {c.numeroDocumento ? formatarCNPJ(c.numeroDocumento) : 'Não informado'}
+                              {c.numeroDocumento || 'Não informado'}
                             </span>
                             {isCopied ? (
                               <Check className="w-3.5 h-3.5 text-[#11d493]" />
@@ -921,66 +888,8 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                           </div>
                         </td>
 
-                        {/* 3. E-mail */}
-                        <td className="px-3.5 py-3.5">
-                          {c.email ? (
-                            <a
-                              href={`mailto:${c.email}`}
-                              onClick={(e) => e.stopPropagation()}
-                              className="inline-flex items-center gap-1.5 text-xs text-gray-700 dark:text-gray-300 hover:text-[#11d493] max-w-[190px] truncate group/email"
-                              title={`Enviar e-mail para ${c.email}`}
-                            >
-                              <Mail className="w-3.5 h-3.5 text-gray-400 group-hover/email:text-[#11d493] shrink-0" />
-                              <span className="truncate">{c.email}</span>
-                            </a>
-                          ) : (
-                            <span className="text-gray-400 text-xs">-</span>
-                          )}
-                        </td>
-
-                        {/* 4. Endereço */}
-                        <td className="px-3.5 py-3.5">
-                          {c.endereco?.geral?.endereco ? (
-                            <div className="max-w-[210px] text-xs">
-                              <p
-                                className="font-medium text-gray-800 dark:text-gray-200 truncate"
-                                title={`${c.endereco.geral.endereco}${c.endereco.geral.numero ? `, ${c.endereco.geral.numero}` : ''}`}
-                              >
-                                {c.endereco.geral.endereco}
-                                {c.endereco.geral.numero ? `, ${c.endereco.geral.numero}` : ''}
-                              </p>
-                              {c.endereco.geral.bairro && (
-                                <span className="text-[11px] text-gray-400 truncate block">
-                                  {c.endereco.geral.bairro}
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span className="text-gray-400 text-xs">-</span>
-                          )}
-                        </td>
-
-                        {/* 5. CEP */}
-                        <td className="px-3.5 py-3.5">
-                          <span className="font-mono text-xs text-gray-700 dark:text-gray-300 font-medium">
-                            {formatarCep(c.endereco?.geral?.cep)}
-                          </span>
-                        </td>
-
-                        {/* 6. Cidade / Federação (UF) */}
-                        <td className="px-3.5 py-3.5">
-                          <div className="flex items-center gap-1.5 text-xs text-gray-800 dark:text-gray-200 font-medium">
-                            <span className="truncate max-w-[120px]">
-                              {c.endereco?.geral?.municipio || 'Não informada'}
-                            </span>
-                            <span className="inline-block px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-[10px] font-black text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 uppercase shrink-0">
-                              {c.endereco?.geral?.uf || 'SP'}
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* 7. Situação Cadastral Receita Federal / Cartão CNPJ */}
-                        <td className="px-3.5 py-3.5">
+                        {/* 3. Situação Cadastral Receita Federal / Cartão CNPJ */}
+                        <td className="px-3 py-3.5">
                           {c.situacaoCadastral ? (
                             <div className="flex flex-col gap-0.5">
                               <span
@@ -999,7 +908,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                               </span>
                               {c.cnaePrincipal?.codigo && (
                                 <span
-                                  className="text-[10px] text-gray-400 truncate max-w-[130px]"
+                                  className="text-[10px] text-gray-400 truncate max-w-[170px]"
                                   title={`${c.cnaePrincipal.codigo} - ${c.cnaePrincipal.descricao}`}
                                 >
                                   CNAE: {c.cnaePrincipal.codigo}
@@ -1014,7 +923,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                               }}
                               disabled={isConsulting}
                               className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold bg-emerald-500/10 hover:bg-emerald-500/20 text-[#11d493] border border-emerald-500/20 transition cursor-pointer"
-                              title="Consultar Cartão CNPJ na Receita Federal"
+                              title="Consultar Cartão CNPJ e Sintegra na Receita Federal"
                             >
                               {isConsulting ? (
                                 <Loader2 className="w-3 h-3 animate-spin" />
@@ -1028,28 +937,59 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                           )}
                         </td>
 
-                        {/* 8. WhatsApp / Fone */}
-                        <td className="px-3.5 py-3.5">
-                          {fone ? (
-                            <div className="flex items-center gap-1.5">
-                              <span className="font-mono text-xs text-gray-800 dark:text-gray-200 font-medium">
-                                {fone}
-                              </span>
-                              <button
-                                onClick={(e) => handleWhatsApp(e, fone)}
-                                className="p-1 rounded bg-emerald-500/15 hover:bg-emerald-500/30 text-[#11d493] transition cursor-pointer"
-                                title="Abrir WhatsApp"
-                              >
-                                <MessageSquare className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          ) : (
-                            <span className="text-gray-400 text-xs">-</span>
-                          )}
+                        {/* 4. Localidade */}
+                        <td className="px-3 py-3.5">
+                          <div className="flex items-center gap-1 text-gray-700 dark:text-gray-300 font-medium">
+                            <MapPin className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                            <span>
+                              {c.endereco?.geral?.municipio
+                                ? `${c.endereco.geral.municipio}/${c.endereco.geral.uf || 'SP'}`
+                                : 'São Paulo/SP'}
+                            </span>
+                          </div>
                         </td>
 
-                        {/* 9. Saldo em Aberto */}
-                        <td className="px-3.5 py-3.5">
+                        {/* 5. Contato & WhatsApp */}
+                        <td className="px-3 py-3.5">
+                          <div className="space-y-1">
+                            {fone ? (
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-mono text-gray-800 dark:text-gray-200 font-medium">
+                                  {fone}
+                                </span>
+                                <button
+                                  onClick={(e) => handleWhatsApp(e, fone)}
+                                  className="p-1 rounded bg-emerald-500/15 hover:bg-emerald-500/30 text-[#11d493] transition cursor-pointer"
+                                  title="Abrir WhatsApp"
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-gray-400">-</span>
+                            )}
+
+                            {c.email && (
+                              <a
+                                href={`mailto:${c.email}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-gray-400 hover:text-[#11d493] truncate max-w-[180px]"
+                              >
+                                <Mail className="w-3 h-3 shrink-0" />
+                                <span className="truncate">{c.email}</span>
+                              </a>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* 6. Condição & Regime */}
+                        <td className="px-3 py-3.5 text-[11px] text-gray-600 dark:text-gray-300">
+                          <div className="font-semibold">{c.condicaoPagamento || 'A Combinar'}</div>
+                          <div className="text-[10px] text-gray-400">{c.regimeTributario || 'Simples Nacional'}</div>
+                        </td>
+
+                        {/* 7. Saldo em Aberto */}
+                        <td className="px-3 py-3.5">
                           {balance.total > 0 ? (
                             <div>
                               <span className="font-extrabold text-emerald-600 dark:text-emerald-400 text-xs">
@@ -1059,7 +999,7 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                                 })}
                               </span>
                               <span className="block text-[10px] text-gray-400">
-                                {balance.count} boleto{balance.count > 1 ? 's' : ''}
+                                {balance.count} boleto{balance.count > 1 ? 's' : ''} pendente
                               </span>
                             </div>
                           ) : (
@@ -1069,8 +1009,26 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                           )}
                         </td>
 
-                        {/* 10. Ações Fiscais */}
-                        <td className="px-3.5 py-3.5 text-right" onClick={(e) => e.stopPropagation()}>
+                        {/* 8. Status */}
+                        <td className="px-3 py-3.5">
+                          <span
+                            className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold ${
+                              c.situacao !== 'I'
+                                ? 'bg-emerald-500/10 text-[#11d493] border border-emerald-500/20'
+                                : 'bg-gray-100 dark:bg-gray-800 text-gray-500'
+                            }`}
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                c.situacao !== 'I' ? 'bg-[#11d493]' : 'bg-gray-400'
+                              }`}
+                            />
+                            {c.situacao !== 'I' ? 'Ativo' : 'Inativo'}
+                          </span>
+                        </td>
+
+                        {/* 9. Ações Fiscais */}
+                        <td className="px-3 py-3.5 text-right" onClick={(e) => e.stopPropagation()}>
                           {onEmitirParaCliente ? (
                             <button
                               onClick={() => onEmitirParaCliente(c)}
@@ -1084,7 +1042,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                             <button
                               onClick={() => setSelectedClientModal(c)}
                               className="p-1.5 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer"
-                              title="Ver Detalhes do Cliente"
                             >
                               <ExternalLink className="w-4 h-4" />
                             </button>
@@ -1133,13 +1090,11 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                     )}
                   </div>
                   <h3 className="text-base sm:text-lg font-black text-gray-900 dark:text-white truncate mt-1">
-                    {activeClientInModal.nome}
+                    {activeClientInModal.fantasia || activeClientInModal.nome}
                   </h3>
-                  {activeClientInModal.fantasia && activeClientInModal.fantasia !== activeClientInModal.nome && (
-                    <p className="text-xs text-gray-500 dark:text-gray-400 font-medium truncate">
-                      {activeClientInModal.fantasia}
-                    </p>
-                  )}
+                  <p className="text-xs text-gray-500 dark:text-gray-400 font-medium truncate">
+                    {activeClientInModal.nome}
+                  </p>
                 </div>
               </div>
 
@@ -1330,50 +1285,126 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
               </div>
             )}
 
-            {/* Endereço Fiscal Completo com link Google Maps */}
-            <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/60 dark:border-gray-700/50 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-              <div className="min-w-0">
-                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5 flex items-center gap-1">
-                  <MapPin className="w-3.5 h-3.5 text-[#11d493]" /> Endereço Fiscal Cadastrado
+            {/* Card com os Dados Oficiais Solicitados: Razão Social, E-mail, CEP, Endereço, Cidade e Federação */}
+            <div className="p-4 rounded-2xl bg-gray-50 dark:bg-[#10221c] border border-gray-200/70 dark:border-gray-700/60 space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-gray-200/60 dark:border-gray-700/60">
+                <span className="text-[10px] font-black uppercase tracking-wider text-emerald-600 dark:text-[#11d493] flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5" />
+                  Identificação & Localização Oficial (Receita / Sintegra)
                 </span>
-                <p className="font-semibold text-gray-800 dark:text-gray-200 leading-snug">
-                  {[
-                    activeClientInModal.endereco?.geral?.endereco,
-                    activeClientInModal.endereco?.geral?.numero,
-                    activeClientInModal.endereco?.geral?.complemento,
-                  ]
-                    .filter(Boolean)
-                    .join(', ') || 'Endereço não cadastrado'}
-                </p>
-                <p className="text-[11px] text-gray-400">
-                  {[
-                    activeClientInModal.endereco?.geral?.bairro,
-                    activeClientInModal.endereco?.geral?.municipio,
-                    activeClientInModal.endereco?.geral?.uf,
-                    formatarCep(activeClientInModal.endereco?.geral?.cep),
-                  ]
-                    .filter(Boolean)
-                    .join(' - ')}
-                </p>
+                {activeClientInModal.consultadoEm && (
+                  <span className="text-[10px] font-bold text-emerald-600 dark:text-[#11d493] bg-emerald-500/10 px-2 py-0.5 rounded-full">
+                    Sincronizado
+                  </span>
+                )}
               </div>
 
-              {activeClientInModal.endereco?.geral?.municipio && (
-                <a
-                  href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                    `${activeClientInModal.endereco.geral.endereco || ''} ${
-                      activeClientInModal.endereco.geral.numero || ''
-                    }, ${activeClientInModal.endereco.geral.municipio || ''} - ${
-                      activeClientInModal.endereco.geral.uf || ''
-                    }`
-                  )}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200 dark:border-gray-700 hover:border-[#11d493] text-gray-700 dark:text-gray-200 text-xs font-bold transition shrink-0 cursor-pointer"
-                >
-                  <MapPin className="w-3.5 h-3.5 text-[#11d493]" />
-                  <span>Ver no Maps</span>
-                </a>
-              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                {/* 1. Razão Social */}
+                <div className="sm:col-span-2 p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60 flex items-center justify-between">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
+                      Razão Social
+                    </span>
+                    <span className="font-extrabold text-gray-900 dark:text-white truncate block select-all">
+                      {activeClientInModal.nome || 'Não informada'}
+                    </span>
+                  </div>
+                  {activeClientInModal.nome && (
+                    <button
+                      onClick={(e) => handleCopyDoc(e, -1, activeClientInModal.nome)}
+                      className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 shrink-0 cursor-pointer"
+                      title="Copiar Razão Social"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {/* 2. E-mail */}
+                <div className="p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5 flex items-center gap-1">
+                    <Mail className="w-3 h-3 text-gray-400" /> E-mail
+                  </span>
+                  {activeClientInModal.email ? (
+                    <a
+                      href={`mailto:${activeClientInModal.email}`}
+                      className="font-bold text-emerald-600 dark:text-[#11d493] hover:underline truncate block"
+                    >
+                      {activeClientInModal.email}
+                    </a>
+                  ) : (
+                    <span className="text-gray-400 italic">Não informado</span>
+                  )}
+                </div>
+
+                {/* 3. CEP */}
+                <div className="p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
+                    CEP
+                  </span>
+                  <span className="font-mono font-bold text-gray-800 dark:text-gray-200">
+                    {activeClientInModal.endereco?.geral?.cep || 'Não informado'}
+                  </span>
+                </div>
+
+                {/* 4. Endereço Completo */}
+                <div className="sm:col-span-2 p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60 flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5 flex items-center gap-1">
+                      <MapPin className="w-3 h-3 text-[#11d493]" /> Endereço
+                    </span>
+                    <span className="font-semibold text-gray-800 dark:text-gray-200 leading-snug block">
+                      {[
+                        activeClientInModal.endereco?.geral?.endereco,
+                        activeClientInModal.endereco?.geral?.numero ? `Nº ${activeClientInModal.endereco.geral.numero}` : '',
+                        activeClientInModal.endereco?.geral?.complemento,
+                        activeClientInModal.endereco?.geral?.bairro ? `Bairro ${activeClientInModal.endereco.geral.bairro}` : '',
+                      ]
+                        .filter(Boolean)
+                        .join(', ') || 'Não informado'}
+                    </span>
+                  </div>
+
+                  {activeClientInModal.endereco?.geral?.municipio && (
+                    <a
+                      href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                        `${activeClientInModal.endereco.geral.endereco || ''} ${
+                          activeClientInModal.endereco.geral.numero || ''
+                        }, ${activeClientInModal.endereco.geral.municipio || ''} - ${
+                          activeClientInModal.endereco.geral.uf || ''
+                        }`
+                      )}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-gray-50 dark:bg-[#10221c] border border-gray-200 dark:border-gray-700 hover:border-[#11d493] text-gray-700 dark:text-gray-200 text-[11px] font-bold transition shrink-0 cursor-pointer"
+                    >
+                      <MapPin className="w-3 h-3 text-[#11d493]" />
+                      <span>Maps</span>
+                    </a>
+                  )}
+                </div>
+
+                {/* 5. Cidade */}
+                <div className="p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
+                    Cidade
+                  </span>
+                  <span className="font-bold text-gray-800 dark:text-gray-200">
+                    {activeClientInModal.endereco?.geral?.municipio || 'Não informada'}
+                  </span>
+                </div>
+
+                {/* 6. Federação (UF) */}
+                <div className="p-2.5 rounded-xl bg-white dark:bg-[#162f27] border border-gray-200/70 dark:border-gray-700/60">
+                  <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider block mb-0.5">
+                    Federação (UF)
+                  </span>
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md font-mono font-black text-xs bg-emerald-500/10 text-emerald-600 dark:text-[#11d493]">
+                    {activeClientInModal.endereco?.geral?.uf || 'SP'}
+                  </span>
+                </div>
+              </div>
             </div>
 
             {/* Rodapé com Ações do Modal */}
@@ -1484,6 +1515,44 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">
+                    Segmento
+                  </label>
+                  <input
+                    type="text"
+                    value={newSegmento}
+                    onChange={(e) => setNewSegmento(e.target.value)}
+                    placeholder="Ex: Construtora, Varejista..."
+                    className="w-full px-3 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#10221c] text-gray-900 dark:text-white focus:ring-2 focus:ring-[#11d493] focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">
+                    Cidade / UF
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newCidade}
+                      onChange={(e) => setNewCidade(e.target.value)}
+                      placeholder="Cidade"
+                      className="flex-1 px-3 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#10221c] text-gray-900 dark:text-white focus:ring-2 focus:ring-[#11d493] focus:outline-none"
+                    />
+                    <input
+                      type="text"
+                      value={newUf}
+                      onChange={(e) => setNewUf(e.target.value.toUpperCase())}
+                      placeholder="UF"
+                      maxLength={2}
+                      className="w-12 text-center px-2 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#10221c] text-gray-900 dark:text-white focus:ring-2 focus:ring-[#11d493] focus:outline-none font-bold uppercase"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">
                     E-mail
                   </label>
                   <input
@@ -1507,91 +1576,6 @@ export const ClientsView: React.FC<ClientsViewProps> = ({
                     className="w-full px-3 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#10221c] text-gray-900 dark:text-white focus:ring-2 focus:ring-[#11d493] focus:outline-none"
                   />
                 </div>
-              </div>
-
-              {/* Endereço, CEP, Cidade e Federação */}
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">
-                    CEP
-                  </label>
-                  <input
-                    type="text"
-                    value={newCep}
-                    onChange={(e) => setNewCep(e.target.value)}
-                    placeholder="00000-000"
-                    maxLength={9}
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#10221c] text-gray-900 dark:text-white focus:ring-2 focus:ring-[#11d493] focus:outline-none font-mono"
-                  />
-                </div>
-
-                <div className="col-span-2">
-                  <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">
-                    Endereço (Rua, Número)
-                  </label>
-                  <input
-                    type="text"
-                    value={newEndereco}
-                    onChange={(e) => setNewEndereco(e.target.value)}
-                    placeholder="Av. Paulista, 1000"
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#10221c] text-gray-900 dark:text-white focus:ring-2 focus:ring-[#11d493] focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-3">
-                <div>
-                  <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">
-                    Bairro
-                  </label>
-                  <input
-                    type="text"
-                    value={newBairro}
-                    onChange={(e) => setNewBairro(e.target.value)}
-                    placeholder="Bela Vista"
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#10221c] text-gray-900 dark:text-white focus:ring-2 focus:ring-[#11d493] focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">
-                    Cidade
-                  </label>
-                  <input
-                    type="text"
-                    value={newCidade}
-                    onChange={(e) => setNewCidade(e.target.value)}
-                    placeholder="São Paulo"
-                    className="w-full px-3 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#10221c] text-gray-900 dark:text-white focus:ring-2 focus:ring-[#11d493] focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">
-                    UF (Federação)
-                  </label>
-                  <input
-                    type="text"
-                    value={newUf}
-                    onChange={(e) => setNewUf(e.target.value.toUpperCase())}
-                    placeholder="SP"
-                    maxLength={2}
-                    className="w-full text-center px-2 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#10221c] text-gray-900 dark:text-white focus:ring-2 focus:ring-[#11d493] focus:outline-none font-bold uppercase"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block font-bold text-gray-600 dark:text-gray-400 mb-1">
-                  Segmento
-                </label>
-                <input
-                  type="text"
-                  value={newSegmento}
-                  onChange={(e) => setNewSegmento(e.target.value)}
-                  placeholder="Ex: Construtora, Distribuidora, Varejista..."
-                  className="w-full px-3 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 bg-white dark:bg-[#10221c] text-gray-900 dark:text-white focus:ring-2 focus:ring-[#11d493] focus:outline-none"
-                />
               </div>
 
               <div className="flex justify-end gap-3 pt-3 border-t border-gray-100 dark:border-[#214739]">
