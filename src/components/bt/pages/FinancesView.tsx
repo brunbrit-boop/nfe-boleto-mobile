@@ -24,6 +24,8 @@ import { ContaReceberDetalhesModal } from '../../ContaReceberDetalhesModal';
 import {
   atualizarContaReceberBling,
   atualizarContaPagarBling,
+  obterContasReceberCacheLocal,
+  salvarContasReceberCacheLocal,
 } from '../../../services/blingService';
 
 export interface FinanceTransaction {
@@ -574,7 +576,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   const [enviandoDados, setEnviandoDados] = useState<boolean>(false);
   const [envioFeedback, setEnvioFeedback] = useState<{ tipo: 'sucesso' | 'erro'; mensagem: string } | null>(null);
 
-  // Salva observação alterada no modal diretamente no estado e marca como pendente
+  // Salva histórico / observação alterada diretamente no estado e marca como pendente
   const handleSalvarObservacaoReceber = (idConta: number, novoTexto: string) => {
     setAllTransactions((prev) =>
       prev.map((t) => {
@@ -585,13 +587,24 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             ...t,
             description: novoTexto,
             originalBlingReceber: t.originalBlingReceber
-              ? { ...t.originalBlingReceber, historico: novoTexto }
+              ? { ...t.originalBlingReceber, historico: novoTexto, observacoes: novoTexto }
               : t.originalBlingReceber,
           };
         }
         return t;
       })
     );
+
+    try {
+      const empId = localStorage.getItem('nfe_empresa_ativa_id') || undefined;
+      const cached = obterContasReceberCacheLocal(empId);
+      if (cached && cached.length > 0) {
+        salvarContasReceberCacheLocal(
+          empId,
+          cached.map((c) => (c.id === idConta ? { ...c, historico: novoTexto, observacoes: novoTexto } : c))
+        );
+      }
+    } catch {}
   };
 
   // Dispara o envio em lote das alterações pendentes para a API do Bling ERP
@@ -763,11 +776,15 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
       const dateISO = cr.vencimento || cr.dataEmissao || todayISO;
       const isPaid = cr.situacao === 2;
       const nomeEmp = (cr.empresaId && mapaNomesEmpresas[cr.empresaId]) || empresaNome || 'Minha Empresa';
+      const nfNumero = (cr as any).origem?.numero || (cr.numeroDocumento && cr.numeroDocumento.includes('/') ? cr.numeroDocumento.split('/')[0] : '');
+      const fallbackRef = nfNumero ? `Ref. a NF nº ${nfNumero}` : (cr.numeroDocumento ? `Ref. doc. ${cr.numeroDocumento}` : `Recebimento Ref #${cr.id}`);
+      const descReceber = cr.historico && !cr.historico.startsWith('Recebimento Ref #') ? cr.historico : (cr.historico || fallbackRef);
+
       list.push({
         id: `rec-bling-${cr.empresaId || ''}-${cr.id}`,
         date: dateISO,
         displayDate: formatDateBr(dateISO),
-        description: cr.historico || `Recebimento Ref #${cr.numeroDocumento || cr.id}`,
+        description: descReceber,
         category:
           (typeof cr.categoria === 'object' && cr.categoria !== null
             ? (cr.categoria as any).descricao
@@ -791,11 +808,14 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
       const dateISO = cp.vencimento || cp.dataEmissao || todayISO;
       const isPaid = cp.situacao === 2;
       const nomeEmp = (cp.empresaId && mapaNomesEmpresas[cp.empresaId]) || empresaNome || 'Minha Empresa';
+      const fallbackRefPagar = cp.numeroDocumento ? `Ref. doc. ${cp.numeroDocumento}` : `Pagamento Ref #${cp.id}`;
+      const descPagar = cp.historico && cp.historico !== 'Despesa Bling' && !cp.historico.startsWith('Pagamento Ref #') ? cp.historico : (cp.historico || fallbackRefPagar);
+
       list.push({
         id: `pay-bling-${cp.empresaId || ''}-${cp.id}`,
         date: dateISO,
         displayDate: formatDateBr(dateISO),
-        description: cp.historico || `Pagamento Ref #${cp.numeroDocumento || cp.id}`,
+        description: descPagar,
         category:
           (typeof cp.categoria === 'object' && cp.categoria !== null
             ? (cp.categoria as any).descricao
@@ -2072,8 +2092,10 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
                         <td className="p-2 text-gray-500 truncate max-w-[75px]">{tx.method}</td>
 
-                        <td className="p-2 text-gray-700 dark:text-gray-300 truncate max-w-[130px]">
-                          {tx.description}
+                        <td className="p-2 text-gray-700 dark:text-gray-300 truncate min-w-[150px] max-w-[260px]" title={tx.description}>
+                          <span className="truncate block font-medium">
+                            {tx.description}
+                          </span>
                         </td>
 
                         <td className="p-2 text-right font-mono font-bold text-rose-600 dark:text-rose-400 whitespace-nowrap">
@@ -2309,8 +2331,10 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
 
                         <td className="p-2 text-gray-500 truncate max-w-[75px]">{tx.method}</td>
 
-                        <td className="p-2 text-gray-700 dark:text-gray-300 truncate max-w-[130px] group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
-                          {tx.description}
+                        <td className="p-2 text-gray-700 dark:text-gray-300 truncate min-w-[150px] max-w-[260px] group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors" title={tx.description}>
+                          <span className="truncate block font-medium">
+                            {tx.description}
+                          </span>
                         </td>
 
                         <td className="p-2 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400 whitespace-nowrap">

@@ -1598,10 +1598,19 @@ export async function carregarContasPagarBling(
       await new Promise((r) => setTimeout(r, 350));
     }
     
+    const cacheAtual = obterContasPagarCacheLocal(empresaId);
+    const mapCache = new Map<number, BlingContaPagar>(cacheAtual.map((c) => [c.id, c]));
+
     const pagamentos: BlingContaPagar[] = todasContas.map((p: any) => {
       const val = Number(p.valor || p.saldo || 0);
       const venc = p.vencimento || new Date().toISOString().slice(0, 10);
       const [yyyy, mm, dd] = venc.split('-');
+
+      const cacheItem = mapCache.get(p.id);
+      const historicoLocal = cacheItem?.historico && cacheItem.historico !== 'Despesa Bling' ? cacheItem.historico : '';
+      const fallbackRef = p.numeroDocumento ? `Ref. doc. ${p.numeroDocumento}` : `Pagamento Ref #${p.id}`;
+      const histFinal = p.historico || p.observacoes || p.detalhes || historicoLocal || fallbackRef;
+
       return {
         id: p.id,
         numeroDocumento: p.numeroDocumento || `CP-${p.id}`,
@@ -1611,8 +1620,8 @@ export async function carregarContasPagarBling(
         valor: val,
         valorFormatado: formatCurrency(val),
         saldo: Number(p.saldo ?? val),
-        historico: p.historico || 'Despesa Bling',
-        categoria: p.categoria?.descricao || 'Fornecedores',
+        historico: histFinal,
+        categoria: p.categoria?.descricao || p.categoria || 'Fornecedores',
         situacao: p.situacao || 1,
         contato: {
           id: p.contato?.id || 1,
@@ -1623,6 +1632,37 @@ export async function carregarContasPagarBling(
         contaFinanceira: p.contaContabil ? { id: p.contaContabil.id, descricao: p.contaContabil.descricao } : (p.contaFinanceira ? { id: p.contaFinanceira.id, descricao: p.contaFinanceira.descricao } : (p.portador ? { id: p.portador.id, descricao: p.portador.nome || p.portador.descricao } : undefined)),
       };
     });
+
+    // Enriquecimento do histórico real gravado no Bling para contas a pagar abertas
+    const contasPagarParaEnriquecer = pagamentos
+      .filter((c) => (!c.historico || c.historico === 'Despesa Bling' || c.historico.startsWith('Pagamento Ref #')) && c.situacao === 1)
+      .slice(0, 10);
+
+    for (const c of contasPagarParaEnriquecer) {
+      try {
+        const getRes = await callBlingApi(`/contas/pagar/${c.id}`, {
+          method: 'GET',
+          customToken: token,
+          empresaId,
+        }).catch(() => callBlingApi(`/contas-pagar/${c.id}`, { method: 'GET', customToken: token, empresaId }));
+
+        if (getRes?.data) {
+          if (getRes.data.historico) {
+            c.historico = getRes.data.historico;
+          }
+          if (getRes.data.numeroDocumento) {
+            c.numeroDocumento = getRes.data.numeroDocumento;
+          }
+          if (getRes.data.contaContabil?.descricao) {
+            c.contaFinanceira = {
+              id: getRes.data.contaContabil.id,
+              descricao: getRes.data.contaContabil.descricao,
+            };
+          }
+        }
+        await new Promise((res) => setTimeout(res, 350));
+      } catch {}
+    }
 
     const resumo = calcularResumoFinanceiro(pagamentos);
     const key = empresaId ? `${STORAGE_KEYS.PAGAR}_${empresaId}` : STORAGE_KEYS.PAGAR;
@@ -1682,6 +1722,9 @@ export async function carregarContasReceberBling(
       await new Promise((r) => setTimeout(r, 350));
     }
 
+    const cacheAtual = obterContasReceberCacheLocal(empresaId);
+    const mapCache = new Map<number, BlingContaReceber>(cacheAtual.map((c) => [c.id, c]));
+
     const receber: BlingContaReceber[] = todasContas.map((r: any, idx: number) => {
       const val = Number(r.valor || r.saldo || 0);
       const venc = r.vencimento || r.dataVencimento || r.dataEmissao || new Date().toISOString().slice(0, 10);
@@ -1694,6 +1737,12 @@ export async function carregarContasReceberBling(
         900000 + idx
       );
 
+      const cacheItem = mapCache.get(r.id);
+      const historicoLocal = cacheItem?.historico && !cacheItem.historico.startsWith('Recebimento Ref #') ? cacheItem.historico : '';
+      const nfNumero = r.origem?.numero || (r.numeroDocumento && r.numeroDocumento.includes('/') ? r.numeroDocumento.split('/')[0] : '');
+      const fallbackRef = nfNumero ? `Ref. a NF nº ${nfNumero}` : (r.numeroDocumento ? `Ref. doc. ${r.numeroDocumento}` : `Recebimento Ref #${r.id}`);
+      const histFinal = r.historico || r.observacoes || r.observacao || r.detalhes || historicoLocal || fallbackRef;
+
       return {
         id: r.id,
         numeroDocumento: r.numeroDocumento || `CR-${r.id}`,
@@ -1703,8 +1752,8 @@ export async function carregarContasReceberBling(
         valor: val,
         valorFormatado: formatCurrency(val),
         saldo: Number(r.saldo ?? val),
-        historico: r.historico || r.observacoes || r.observacao || r.detalhes || '',
-        observacoes: r.observacoes || r.observacao || r.historico || '',
+        historico: histFinal,
+        observacoes: histFinal,
         categoria: r.categoria?.descricao || r.categoria || 'Vendas',
         situacao: r.situacao || 1,
         contato: {
@@ -1731,6 +1780,38 @@ export async function carregarContasReceberBling(
       };
     });
 
+    // Enriquecimento do histórico real gravado no Bling para contas abertas recentes
+    const contasParaEnriquecer = receber
+      .filter((c) => (!c.historico || c.historico.startsWith('Recebimento Ref #') || c.historico.startsWith('Ref. doc.')) && c.situacao === 1)
+      .slice(0, 10);
+
+    for (const c of contasParaEnriquecer) {
+      try {
+        const getRes = await callBlingApi(`/contas/receber/${c.id}`, {
+          method: 'GET',
+          customToken: token,
+          empresaId,
+        }).catch(() => callBlingApi(`/contas-receber/${c.id}`, { method: 'GET', customToken: token, empresaId }));
+
+        if (getRes?.data) {
+          if (getRes.data.historico) {
+            c.historico = getRes.data.historico;
+            c.observacoes = getRes.data.historico;
+          }
+          if (getRes.data.numeroDocumento) {
+            c.numeroDocumento = getRes.data.numeroDocumento;
+          }
+          if (getRes.data.contaContabil?.descricao || getRes.data.contaContabil?.nome) {
+            c.contaFinanceira = {
+              id: getRes.data.contaContabil.id,
+              descricao: getRes.data.contaContabil.descricao || getRes.data.contaContabil.nome,
+            };
+          }
+        }
+        await new Promise((res) => setTimeout(res, 350));
+      } catch {}
+    }
+
     const resumo = calcularResumoFinanceiro(receber);
     const key = empresaId ? `${STORAGE_KEYS.RECEBER}_${empresaId}` : STORAGE_KEYS.RECEBER;
     localStorage.setItem(key, JSON.stringify(receber));
@@ -1742,6 +1823,46 @@ export async function carregarContasReceberBling(
   const key = empresaId ? `${STORAGE_KEYS.RECEBER}_${empresaId}` : STORAGE_KEYS.RECEBER;
   localStorage.setItem(key, JSON.stringify([]));
   return { data: [], resumo: resumoVazio, isLive: true };
+}
+
+/**
+ * Busca os detalhes completos de uma Conta a Receber no Bling (incluindo o Histórico real)
+ */
+export async function obterDetalhesContaReceberBling(
+  idConta: number,
+  token?: string,
+  empresaId?: string
+): Promise<any> {
+  try {
+    const res = await callBlingApi(`/contas/receber/${idConta}`, {
+      method: 'GET',
+      customToken: token,
+      empresaId,
+    }).catch(() => callBlingApi(`/contas-receber/${idConta}`, { method: 'GET', customToken: token, empresaId }));
+    return res?.data || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Busca os detalhes completos de uma Conta a Pagar no Bling (incluindo o Histórico real)
+ */
+export async function obterDetalhesContaPagarBling(
+  idConta: number,
+  token?: string,
+  empresaId?: string
+): Promise<any> {
+  try {
+    const res = await callBlingApi(`/contas/pagar/${idConta}`, {
+      method: 'GET',
+      customToken: token,
+      empresaId,
+    }).catch(() => callBlingApi(`/contas-pagar/${idConta}`, { method: 'GET', customToken: token, empresaId }));
+    return res?.data || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
