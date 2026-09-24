@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { ArrowUpCircle, CheckCircle2, Clock, AlertTriangle, RefreshCw, Search, Calendar, Copy, Check, Barcode, Share2 } from 'lucide-react';
+import { ArrowUpCircle, CheckCircle2, Clock, AlertTriangle, RefreshCw, Search, Calendar, Copy, Check, Barcode, Share2, Info } from 'lucide-react';
 import type { BlingContaReceber, ResumoFinanceiro } from '../types';
 import { formatCurrency } from '../utils/financeEngine';
 import { speechEngine } from '../utils/speechEngine';
+import { ContaReceberDetalhesModal } from './ContaReceberDetalhesModal';
+
 
 interface ContasReceberTabProps {
   contas: BlingContaReceber[];
@@ -24,6 +26,8 @@ export const ContasReceberTab: React.FC<ContasReceberTabProps> = ({
   const [filterSituacao, setFilterSituacao] = useState<'todas' | 'aberto' | 'recebidas' | 'atrasadas'>('todas');
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedLinhaId, setCopiedLinhaId] = useState<number | null>(null);
+  const [selectedContaModal, setSelectedContaModal] = useState<BlingContaReceber | null>(null);
+
 
   const hojeStr = new Date().toISOString().slice(0, 10);
 
@@ -206,13 +210,17 @@ export const ContasReceberTab: React.FC<ContasReceberTabProps> = ({
                   isAtrasada ? 'border-rose-300/80 bg-rose-50/20' : 'border-slate-200/90'
                 }`}
               >
-                {/* Header */}
-                <div className="flex items-start justify-between gap-2">
+                {/* Header (Clicável para ver detalhes completos) */}
+                <div
+                  onClick={() => setSelectedContaModal(conta)}
+                  className="flex items-start justify-between gap-2 cursor-pointer group"
+                  title="Clique para ver detalhes do Bling"
+                >
                   <div>
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-mono">
                       {conta.numeroDocumento}
                     </span>
-                    <h3 className="text-sm font-bold text-slate-900 leading-snug">
+                    <h3 className="text-sm font-bold text-slate-900 leading-snug group-hover:text-emerald-600 transition-colors">
                       {conta.contato.nome}
                     </h3>
                   </div>
@@ -256,7 +264,11 @@ export const ContasReceberTab: React.FC<ContasReceberTabProps> = ({
                 )}
 
                 {/* Vencimento e Valor */}
-                <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs">
+                <div
+                  onClick={() => setSelectedContaModal(conta)}
+                  className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs cursor-pointer"
+                  title="Ver detalhes"
+                >
                   <div className="flex items-center gap-1.5 text-slate-500">
                     <Calendar className="w-3.5 h-3.5 text-slate-400" />
                     <span>
@@ -269,22 +281,33 @@ export const ContasReceberTab: React.FC<ContasReceberTabProps> = ({
                   </span>
                 </div>
 
-                {/* Botões de Ação */}
-                <div className="grid grid-cols-2 gap-2 pt-0.5">
+                {/* Botões de Ação Minimalistas (app-design-master) */}
+                <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                  <button
+                    onClick={() => setSelectedContaModal(conta)}
+                    className="flex items-center justify-center gap-1 text-[11px] font-semibold py-1.5 px-2 rounded-xl bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200 transition active:scale-95"
+                    title="Detalhes Bling"
+                  >
+                    <Info className="w-3.5 h-3.5 text-slate-600" />
+                    <span>Detalhes</span>
+                  </button>
+
                   <button
                     onClick={() => onViewBoletoReceber(conta)}
-                    className="flex items-center justify-center gap-1 text-[11px] font-semibold py-1.5 px-2 rounded-xl bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200 transition active:scale-95"
+                    className="flex items-center justify-center gap-1 text-[11px] font-semibold py-1.5 px-2 rounded-xl bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 transition active:scale-95"
+                    title="Ver Boleto"
                   >
                     <Barcode className="w-3.5 h-3.5 text-blue-600" />
-                    <span>Ver Boleto Oficial</span>
+                    <span>Ver Boleto</span>
                   </button>
 
                   <button
                     onClick={() => handleShareCobrança(conta)}
                     className="flex items-center justify-center gap-1 text-[11px] font-semibold py-1.5 px-2 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 transition active:scale-95"
+                    title="Cobrar via WhatsApp"
                   >
                     <Share2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Cobrar WhatsApp</span>
+                    <span>WhatsApp</span>
                   </button>
                 </div>
               </div>
@@ -292,6 +315,15 @@ export const ContasReceberTab: React.FC<ContasReceberTabProps> = ({
           })
         )}
       </div>
+
+      {/* Modal de Detalhes da Conta Bling */}
+      {selectedContaModal && (
+        <ContaReceberDetalhesModal
+          conta={selectedContaModal}
+          onClose={() => setSelectedContaModal(null)}
+          onViewBoleto={onViewBoletoReceber}
+        />
+      )}
     </div>
   );
 };

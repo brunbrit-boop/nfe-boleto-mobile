@@ -1616,7 +1616,9 @@ export async function carregarContasPagarBling(
           id: p.contato?.id || 1,
           nome: p.contato?.nome || 'Fornecedor',
           numeroDocumento: p.contato?.numeroDocumento,
-        }
+        },
+        formaPagamento: p.formaPagamento ? { id: p.formaPagamento.id, descricao: p.formaPagamento.descricao } : undefined,
+        contaFinanceira: p.contaContabil ? { id: p.contaContabil.id, descricao: p.contaContabil.descricao } : (p.contaFinanceira ? { id: p.contaFinanceira.id, descricao: p.contaFinanceira.descricao } : (p.portador ? { id: p.portador.id, descricao: p.portador.nome || p.portador.descricao } : undefined)),
       };
     });
 
@@ -1709,6 +1711,8 @@ export async function carregarContasReceberBling(
         linhaDigitavel,
         codigoBarras,
         pixCopiaECola: gerarPixCopiaECola(val, `CR${r.id}`),
+        formaPagamento: r.formaPagamento ? { id: r.formaPagamento.id, descricao: r.formaPagamento.descricao } : undefined,
+        contaFinanceira: r.contaContabil ? { id: r.contaContabil.id, descricao: r.contaContabil.descricao } : (r.contaFinanceira ? { id: r.contaFinanceira.id, descricao: r.contaFinanceira.descricao } : (r.portador ? { id: r.portador.id, descricao: r.portador.nome || r.portador.descricao } : undefined)),
       };
     });
 
@@ -1723,6 +1727,164 @@ export async function carregarContasReceberBling(
   const key = empresaId ? `${STORAGE_KEYS.RECEBER}_${empresaId}` : STORAGE_KEYS.RECEBER;
   localStorage.setItem(key, JSON.stringify([]));
   return { data: [], resumo: resumoVazio, isLive: true };
+}
+
+/**
+ * Atualiza uma Conta a Receber no Bling ERP via API (PUT /contas-receber/{id})
+ */
+export async function atualizarContaReceberBling(
+  idConta: number,
+  dados: {
+    contaContabilId?: number;
+    formaPagamentoId?: number;
+    vencimento?: string;
+    valor?: number;
+    historico?: string;
+  },
+  token?: string,
+  empresaId?: string
+): Promise<{ sucesso: boolean; mensagem?: string; data?: any }> {
+  try {
+    let contaAtual: any = null;
+    try {
+      const getRes = await callBlingApi(`/contas-receber/${idConta}`, {
+        method: 'GET',
+        customToken: token,
+        empresaId,
+      });
+      contaAtual = getRes?.data;
+    } catch {}
+
+    const payload: any = {
+      vencimento: dados.vencimento || contaAtual?.vencimento,
+      valor: dados.valor !== undefined ? dados.valor : contaAtual?.valor,
+      historico: dados.historico || contaAtual?.historico,
+    };
+
+    if (contaAtual?.contato?.id) {
+      payload.contato = { id: contaAtual.contato.id };
+    }
+    if (dados.contaContabilId) {
+      payload.contaContabil = { id: dados.contaContabilId };
+    } else if (contaAtual?.contaContabil?.id) {
+      payload.contaContabil = { id: contaAtual.contaContabil.id };
+    }
+    if (dados.formaPagamentoId) {
+      payload.formaPagamento = { id: dados.formaPagamentoId };
+    } else if (contaAtual?.formaPagamento?.id) {
+      payload.formaPagamento = { id: contaAtual.formaPagamento.id };
+    }
+
+    const res = await callBlingApi(`/contas-receber/${idConta}`, {
+      method: 'PUT',
+      body: payload,
+      customToken: token,
+      empresaId,
+    });
+
+    return { sucesso: true, data: res?.data };
+  } catch (err: any) {
+    return { sucesso: false, mensagem: err?.message || 'Erro ao atualizar conta no Bling' };
+  }
+}
+
+export interface ProgressUpdateSantander {
+  index: number;
+  total: number;
+  conta: BlingContaReceber;
+  status: 'processando' | 'ok' | 'erro';
+  erro?: string;
+}
+
+/**
+ * Preenche automaticamente todas as Contas a Receber sem banco/conta financeira com Santander
+ */
+export async function preencherContasReceberSemBancoComSantander(
+  token?: string,
+  empresaId?: string,
+  onProgress?: (info: ProgressUpdateSantander) => void
+): Promise<{ sucesso: boolean; totalAtualizadas: number; totalProcessadas: number; erros: string[]; santanderNome: string }> {
+  // 1. Identifica o Santander nas Contas Financeiras e Formas de Pagamento cadastradas no Bling
+  const contasContabeis = await buscarContasFinanceirasBling(token, empresaId);
+  const formasPag = await buscarFormasPagamentoBling(token, empresaId);
+
+  const santanderContabil = contasContabeis.find((c) =>
+    (c.descricao || '').toLowerCase().includes('santander')
+  );
+  const santanderForma = formasPag.find((f) =>
+    (f.descricao || '').toLowerCase().includes('santander')
+  );
+
+  if (!santanderContabil && !santanderForma) {
+    throw new Error('Conta Financeira ou Forma de Pagamento "Santander" não encontrada no Bling ERP. Verifique o cadastro em Finanças > Contas Bancárias.');
+  }
+
+  const idContaContabil = santanderContabil?.id;
+  const idFormaPag = santanderForma?.id;
+  const santanderNome = santanderContabil?.descricao || santanderForma?.descricao || 'Santander';
+
+  // 2. Carrega as Contas a Receber atuais do Bling
+  const { data: contas } = await carregarContasReceberBling(token, empresaId);
+
+  // 3. Filtra estritamente as que estão com a conta financeira / banco vazias
+  const contasVazias = contas.filter((c) => {
+    const semContaFin = !c.contaFinanceira || !c.contaFinanceira.descricao || c.contaFinanceira.descricao.toLowerCase() === 'nenhuma';
+    const semForma = !c.formaPagamento || !c.formaPagamento.descricao || c.formaPagamento.descricao.toLowerCase() === 'nenhuma';
+    return semContaFin && semForma;
+  });
+
+  if (contasVazias.length === 0) {
+    return { sucesso: true, totalAtualizadas: 0, totalProcessadas: 0, erros: [], santanderNome };
+  }
+
+  let totalAtualizadas = 0;
+  const erros: string[] = [];
+
+  for (let i = 0; i < contasVazias.length; i++) {
+    const conta = contasVazias[i];
+    if (onProgress) {
+      onProgress({ index: i + 1, total: contasVazias.length, conta, status: 'processando' });
+    }
+
+    // Delay de 350ms para respeitar a taxa máxima de 3 req/seg da API v3 do Bling
+    await sleep(350);
+
+    const res = await atualizarContaReceberBling(
+      conta.id,
+      {
+        contaContabilId: idContaContabil,
+        formaPagamentoId: idFormaPag,
+        vencimento: conta.vencimento,
+        valor: conta.valor,
+        historico: conta.historico,
+      },
+      token,
+      empresaId
+    );
+
+    if (res.sucesso) {
+      totalAtualizadas++;
+      if (onProgress) {
+        onProgress({ index: i + 1, total: contasVazias.length, conta, status: 'ok' });
+      }
+    } else {
+      erros.push(`Conta ${conta.numeroDocumento} (${conta.contato.nome}): ${res.mensagem}`);
+      if (onProgress) {
+        onProgress({ index: i + 1, total: contasVazias.length, conta, status: 'erro', erro: res.mensagem });
+      }
+    }
+  }
+
+  // Recarrega do Bling para atualizar todo o estado e cache local
+  await carregarContasReceberBling(token, empresaId);
+
+  return {
+    sucesso: totalAtualizadas > 0,
+    totalAtualizadas,
+    totalProcessadas: contasVazias.length,
+    erros,
+    santanderNome,
+  };
 }
 
 /**

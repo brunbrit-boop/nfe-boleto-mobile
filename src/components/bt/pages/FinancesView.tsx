@@ -20,6 +20,7 @@ import {
   testarConexaoPocketBase,
   getPocketBaseUrl,
 } from '../../../services/pocketbaseService';
+import { ContaReceberDetalhesModal } from '../../ContaReceberDetalhesModal';
 
 export interface FinanceTransaction {
   id: string;
@@ -562,6 +563,8 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
   const [contasConsolidadasPagar, setContasConsolidadasPagar] = useState<BlingContaPagar[]>([]);
   const [carregandoConsolidado, setCarregandoConsolidado] = useState<boolean>(false);
   const [pbOnline, setPbOnline] = useState<boolean | null>(null);
+  const [selectedContaReceberModal, setSelectedContaReceberModal] = useState<BlingContaReceber | null>(null);
+
 
   // Mapa de ID -> Nome da empresa
   const mapaNomesEmpresas = useMemo(() => {
@@ -636,8 +639,8 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         status: isPaid ? 'paid' : 'open',
         originType: 'bling_erp',
         companyName: nomeEmp,
-        bankName: 'Bling ERP',
-        method: cr.pixCopiaECola ? 'PIX' : cr.linkBoleto ? 'Boleto' : 'Bolepix',
+        bankName: cr.contaFinanceira?.descricao || 'Não Definido',
+        method: cr.formaPagamento?.descricao || (cr.pixCopiaECola ? 'PIX' : cr.linkBoleto ? 'Boleto' : 'Bolepix'),
         unit: nomeEmp,
         numeroDocumento: cr.numeroDocumento,
         originalBlingReceber: cr,
@@ -664,7 +667,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
         status: isPaid ? 'paid' : 'open',
         originType: 'bling_erp',
         companyName: nomeEmp,
-        bankName: 'Bling ERP',
+        bankName: cp.contaFinanceira?.descricao || 'Não Definido',
         method: cp.formaPagamento?.descricao || 'Boleto',
         unit: nomeEmp,
         numeroDocumento: cp.numeroDocumento,
@@ -2064,13 +2067,32 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                           </div>
                         </td>
 
-                        <td className="p-2 font-bold text-gray-900 dark:text-white truncate max-w-[110px]">
-                          {tx.entity}
+                        <td
+                          onClick={() => tx.originalBlingReceber && setSelectedContaReceberModal(tx.originalBlingReceber)}
+                          className={`p-2 font-bold text-gray-900 dark:text-white truncate max-w-[110px] ${
+                            tx.originalBlingReceber ? 'cursor-pointer hover:text-emerald-500 hover:underline' : ''
+                          }`}
+                          title={tx.originalBlingReceber ? 'Clique para ver detalhes do Bling ERP' : undefined}
+                        >
+                          <div className="flex items-center gap-1.5 truncate">
+                            <span className="truncate">{tx.entity}</span>
+                            {tx.originalBlingReceber && (
+                              <span className="text-[9px] px-1 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold border border-emerald-500/20 shrink-0">
+                                Bling
+                              </span>
+                            )}
+                          </div>
                         </td>
 
                         <td className="p-2 text-gray-500 truncate max-w-[75px]">{tx.method}</td>
 
-                        <td className="p-2 text-gray-700 dark:text-gray-300 truncate max-w-[130px]">
+                        <td
+                          onClick={() => tx.originalBlingReceber && setSelectedContaReceberModal(tx.originalBlingReceber)}
+                          className={`p-2 text-gray-700 dark:text-gray-300 truncate max-w-[130px] ${
+                            tx.originalBlingReceber ? 'cursor-pointer hover:text-emerald-500' : ''
+                          }`}
+                          title={tx.originalBlingReceber ? 'Clique para ver detalhes do Bling ERP' : undefined}
+                        >
                           {tx.description}
                         </td>
 
@@ -2108,9 +2130,18 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                           </select>
                         </td>
 
-                        {/* Ação: Simular / Excluir */}
+                        {/* Ação: Simular / Excluir / Detalhes */}
                         <td className="p-2 text-center">
                           <div className="flex items-center gap-1">
+                            {tx.originalBlingReceber && (
+                              <button
+                                onClick={() => setSelectedContaReceberModal(tx.originalBlingReceber!)}
+                                className="p-0.5 rounded text-gray-400 hover:text-emerald-500 transition-colors"
+                                title="Detalhes Bling ERP"
+                              >
+                                <span className="material-symbols-outlined text-[14px]">visibility</span>
+                              </button>
+                            )}
                             <button
                               onClick={() => toggleSimulation(tx.id)}
                               className={`p-0.5 rounded transition-colors ${
@@ -2479,6 +2510,15 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Modal com Card de Detalhes da Conta a Receber (Bling ERP) */}
+      {selectedContaReceberModal && (
+        <ContaReceberDetalhesModal
+          conta={selectedContaReceberModal}
+          onClose={() => setSelectedContaReceberModal(null)}
+          onViewBoleto={onViewBoletoReceber}
+        />
       )}
     </div>
   );

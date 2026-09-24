@@ -254,6 +254,10 @@ export interface BlingContaPagar {
     id: number;
     descricao: string;
   };
+  contaFinanceira?: {
+    id?: number;
+    descricao?: string;
+  };
 }
 
 export interface BlingContaReceber {
@@ -281,6 +285,10 @@ export interface BlingContaReceber {
   pixCopiaECola?: string;
   linkBoleto?: string;
   formaPagamento?: {
+    id?: number;
+    descricao?: string;
+  };
+  contaFinanceira?: {
     id?: number;
     descricao?: string;
   };
