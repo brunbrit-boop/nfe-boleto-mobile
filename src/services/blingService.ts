@@ -1971,6 +1971,8 @@ export async function atualizarContaReceberBling(
       payload.formaPagamento = { id: dados.formaPagamentoId };
     } else if (contaAtual?.formaPagamento?.id) {
       payload.formaPagamento = { id: contaAtual.formaPagamento.id };
+    } else if (contaAtual?.formaPagamentoId) {
+      payload.formaPagamento = { id: contaAtual.formaPagamentoId };
     }
 
     let res: any;
@@ -2290,11 +2292,44 @@ export async function atualizarContasReceberFaixaNotasBling(
       };
     }
 
+    // 1.1 Busca as Formas de Pagamento cadastradas no Bling daquela empresa
+    onProgress?.('Localizando Formas de Pagamento no Bling...', 0, 0);
+    const formasPagamento = await buscarFormasPagamentoBling(token, empresaId);
+
+    const resolverFormaPagamentoParaBanco = (bancoNome: string): { id: number; descricao: string } | undefined => {
+      if (!formasPagamento || formasPagamento.length === 0) return undefined;
+      const bLower = (bancoNome || '').toLowerCase();
+      // 1. Tenta achar forma com nome do banco
+      let encontrada = formasPagamento.find((f) => {
+        const d = (f.descricao || '').toLowerCase();
+        if (bLower.includes('bradesco')) return d.includes('bradesco');
+        if (bLower.includes('itau') || bLower.includes('itaú')) return d.includes('itau') || d.includes('itaú');
+        if (bLower.includes('santander')) return d.includes('santander');
+        return false;
+      });
+      // 2. Se não achou específica do banco, procura por "Boleto"
+      if (!encontrada) {
+        encontrada = formasPagamento.find((f) => (f.descricao || '').toLowerCase().includes('boleto'));
+      }
+      // 3. Fallback: forma padrão ou primeira ativa
+      if (!encontrada) {
+        encontrada = formasPagamento.find((f) => (f as any).padrao === 1) || formasPagamento[0];
+      }
+      if (encontrada) {
+        return { id: encontrada.id, descricao: encontrada.descricao };
+      }
+      return undefined;
+    };
+
+    // Cache local de formas de pagamento de notas consultadas
+    const cacheFormasPagNFe = new Map<string, { id: number; descricao: string }>();
+
     // 2. Mapeamento das Notas e Parcelas a partir dos Grupos de Clientes Locais
     interface InfoNotaLocal {
       numeroNF: number;
       totalParcelas: number;
       idNotaBling?: string;
+      idFormaPagamentoBling?: number;
       parcelasDatas?: string[];
     }
     const mapaNFsLocais = new Map<number, InfoNotaLocal>();
@@ -2314,6 +2349,7 @@ export async function atualizarContasReceberFaixaNotasBling(
                   if (limpo) numNfCand = parseInt(limpo, 10);
                 }
                 const idNotaStr = cli.idNotaBling ? String(cli.idNotaBling) : '';
+                const idFormaPagGrupo = cli.idFormaPagamentoBling || g.idFormaPagamentoBling;
 
                 const count = cli.parcelasCount || (Array.isArray(cli.nfeEmitida?.parcelas) ? cli.nfeEmitida.parcelas.length : 0) || 1;
                 const parcelasDatas: string[] = [];
@@ -2328,6 +2364,7 @@ export async function atualizarContasReceberFaixaNotasBling(
                     numeroNF: numNfCand,
                     totalParcelas: Math.max(count, 1),
                     idNotaBling: idNotaStr,
+                    idFormaPagamentoBling: idFormaPagGrupo,
                     parcelasDatas,
                   });
                 }
@@ -2566,11 +2603,58 @@ export async function atualizarContasReceberFaixaNotasBling(
         // Histórico padronizado OBRIGATORIAMENTE com a Parcela:
         const novoHistorico = `Ref. a NF nº ${nfNumFormatado} - ${nomeBancoPadrao} | Parcela ${parcelaStr}`;
 
-        onProgress?.(`Atualizando NF ${numNF} (${parcelaStr}) -> ${nomeBancoPadrao} (${indiceGeral}/${total})...`, indiceGeral, total);
+        // Identifica ou recupera a Forma de Pagamento adequada
+        let formaPagAlvo: { id: number; descricao: string } | undefined;
 
-        const payloadUpdate: any = { historico: novoHistorico };
+        if (c.formaPagamento?.id) {
+          formaPagAlvo = { id: c.formaPagamento.id, descricao: c.formaPagamento.descricao || 'Boleto' };
+        }
+
+        if (!formaPagAlvo && infoLocal?.idFormaPagamentoBling) {
+          const f = formasPagamento.find((x) => x.id === infoLocal.idFormaPagamentoBling);
+          if (f) formaPagAlvo = { id: f.id, descricao: f.descricao };
+        }
+
+        // Se a nota tiver ID no Bling, consulta a NF original no Bling para pegar a forma de pagamento exata
+        const idNotaOrigem = (r.origem?.id ? String(r.origem.id) : '') || infoLocal?.idNotaBling || '';
+        if (!formaPagAlvo && idNotaOrigem) {
+          if (cacheFormasPagNFe.has(idNotaOrigem)) {
+            formaPagAlvo = cacheFormasPagNFe.get(idNotaOrigem);
+          } else {
+            try {
+              const resNota = await callBlingApi(`/nfe/${idNotaOrigem}`, {
+                method: 'GET',
+                customToken: token,
+                empresaId,
+              });
+              const parcelasNfe = resNota?.data?.parcelas;
+              if (Array.isArray(parcelasNfe) && parcelasNfe.length > 0) {
+                const fpNota = parcelasNfe[0]?.formaPagamento;
+                if (fpNota?.id) {
+                  const descFp = formasPagamento.find((x) => x.id === fpNota.id)?.descricao || fpNota.descricao || 'Boleto';
+                  formaPagAlvo = { id: fpNota.id, descricao: descFp };
+                  cacheFormasPagNFe.set(idNotaOrigem, formaPagAlvo);
+                }
+              }
+            } catch {}
+          }
+        }
+
+        // Fallback: resolve pelo nome do banco ou boleto padrão
+        if (!formaPagAlvo) {
+          formaPagAlvo = resolverFormaPagamentoParaBanco(nomeBancoPadrao);
+        }
+
+        onProgress?.(`Atualizando NF ${numNF} (${parcelaStr}) -> ${nomeBancoPadrao} [${formaPagAlvo?.descricao || 'Boleto'}] (${indiceGeral}/${total})...`, indiceGeral, total);
+
+        const payloadUpdate: any = {
+          historico: novoHistorico,
+        };
         if (contaFinAlvo?.id) {
           payloadUpdate.contaContabilId = contaFinAlvo.id;
+        }
+        if (formaPagAlvo?.id) {
+          payloadUpdate.formaPagamentoId = formaPagAlvo.id;
         }
 
         const resUpdate = await atualizarContaReceberBling(c.id, payloadUpdate, token, empresaId);
@@ -2580,6 +2664,10 @@ export async function atualizarContasReceberFaixaNotasBling(
           if (contaFinAlvo?.id) {
             c.contaFinanceira = { id: contaFinAlvo.id, descricao: contaFinAlvo.descricao };
             r.contaContabil = { id: contaFinAlvo.id, descricao: contaFinAlvo.descricao };
+          }
+          if (formaPagAlvo?.id) {
+            c.formaPagamento = { id: formaPagAlvo.id, descricao: formaPagAlvo.descricao };
+            r.formaPagamento = { id: formaPagAlvo.id, descricao: formaPagAlvo.descricao };
           }
           atualizados++;
         }
