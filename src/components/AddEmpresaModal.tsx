@@ -5,11 +5,13 @@ import type { EmpresaTenant } from '../types';
 interface AddEmpresaModalProps {
   onClose: () => void;
   onAddEmpresa: (empresa: EmpresaTenant) => void;
+  empresasExistentes?: EmpresaTenant[];
 }
 
 export const AddEmpresaModal: React.FC<AddEmpresaModalProps> = ({
   onClose,
   onAddEmpresa,
+  empresasExistentes = [],
 }) => {
   const [linkOuClientId, setLinkOuClientId] = useState('');
   const [clientSecret, setClientSecret] = useState('');
@@ -54,12 +56,19 @@ export const AddEmpresaModal: React.FC<AddEmpresaModalProps> = ({
       return;
     }
 
-    // Registra a empresa pendente com seu ID, Client ID e Client Secret
+    // Registra a empresa pendente preservando integralmente todas as empresas existentes
+    const baseList = Array.isArray(empresasExistentes) && empresasExistentes.length > 0 ? [...empresasExistentes] : [];
     const rawList = localStorage.getItem('nfe_empresas_list');
-    let lista: EmpresaTenant[] = [];
+    let lista: EmpresaTenant[] = baseList;
     if (rawList) {
       try {
-        lista = JSON.parse(rawList);
+        const parsed: EmpresaTenant[] = JSON.parse(rawList);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const map = new Map<string, EmpresaTenant>();
+          baseList.forEach((item) => map.set(item.id, item));
+          parsed.forEach((item) => map.set(item.id, item));
+          lista = Array.from(map.values());
+        }
       } catch {}
     }
 
@@ -81,8 +90,13 @@ export const AddEmpresaModal: React.FC<AddEmpresaModalProps> = ({
       isBlingConectado: false,
     };
 
-    lista.push(preCadastro);
-    localStorage.setItem('nfe_empresas_list', JSON.stringify(lista));
+    // Remove eventual registro duplicado com mesmo ID e anexa a nova empresa
+    const listaFinal = [...lista.filter((item) => item.id !== empresaId), preCadastro];
+    localStorage.setItem('nfe_empresas_list', JSON.stringify(listaFinal));
+
+    // Salva credenciais isoladas por ID imediatamente
+    localStorage.setItem(`bling_client_id_${empresaId}`, cid);
+    localStorage.setItem(`bling_client_secret_${empresaId}`, sec);
 
     // Salva referências pendentes isoladas por empresa para não contaminar a empresa ativa
     localStorage.setItem('bling_oauth_pending_empresa_id', empresaId);

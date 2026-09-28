@@ -216,13 +216,18 @@ export async function tentarAutoRenovarToken(tokenAtual?: string, empresaIdParam
 
           if (emp) {
             empresaIdAlvo = emp.id;
-            if (emp.blingRefreshToken) {
-              refreshToken = emp.blingRefreshToken;
-            }
-            clientId = emp.blingClientId || '';
-            clientSecret = emp.blingClientSecret || '';
+            refreshToken = emp.blingRefreshToken || localStorage.getItem(`bling_refresh_${emp.id}`) || '';
+            clientId = emp.blingClientId || localStorage.getItem(`bling_client_id_${emp.id}`) || '';
+            clientSecret = emp.blingClientSecret || localStorage.getItem(`bling_client_secret_${emp.id}`) || '';
           }
         } catch {}
+      }
+
+      // Se ainda não achou as credenciais isoladas da empresa alvo, busca direto no storage isolado
+      if (empresaIdAlvo) {
+        if (!refreshToken) refreshToken = localStorage.getItem(`bling_refresh_${empresaIdAlvo}`) || '';
+        if (!clientId) clientId = localStorage.getItem(`bling_client_id_${empresaIdAlvo}`) || '';
+        if (!clientSecret) clientSecret = localStorage.getItem(`bling_client_secret_${empresaIdAlvo}`) || '';
       }
 
       // Se a empresa ainda não tem clientId/clientSecret isolados, tenta buscar nos pending creds
@@ -237,8 +242,8 @@ export async function tentarAutoRenovarToken(tokenAtual?: string, empresaIdParam
         }
       }
 
-      // Fallback global apenas para a empresa inicial ou quando há apenas 1 empresa cadastrada
-      if ((!refreshToken || !clientId) && (empresaIdAlvo === 'emp_default_1' || empresasCadastradas.length <= 1)) {
+      // Fallback global estritamente se houver apenas 1 empresa cadastrada em todo o sistema
+      if ((!refreshToken || !clientId) && empresasCadastradas.length <= 1) {
         refreshToken = refreshToken || localStorage.getItem('bling_refresh_token') || '';
         clientId = clientId || localStorage.getItem('bling_client_id') || '';
         clientSecret = clientSecret || localStorage.getItem('bling_client_secret') || '';
@@ -250,6 +255,16 @@ export async function tentarAutoRenovarToken(tokenAtual?: string, empresaIdParam
 
       const res = await renovarTokenBling(refreshToken, clientId, clientSecret, empresaIdAlvo || undefined);
       if (res.success && res.accessToken) {
+        if (empresaIdAlvo) {
+          localStorage.setItem(`bling_token_${empresaIdAlvo}`, res.accessToken);
+          if (res.refreshToken) {
+            localStorage.setItem(`bling_refresh_${empresaIdAlvo}`, res.refreshToken);
+          }
+          if (res.expiresAt) {
+            localStorage.setItem(`bling_expires_at_${empresaIdAlvo}`, String(res.expiresAt));
+          }
+        }
+
         if (rawList) {
           try {
             const empresas: any[] = JSON.parse(rawList);

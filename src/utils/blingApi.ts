@@ -325,6 +325,47 @@ export async function renovarTokenBling(
         const expiresAt = Date.now() + ((data.expires_in || 21600) * 1000);
         const ativaAtual = localStorage.getItem('nfe_empresa_ativa_id');
 
+        // Persiste estritamente nas chaves isoladas da empresa alvo
+        if (empresaIdAlvo) {
+          localStorage.setItem(`bling_token_${empresaIdAlvo}`, data.access_token);
+          if (data.refresh_token) {
+            localStorage.setItem(`bling_refresh_${empresaIdAlvo}`, data.refresh_token);
+          }
+          if (cId) localStorage.setItem(`bling_client_id_${empresaIdAlvo}`, cId);
+          if (cSec) localStorage.setItem(`bling_client_secret_${empresaIdAlvo}`, cSec);
+          localStorage.setItem(`bling_expires_at_${empresaIdAlvo}`, String(expiresAt));
+
+          // Atualiza imediatamente na lista de empresas do localStorage
+          try {
+            const rawList = localStorage.getItem('nfe_empresas_list');
+            if (rawList) {
+              const list = JSON.parse(rawList);
+              if (Array.isArray(list)) {
+                const updatedList = list.map((e: any) => {
+                  if (e.id === empresaIdAlvo) {
+                    return {
+                      ...e,
+                      blingAccessToken: data.access_token,
+                      blingRefreshToken: data.refresh_token || cleanRefreshToken,
+                      blingClientId: cId || e.blingClientId,
+                      blingClientSecret: cSec || e.blingClientSecret,
+                      blingTokenExpiresAt: expiresAt,
+                      isBlingConectado: true,
+                      isBlingExpirado: false,
+                    };
+                  }
+                  return e;
+                });
+                localStorage.setItem('nfe_empresas_list', JSON.stringify(updatedList));
+                if (typeof window !== 'undefined') {
+                  window.dispatchEvent(new CustomEvent('nfe_empresas_updated'));
+                }
+              }
+            }
+          } catch {}
+        }
+
+        // Se for a empresa ativa no momento, atualiza também os caches globais
         if (!empresaIdAlvo || empresaIdAlvo === ativaAtual) {
           saveBlingConfig({
             clientId: cId,
@@ -376,6 +417,45 @@ export async function renovarTokenBling(
       const data = await response.json();
       const expiresAt = Date.now() + ((data.expires_in || 21600) * 1000);
       const ativaAtual = localStorage.getItem('nfe_empresa_ativa_id');
+
+      if (empresaIdAlvo) {
+        localStorage.setItem(`bling_token_${empresaIdAlvo}`, data.access_token);
+        if (data.refresh_token) {
+          localStorage.setItem(`bling_refresh_${empresaIdAlvo}`, data.refresh_token);
+        }
+        if (cId) localStorage.setItem(`bling_client_id_${empresaIdAlvo}`, cId);
+        if (cSec) localStorage.setItem(`bling_client_secret_${empresaIdAlvo}`, cSec);
+        localStorage.setItem(`bling_expires_at_${empresaIdAlvo}`, String(expiresAt));
+
+        try {
+          const rawList = localStorage.getItem('nfe_empresas_list');
+          if (rawList) {
+            const list = JSON.parse(rawList);
+            if (Array.isArray(list)) {
+              const updatedList = list.map((e: any) => {
+                if (e.id === empresaIdAlvo) {
+                  return {
+                    ...e,
+                    blingAccessToken: data.access_token,
+                    blingRefreshToken: data.refresh_token || cleanRefreshToken,
+                    blingClientId: cId || e.blingClientId,
+                    blingClientSecret: cSec || e.blingClientSecret,
+                    blingTokenExpiresAt: expiresAt,
+                    isBlingConectado: true,
+                    isBlingExpirado: false,
+                  };
+                }
+                return e;
+              });
+              localStorage.setItem('nfe_empresas_list', JSON.stringify(updatedList));
+              if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('nfe_empresas_updated'));
+              }
+            }
+          }
+        } catch {}
+      }
+
       if (!empresaIdAlvo || empresaIdAlvo === ativaAtual) {
         saveBlingConfig({
           clientId: cId,

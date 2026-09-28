@@ -31,6 +31,7 @@ import {
   carregarContasPagarBling,
   salvarContasReceberCacheLocal,
   salvarContasPagarCacheLocal,
+  tentarAutoRenovarToken,
 } from './services/blingService';
 import {
   obterContasReceberDoBanco,
@@ -66,11 +67,13 @@ export const App: React.FC = () => {
             const savedCid = e.blingClientId || localStorage.getItem(`bling_client_id_${e.id}`) || '';
             const savedSec = e.blingClientSecret || localStorage.getItem(`bling_client_secret_${e.id}`) || '';
 
-            // Fallback de backfill da empresa inicial caso não tenha chaves isoladas ainda
-            const token = savedTok || (e.id === 'emp_default_1' ? tokenAtual : '') || '';
-            const rToken = savedRef || (e.id === 'emp_default_1' ? refreshTokenAtual : undefined);
-            const cId = savedCid || (e.id === 'emp_default_1' ? clientIdAtual : '') || '';
-            const cSec = savedSec || (e.id === 'emp_default_1' ? clientSecretAtual : '') || '';
+            // ATENÇÃO: NUNCA usar fallback de tokenAtual / refreshTokenAtual global se houver mais de 1 empresa cadastrada!
+            // Porque tokenAtual pode ser de OUTRA empresa que estava ativa por último.
+            const podeUsarFallbackGlobal = parsed.length === 1 && !savedTok && !savedRef;
+            const token = savedTok || (e.id === 'emp_default_1' && podeUsarFallbackGlobal ? tokenAtual : '') || '';
+            const rToken = savedRef || (e.id === 'emp_default_1' && podeUsarFallbackGlobal ? refreshTokenAtual : undefined);
+            const cId = savedCid || (e.id === 'emp_default_1' && podeUsarFallbackGlobal ? clientIdAtual : '') || '';
+            const cSec = savedSec || (e.id === 'emp_default_1' && podeUsarFallbackGlobal ? clientSecretAtual : '') || '';
 
             // Persiste o isolamento imediato por ID
             if (token) localStorage.setItem(`bling_token_${e.id}`, token);
@@ -95,6 +98,9 @@ export const App: React.FC = () => {
               isBlingExpirado: false, // Reset preventivo no boot: auto-refresh tratará reativamente
             };
           });
+
+          // IMPORTANTE: Persistir imediatamente a lista higienizada de volta ao localStorage
+          localStorage.setItem('nfe_empresas_list', JSON.stringify(limpas));
           return limpas;
         }
       } catch {}
@@ -124,6 +130,13 @@ export const App: React.FC = () => {
       corAvatar: 'blue',
       criadoEm: new Date().toISOString(),
     };
+
+    // Garante que o initialEmpresa seja gravado no localStorage
+    localStorage.setItem('nfe_empresas_list', JSON.stringify([initialEmpresa]));
+    if (tokenAtual) localStorage.setItem('bling_token_emp_default_1', tokenAtual);
+    if (refreshTokenAtual) localStorage.setItem('bling_refresh_emp_default_1', refreshTokenAtual);
+    if (clientIdAtual) localStorage.setItem('bling_client_id_emp_default_1', clientIdAtual);
+    if (clientSecretAtual) localStorage.setItem('bling_client_secret_emp_default_1', clientSecretAtual);
 
     return [initialEmpresa];
   });
@@ -173,6 +186,26 @@ export const App: React.FC = () => {
   // Mensagens do Chat do Robô (100% limpo, sem conteúdo fake)
   const [messages, setMessages] = useState<ChatMessage[]>([]);
 
+  // Função utilitária para hidratar uma lista de empresas com suas credenciais isoladas por ID
+  const hidratarEmpresasComCredenciais = (lista: EmpresaTenant[]): EmpresaTenant[] => {
+    return lista.map((e) => {
+      const savedTok = e.blingAccessToken || localStorage.getItem(`bling_token_${e.id}`) || '';
+      const savedRef = e.blingRefreshToken || localStorage.getItem(`bling_refresh_${e.id}`) || '';
+      const savedCid = e.blingClientId || localStorage.getItem(`bling_client_id_${e.id}`) || '';
+      const savedSec = e.blingClientSecret || localStorage.getItem(`bling_client_secret_${e.id}`) || '';
+      const temChave = Boolean(savedTok || savedRef);
+
+      return {
+        ...e,
+        blingAccessToken: savedTok,
+        blingRefreshToken: savedRef || e.blingRefreshToken,
+        blingClientId: savedCid || e.blingClientId,
+        blingClientSecret: savedSec || e.blingClientSecret,
+        isBlingConectado: temChave ? true : e.isBlingConectado,
+      };
+    });
+  };
+
   // Mantém estado das empresas sincronizado quando tokens expiram ou são renovados
   useEffect(() => {
     const handleEmpresasUpdated = () => {
@@ -181,7 +214,7 @@ export const App: React.FC = () => {
         try {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            setEmpresas(parsed);
+            setEmpresas(hidratarEmpresasComCredenciais(parsed));
           }
         } catch {}
       }
@@ -193,7 +226,7 @@ export const App: React.FC = () => {
   // Sincroniza dados cadastrais reais da empresa através do endpoint oficial do Bling (/empresas/me/dados-basicos)
   const sincronizarEmpresaDoBling = async (empresaId: string, tokenParam?: string) => {
     const targetEmpresa = empresas.find((e) => e.id === empresaId);
-    const token = (tokenParam || targetEmpresa?.blingAccessToken || '').trim();
+    const token = (tokenParam || targetEmpresa?.blingAccessToken || localStorage.getItem(`bling_token_${empresaId}`) || '').trim();
     if (!token) return;
 
     try {
@@ -203,13 +236,19 @@ export const App: React.FC = () => {
         const razaoFinal = dados.razaoSocial || nomeFinal;
 
         setEmpresas((prev) => {
+          // Prevenção de colisão: verifica se este CNPJ já pertence a outra empresa diferente desta
+          const jaExisteComCnpj = dados.cnpj && prev.some((o) => o.id !== empresaId && o.cnpj === dados.cnpj);
+          if (jaExisteComCnpj) {
+            console.warn(`[Sync Bling] CNPJ ${dados.cnpj} já pertence a outra empresa registrada. Mantendo isolamento estrito.`);
+          }
+
           const atualizadas = prev.map((e) => {
             if (e.id === empresaId) {
               return {
                 ...e,
                 razaoSocial: razaoFinal,
                 nomeFantasia: nomeFinal,
-                cnpj: dados.cnpj || e.cnpj,
+                cnpj: jaExisteComCnpj ? e.cnpj : (dados.cnpj || e.cnpj),
                 inscricaoEstadual: dados.inscricaoEstadual || e.inscricaoEstadual,
                 cidade: dados.cidade || e.cidade,
                 uf: dados.uf || e.uf,
@@ -257,8 +296,8 @@ export const App: React.FC = () => {
       if (saved) {
         try {
           const list = JSON.parse(saved);
-          if (Array.isArray(list)) {
-            setEmpresas(list);
+          if (Array.isArray(list) && list.length > 0) {
+            setEmpresas(hidratarEmpresasComCredenciais(list));
           }
         } catch {}
       }
@@ -890,6 +929,15 @@ export const App: React.FC = () => {
             }
           }}
           onDisconnectBling={(empId) => {
+            // Remove chaves isoladas desta empresa
+            localStorage.removeItem(`bling_token_${empId}`);
+            localStorage.removeItem(`bling_refresh_${empId}`);
+            localStorage.removeItem(`bling_expires_at_${empId}`);
+            if (localStorage.getItem('nfe_empresa_ativa_id') === empId) {
+              localStorage.removeItem('bling_access_token');
+              localStorage.removeItem('bling_refresh_token');
+            }
+
             setEmpresas((prev) => {
               const atualizadas = prev.map((e) =>
                 e.id === empId
@@ -906,6 +954,10 @@ export const App: React.FC = () => {
               return atualizadas;
             });
           }}
+          onRenovarToken={async (empId) => {
+            const tokenRenovado = await tentarAutoRenovarToken(undefined, empId);
+            return Boolean(tokenRenovado);
+          }}
           onUpdateEmpresaBanco={(empId, banco) => {
             setEmpresas((prev) => {
               const atualizadas = prev.map((e) =>
@@ -921,6 +973,7 @@ export const App: React.FC = () => {
           <AddEmpresaModal
             onClose={() => setIsAddEmpresaOpen(false)}
             onAddEmpresa={handleAddEmpresa}
+            empresasExistentes={empresas}
           />
         )}
       </>

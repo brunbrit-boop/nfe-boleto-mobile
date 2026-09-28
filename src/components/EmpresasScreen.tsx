@@ -32,6 +32,7 @@ interface EmpresasScreenProps {
   onSyncEmpresa?: (empresa: EmpresaTenant) => Promise<void>;
   onDisconnectBling?: (empresaId: string) => void;
   onUpdateEmpresaBanco?: (empresaId: string, banco: BankProvider) => void;
+  onRenovarToken?: (empresaId: string) => Promise<boolean>;
 }
 
 export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
@@ -42,9 +43,11 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
   onSyncEmpresa,
   onDisconnectBling,
   onUpdateEmpresaBanco,
+  onRenovarToken,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [renovandoId, setRenovandoId] = useState<string | null>(null);
   const [copiedCnpjId, setCopiedCnpjId] = useState<string | null>(null);
   const [selectedEmpresaForBanks, setSelectedEmpresaForBanks] = useState<EmpresaTenant | null>(null);
   const [isApiKeysOpen, setIsApiKeysOpen] = useState(false);
@@ -87,6 +90,23 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
       await onSyncEmpresa(emp);
     } finally {
       setSyncingId(null);
+    }
+  };
+
+  const handleRenovarToken = async (e: React.MouseEvent, empId: string) => {
+    e.stopPropagation();
+    if (!onRenovarToken) return;
+    setRenovandoId(empId);
+    try {
+      const ok = await onRenovarToken(empId);
+      if (!ok) {
+        const emp = empresas.find((item) => item.id === empId);
+        if (emp) {
+          handleAbrirConectarBling(emp);
+        }
+      }
+    } finally {
+      setRenovandoId(null);
     }
   };
 
@@ -432,16 +452,29 @@ export const EmpresasScreen: React.FC<EmpresasScreenProps> = ({
                           </p>
 
                           <div className="mt-2.5 flex items-center gap-2 flex-wrap" onClick={(e) => e.stopPropagation()}>
-                            {(empresa.isBlingExpirado && !empresa.blingRefreshToken) || (empresa.blingTokenExpiresAt && Date.now() > empresa.blingTokenExpiresAt && !empresa.blingRefreshToken) ? (
-                              <button
-                                type="button"
-                                onClick={() => handleAbrirConectarBling(empresa)}
-                                className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white shadow-sm shadow-amber-500/30 transition-all duration-150 active:scale-95 cursor-pointer animate-pulse"
-                                title="O token do Bling expirou (validade de 6h). Clique para reconectar agora com 1 clique!"
-                              >
-                                <RefreshCw className="w-3 h-3" />
-                                <span>⚠️ Token Expirado • Reconectar</span>
-                              </button>
+                            {Boolean(empresa.isBlingExpirado || (empresa.blingTokenExpiresAt && Date.now() > empresa.blingTokenExpiresAt)) ? (
+                              empresa.blingRefreshToken ? (
+                                <button
+                                  type="button"
+                                  onClick={(e) => handleRenovarToken(e, empresa.id)}
+                                  disabled={renovandoId === empresa.id}
+                                  className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 rounded-xl bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-white shadow-sm shadow-amber-500/30 transition-all duration-150 active:scale-95 cursor-pointer"
+                                  title="O token de acesso expirou, mas o refresh token é válido. Clique para renovar com 1 clique!"
+                                >
+                                  <RefreshCw className={`w-3 h-3 ${renovandoId === empresa.id ? 'animate-spin' : ''}`} />
+                                  <span>{renovandoId === empresa.id ? 'Renovando...' : '⚡ Renovar Token (1 Clique)'}</span>
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleAbrirConectarBling(empresa)}
+                                  className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3 py-1 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-white shadow-sm shadow-amber-500/30 transition-all duration-150 active:scale-95 cursor-pointer animate-pulse"
+                                  title="O token do Bling expirou. Clique para reconectar agora!"
+                                >
+                                  <RefreshCw className="w-3 h-3" />
+                                  <span>⚠️ Token Expirado • Reconectar</span>
+                                </button>
+                              )
                             ) : empresa.isBlingConectado ? (
                               <div className="flex items-center gap-1.5">
                                 <button
