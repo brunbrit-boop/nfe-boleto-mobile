@@ -813,7 +813,9 @@ export async function gravarEsbocoNFeNoBling(
     const itemParcela: any = {
       data: dataVenc,
       valor: valorParcela,
-      observacoes: `Parcela ${i}/${parcelasCount}`,
+      observacoes: observacoesAdicionais?.trim()
+        ? `Parcela ${i}/${parcelasCount} - ${observacoesAdicionais.trim()}`
+        : `Parcela ${i}/${parcelasCount}`,
     };
     if (idFormaPagamentoEfetiva) {
       itemParcela.formaPagamento = { id: idFormaPagamentoEfetiva };
@@ -1740,6 +1742,31 @@ export async function carregarContasReceberBling(
     const cacheAtual = obterContasReceberCacheLocal(empresaId);
     const mapCache = new Map<number, BlingContaReceber>(cacheAtual.map((c) => [c.id, c]));
 
+    // Mapeamento dos grupos de clientes cadastrados da empresa para enriquecer referências
+    const mapaNotasParaGrupo = new Map<string, string>();
+    const mapaDocsParaGrupo = new Map<string, string>();
+    if (empresaId) {
+      try {
+        const rawGrupos = localStorage.getItem(`nfe_grupos_clientes_${empresaId}`);
+        if (rawGrupos) {
+          const grupos = JSON.parse(rawGrupos);
+          if (Array.isArray(grupos)) {
+            grupos.forEach((g: any) => {
+              if (g?.nome && Array.isArray(g.clientes)) {
+                g.clientes.forEach((cli: any) => {
+                  if (cli.idNotaBling) mapaNotasParaGrupo.set(String(cli.idNotaBling), g.nome.trim());
+                  if (cli.numeroDocumento) {
+                    const clean = cli.numeroDocumento.replace(/\D/g, '');
+                    if (clean) mapaDocsParaGrupo.set(clean, g.nome.trim());
+                  }
+                });
+              }
+            });
+          }
+        }
+      } catch {}
+    }
+
     const receber: BlingContaReceber[] = todasContas.map((r: any, idx: number) => {
       const val = Number(r.valor || r.saldo || 0);
       const venc = r.vencimento || r.dataVencimento || r.dataEmissao || new Date().toISOString().slice(0, 10);
@@ -1755,8 +1782,28 @@ export async function carregarContasReceberBling(
       const cacheItem = mapCache.get(r.id);
       const historicoLocal = cacheItem?.historico && !cacheItem.historico.startsWith('Recebimento Ref #') ? cacheItem.historico : '';
       const nfNumero = r.origem?.numero || (r.numeroDocumento && r.numeroDocumento.includes('/') ? r.numeroDocumento.split('/')[0] : '');
-      const fallbackRef = nfNumero ? `Ref. a NF nº ${nfNumero}` : (r.numeroDocumento ? `Ref. doc. ${r.numeroDocumento}` : `Recebimento Ref #${r.id}`);
-      const histFinal = r.historico || r.observacoes || r.observacao || r.detalhes || historicoLocal || fallbackRef;
+      const numParcela = r.numeroDocumento && r.numeroDocumento.includes('/') ? r.numeroDocumento.split('/')[1] : '';
+
+      // Identifica o nome do grupo pelo ID da nota fiscal ou CNPJ do cliente
+      const idNotaOrigem = r.origem?.id ? String(r.origem.id) : '';
+      const docCliLimpo = (r.contato?.numeroDocumento || '').replace(/\D/g, '');
+      const grupoIdentificado = (idNotaOrigem && mapaNotasParaGrupo.get(idNotaOrigem)) || (docCliLimpo && mapaDocsParaGrupo.get(docCliLimpo)) || '';
+
+      let fallbackRef = nfNumero ? `Ref. a NF nº ${nfNumero}` : (r.numeroDocumento ? `Ref. doc. ${r.numeroDocumento}` : `Recebimento Ref #${r.id}`);
+      if (grupoIdentificado) {
+        fallbackRef = nfNumero
+          ? `Ref. a NF nº ${nfNumero} - ${grupoIdentificado}${numParcela ? ` | Parcela ${numParcela}` : ''}`
+          : `Ref. doc. ${r.numeroDocumento || r.id} - ${grupoIdentificado}`;
+      }
+
+      let histFinal = r.historico || r.observacoes || r.observacao || r.detalhes || historicoLocal || fallbackRef;
+
+      // Se temos o grupo identificado mas o histórico ainda não tem o nome dele, incorpora com elegância
+      if (grupoIdentificado && !histFinal.toLowerCase().includes(grupoIdentificado.toLowerCase())) {
+        if (histFinal.startsWith('Ref. a NF nº') || histFinal.startsWith('Ref. doc.') || histFinal.startsWith('Parcela')) {
+          histFinal = `${histFinal} - ${grupoIdentificado}`;
+        }
+      }
 
       return {
         id: r.id,
@@ -1946,6 +1993,171 @@ export async function atualizarContaReceberBling(
     return { sucesso: true, data: res?.data };
   } catch (err: any) {
     return { sucesso: false, mensagem: err?.message || 'Erro ao atualizar conta no Bling' };
+  }
+}
+
+/**
+ * Sincroniza e atualiza no Bling ERP (via PUT /contas-receber/{id}) todas as cobranças/parcelas vinculadas a notas fiscais,
+ * enriquecendo o histórico e observações de pagamento com o NOME DO GRUPO DE ORÇAMENTO.
+ * Exemplo de resultado: "Ref. a NF nº 000170 - GRUPO 15 DIAS | Parcela 1/2"
+ */
+export async function sincronizarGruposNasContasReceberBling(
+  empresaId: string,
+  tokenParam?: string,
+  onProgress?: (mensagem: string, atual: number, total: number) => void
+): Promise<{ sucesso: boolean; atualizados: number; total: number; mensagem: string }> {
+  try {
+    const token = (
+      tokenParam ||
+      localStorage.getItem(`bling_token_${empresaId}`) ||
+      localStorage.getItem('bling_access_token') ||
+      ''
+    ).trim();
+
+    if (!token) {
+      return { sucesso: false, atualizados: 0, total: 0, mensagem: 'Token do Bling não configurado para esta empresa.' };
+    }
+
+    // 1. Carrega as contas a receber locais ou do Bling
+    let contasParaProcessar = obterContasReceberCacheLocal(empresaId);
+    if (contasParaProcessar.length === 0) {
+      const res = await carregarContasReceberBling(token, empresaId);
+      contasParaProcessar = res.data || [];
+    }
+
+    if (contasParaProcessar.length === 0) {
+      return { sucesso: true, atualizados: 0, total: 0, mensagem: 'Nenhuma conta a receber encontrada para atualizar.' };
+    }
+
+    // 2. Mapeamento dos grupos de clientes cadastrados da empresa
+    const mapaNotasParaGrupo = new Map<string, string>();
+    const mapaDocsParaGrupo = new Map<string, string>();
+    try {
+      const rawGrupos = localStorage.getItem(`nfe_grupos_clientes_${empresaId}`);
+      if (rawGrupos) {
+        const grupos = JSON.parse(rawGrupos);
+        if (Array.isArray(grupos)) {
+          grupos.forEach((g: any) => {
+            if (g?.nome && Array.isArray(g.clientes)) {
+              g.clientes.forEach((cli: any) => {
+                if (cli.idNotaBling) mapaNotasParaGrupo.set(String(cli.idNotaBling), g.nome.trim());
+                if (cli.numeroDocumento) {
+                  const clean = cli.numeroDocumento.replace(/\D/g, '');
+                  if (clean) mapaDocsParaGrupo.set(clean, g.nome.trim());
+                }
+              });
+            }
+          });
+        }
+      }
+    } catch {}
+
+    // Cache local de notas fiscais consultadas no Bling para não repetir GET
+    const cacheNotasBling = new Map<string, string>();
+
+    // 3. Filtra as contas que são de notas fiscais
+    const contasVinculadasNFe = contasParaProcessar.filter((c) => {
+      const temOrigem = Boolean((c as any).origem?.id || (c as any).origem?.numero);
+      const temNumNFe = Boolean(c.numeroDocumento && (c.numeroDocumento.includes('/') || /^\d+$/.test(c.numeroDocumento)));
+      const temHistNFe = Boolean(c.historico && (c.historico.includes('NF') || c.historico.includes('Parcela') || c.historico.includes('Ref.')));
+      return temOrigem || temNumNFe || temHistNFe;
+    });
+
+    let atualizados = 0;
+    const total = contasVinculadasNFe.length;
+
+    for (let i = 0; i < contasVinculadasNFe.length; i++) {
+      const c = contasVinculadasNFe[i];
+      const r = c as any;
+      const nfNumero = r.origem?.numero || (c.numeroDocumento && c.numeroDocumento.includes('/') ? c.numeroDocumento.split('/')[0] : (c.numeroDocumento || ''));
+      const numParcela = c.numeroDocumento && c.numeroDocumento.includes('/') ? c.numeroDocumento.split('/')[1] : '';
+      const idNotaOrigem = r.origem?.id ? String(r.origem.id) : '';
+      const docCli = (c.contato?.numeroDocumento || '').replace(/\D/g, '');
+
+      // Identifica o nome do grupo pelo mapa local
+      let nomeGrupo = (idNotaOrigem && mapaNotasParaGrupo.get(idNotaOrigem)) || (docCli && mapaDocsParaGrupo.get(docCli)) || '';
+
+      // Se ainda não temos o nome do grupo e temos o ID da nota no Bling, consulta a nota para ler as observações
+      if (!nomeGrupo && idNotaOrigem) {
+        if (cacheNotasBling.has(idNotaOrigem)) {
+          nomeGrupo = cacheNotasBling.get(idNotaOrigem) || '';
+        } else {
+          try {
+            onProgress?.(`Consultando NF-e #${idNotaOrigem} no Bling...`, i + 1, total);
+            const notaRes = await callBlingApi(`/nfe/${idNotaOrigem}`, {
+              method: 'GET',
+              customToken: token,
+              empresaId,
+            });
+            const obsNota = (notaRes?.data?.observacoes || '').trim();
+            if (obsNota) {
+              // A primeira linha das observações é o nome do grupo gerado
+              const primeiraLinha = obsNota.split('\n')[0].replace(/Condições de Pagamento.*$/i, '').trim();
+              if (primeiraLinha && !primeiraLinha.toLowerCase().startsWith('condiç')) {
+                nomeGrupo = primeiraLinha;
+                cacheNotasBling.set(idNotaOrigem, nomeGrupo);
+                mapaNotasParaGrupo.set(idNotaOrigem, nomeGrupo);
+              }
+            }
+            await new Promise((res) => setTimeout(res, 350));
+          } catch {}
+        }
+      }
+
+      // Se mesmo assim não achou grupo específico, mas há algum grupo cadastrado com esse cliente
+      if (!nomeGrupo && mapaDocsParaGrupo.size > 0 && docCli) {
+        nomeGrupo = mapaDocsParaGrupo.get(docCli) || '';
+      }
+
+      // Se encontrou o grupo:
+      if (nomeGrupo) {
+        const histAtual = c.historico || c.observacoes || '';
+        // Verifica se já contém o nome do grupo
+        if (!histAtual.toLowerCase().includes(nomeGrupo.toLowerCase())) {
+          let novoHistorico = '';
+          if (nfNumero) {
+            novoHistorico = `Ref. a NF nº ${nfNumero} - ${nomeGrupo}${numParcela ? ` | Parcela ${numParcela}` : ''}`;
+          } else {
+            novoHistorico = `Ref. doc. ${c.numeroDocumento || c.id} - ${nomeGrupo}`;
+          }
+
+          onProgress?.(`Atualizando parcela ${c.numeroDocumento || c.id} no Bling (${i + 1}/${total})...`, i + 1, total);
+
+          const resUpdate = await atualizarContaReceberBling(c.id, { historico: novoHistorico }, token, empresaId);
+          if (resUpdate.sucesso) {
+            c.historico = novoHistorico;
+            c.observacoes = novoHistorico;
+            atualizados++;
+          }
+          await new Promise((res) => setTimeout(res, 350));
+        }
+      }
+    }
+
+    // Salva no cache local com os novos históricos
+    salvarContasReceberCacheLocal(empresaId, contasParaProcessar);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('bling_sync_update'));
+      window.dispatchEvent(new Event('storage'));
+    }
+
+    return {
+      sucesso: true,
+      atualizados,
+      total,
+      mensagem: atualizados > 0
+        ? `${atualizados} parcela(s) atualizada(s) no Bling ERP com o nome do grupo!`
+        : 'Todas as parcelas já estavam atualizadas com o nome do grupo.',
+    };
+  } catch (err: any) {
+    console.error('Erro na sincronização de grupos nas contas a receber:', err);
+    return {
+      sucesso: false,
+      atualizados: 0,
+      total: 0,
+      mensagem: err?.message || 'Erro ao sincronizar grupos nas cobranças do Bling.',
+    };
   }
 }
 

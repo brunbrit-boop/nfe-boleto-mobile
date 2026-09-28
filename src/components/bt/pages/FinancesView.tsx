@@ -26,6 +26,7 @@ import {
   atualizarContaPagarBling,
   obterContasReceberCacheLocal,
   salvarContasReceberCacheLocal,
+  sincronizarGruposNasContasReceberBling,
 } from '../../../services/blingService';
 
 export interface FinanceTransaction {
@@ -662,6 +663,49 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     setTimeout(() => setEnvioFeedback(null), 4000);
   };
 
+  // --- Sincronização Retroativa de Grupos de Orçamento nas Cobranças do Bling ERP ---
+  const [sincronizandoGrupos, setSincronizandoGrupos] = useState<boolean>(false);
+
+  const handleSincronizarGruposCobrancas = async () => {
+    const empId = localStorage.getItem('nfe_empresa_ativa_id') || undefined;
+    if (!empId) {
+      alert('Selecione uma empresa antes de sincronizar os grupos nas cobranças.');
+      return;
+    }
+
+    setSincronizandoGrupos(true);
+    setEnvioFeedback({
+      tipo: 'sucesso',
+      mensagem: 'Analisando notas e cobranças para atualizar nomes dos grupos no Bling ERP...',
+    });
+
+    try {
+      const res = await sincronizarGruposNasContasReceberBling(empId, undefined, (msg) => {
+        setEnvioFeedback({
+          tipo: 'sucesso',
+          mensagem: msg,
+        });
+      });
+
+      setEnvioFeedback({
+        tipo: res.sucesso ? 'sucesso' : 'erro',
+        mensagem: res.mensagem,
+      });
+
+      if (res.sucesso && onRefreshBling) {
+        onRefreshBling();
+      }
+    } catch (err: any) {
+      setEnvioFeedback({
+        tipo: 'erro',
+        mensagem: err?.message || 'Erro inesperado na sincronização.',
+      });
+    } finally {
+      setSincronizandoGrupos(false);
+      setTimeout(() => setEnvioFeedback(null), 6000);
+    }
+  };
+
   // Abre o card modal de detalhes do Bling com busca e fallback garantido
   const handleAbrirDetalhesReceber = (tx: FinanceTransaction) => {
     try {
@@ -771,14 +815,56 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     const crList = modoConsolidado ? contasConsolidadasReceber : contasReceber;
     const cpList = modoConsolidado ? contasConsolidadasPagar : contasPagar;
 
+    // Mapa de notas e clientes para os grupos de orçamento
+    const mapaNotasParaGrupo = new Map<string, string>();
+    const mapaDocsParaGrupo = new Map<string, string>();
+    try {
+      const targetEmp = localStorage.getItem('nfe_empresa_ativa_id');
+      if (targetEmp) {
+        const rawGrupos = localStorage.getItem(`nfe_grupos_clientes_${targetEmp}`);
+        if (rawGrupos) {
+          const grupos = JSON.parse(rawGrupos);
+          if (Array.isArray(grupos)) {
+            grupos.forEach((g: any) => {
+              if (g?.nome && Array.isArray(g.clientes)) {
+                g.clientes.forEach((cli: any) => {
+                  if (cli.idNotaBling) mapaNotasParaGrupo.set(String(cli.idNotaBling), g.nome.trim());
+                  if (cli.numeroDocumento) {
+                    const clean = cli.numeroDocumento.replace(/\D/g, '');
+                    if (clean) mapaDocsParaGrupo.set(clean, g.nome.trim());
+                  }
+                });
+              }
+            });
+          }
+        }
+      }
+    } catch {}
+
     // 1. Contas a Receber Reais do Bling
     crList.forEach((cr: BlingContaReceber) => {
       const dateISO = cr.vencimento || cr.dataEmissao || todayISO;
       const isPaid = cr.situacao === 2;
       const nomeEmp = (cr.empresaId && mapaNomesEmpresas[cr.empresaId]) || empresaNome || 'Minha Empresa';
       const nfNumero = (cr as any).origem?.numero || (cr.numeroDocumento && cr.numeroDocumento.includes('/') ? cr.numeroDocumento.split('/')[0] : '');
-      const fallbackRef = nfNumero ? `Ref. a NF nº ${nfNumero}` : (cr.numeroDocumento ? `Ref. doc. ${cr.numeroDocumento}` : `Recebimento Ref #${cr.id}`);
-      const descReceber = cr.historico && !cr.historico.startsWith('Recebimento Ref #') ? cr.historico : (cr.historico || fallbackRef);
+      const numParcela = cr.numeroDocumento && cr.numeroDocumento.includes('/') ? cr.numeroDocumento.split('/')[1] : '';
+      const idOrigem = (cr as any).origem?.id ? String((cr as any).origem.id) : '';
+      const docCliLimpo = (cr.contato?.numeroDocumento || '').replace(/\D/g, '');
+      const grupoNome = (idOrigem && mapaNotasParaGrupo.get(idOrigem)) || (docCliLimpo && mapaDocsParaGrupo.get(docCliLimpo)) || '';
+
+      let fallbackRef = nfNumero ? `Ref. a NF nº ${nfNumero}` : (cr.numeroDocumento ? `Ref. doc. ${cr.numeroDocumento}` : `Recebimento Ref #${cr.id}`);
+      if (grupoNome) {
+        fallbackRef = nfNumero
+          ? `Ref. a NF nº ${nfNumero} - ${grupoNome}${numParcela ? ` | Parcela ${numParcela}` : ''}`
+          : `Ref. doc. ${cr.numeroDocumento || cr.id} - ${grupoNome}`;
+      }
+
+      let descReceber = cr.historico && !cr.historico.startsWith('Recebimento Ref #') ? cr.historico : (cr.historico || fallbackRef);
+      if (grupoNome && !descReceber.toLowerCase().includes(grupoNome.toLowerCase())) {
+        if (descReceber.startsWith('Ref. a NF nº') || descReceber.startsWith('Ref. doc.') || descReceber.startsWith('Parcela')) {
+          descReceber = `${descReceber} - ${grupoNome}`;
+        }
+      }
 
       list.push({
         id: `rec-bling-${cr.empresaId || ''}-${cr.id}`,
@@ -1569,6 +1655,25 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
                 : pendentesEnvio.size > 0
                 ? `Enviar Dados (${pendentesEnvio.size})`
                 : 'Enviar Dados'}
+            </span>
+          </button>
+
+          {/* Botão Sincronizar Grupos nas Cobranças */}
+          <button
+            onClick={handleSincronizarGruposCobrancas}
+            disabled={sincronizandoGrupos || carregando}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xs border cursor-pointer ${
+              sincronizandoGrupos
+                ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200 border-amber-300 dark:border-amber-700 animate-pulse'
+                : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-300 dark:hover:bg-emerald-900/60 border-emerald-200/80 dark:border-emerald-800/60'
+            }`}
+            title="Atualizar no Bling ERP todas as parcelas já lançadas, inserindo o nome do grupo de orçamento nas observações de pagamento"
+          >
+            <span className={`material-symbols-outlined text-base ${sincronizandoGrupos ? 'animate-spin' : ''}`}>
+              {sincronizandoGrupos ? 'progress_activity' : 'label'}
+            </span>
+            <span>
+              {sincronizandoGrupos ? 'Atualizando Grupos...' : 'Grupos nas Cobranças'}
             </span>
           </button>
 
