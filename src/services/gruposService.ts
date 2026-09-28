@@ -8,7 +8,7 @@ import type { CatalogoProduto, OfertaGeradaResult } from '../utils/salesOptimize
 import { gerarOfertaComGeminiOuLocal, isCerebroIAConectado, gerarOfertasLoteUnificadoGemini, type ClienteLoteInput } from './geminiService';
 import { CATALOGO_PRODUTOS_PADRAO } from '../utils/salesOptimizer';
 import { sleep, gravarEsbocoNFeNoBling } from './blingService';
-import { formatCurrency, gerarChaveAcessoNFe, calcularDivisaoParcelas } from '../utils/financeEngine';
+import { formatCurrency, gerarChaveAcessoNFe, calcularDivisaoParcelas, BANKS } from '../utils/financeEngine';
 
 const STORAGE_PREFIX = 'nfe_grupos_clientes';
 const STORAGE_PREFIX_PRODUTOS = 'nfe_grupos_produtos';
@@ -603,9 +603,30 @@ export async function emitirNFeItemGrupo(
     diasSemanaPermitidos
   );
 
+  // Determina o nome do banco ou conta financeira cadastrada no Bling para as observações da nota e parcelas
+  let nomeBancoConta = item.nomeContaFinanceiraBling?.trim();
+  if (!nomeBancoConta && idContaFinEfetivo && empresa.id) {
+    try {
+      const rawContas = localStorage.getItem(`bling_contas_financeiras_${empresa.id}`);
+      if (rawContas) {
+        const contas = JSON.parse(rawContas);
+        const achou = Array.isArray(contas) ? contas.find((c: any) => c.id === idContaFinEfetivo) : null;
+        if (achou?.descricao) {
+          nomeBancoConta = achou.descricao.trim();
+        }
+      }
+    } catch {}
+  }
+  if (!nomeBancoConta && bancoEfetivo) {
+    nomeBancoConta = BANKS[bancoEfetivo]?.name || bancoEfetivo;
+  }
+  if (!nomeBancoConta && nomeGrupo) {
+    nomeBancoConta = nomeGrupo.trim();
+  }
+
   const condicoesTexto = `Condições de Pagamento: ${parcelasCalculadas.map((p, idx) => `Parcela ${idx + 1}/${numParcelas}: ${p.dataVencimento.split('-').reverse().join('/')} (${formatCurrency(p.valor)})`).join(' | ')}`;
-  const textoInformacoesComplementares = nomeGrupo?.trim()
-    ? `${nomeGrupo.trim()}\n${condicoesTexto}`
+  const textoInformacoesComplementares = nomeBancoConta?.trim()
+    ? `${nomeBancoConta.trim()}\n${condicoesTexto}`
     : condicoesTexto;
 
   const novaNFe: NFeData = {
@@ -671,7 +692,7 @@ export async function emitirNFeItemGrupo(
       intervaloDias: intervaloDias,
       primeiroVencimento: primeiroVenc,
       diasSemanaPermitidos: diasSemanaPermitidos,
-      observacoesAdicionais: nomeGrupo?.trim(),
+      observacoesAdicionais: nomeBancoConta?.trim(),
       idNotaBlingExistente: idExistente,
     });
 

@@ -339,6 +339,7 @@ export interface GrupoClienteItem {
   banco?: BankProvider;
   idFormaPagamentoBling?: number;
   idContaFinanceiraBling?: number;
+  nomeContaFinanceiraBling?: string;
   status: 'pendente' | 'gerando' | 'gerado' | 'erro';
   ofertaGerada?: any; // OfertaGeradaResult
   nfeEmitida?: NFeData;

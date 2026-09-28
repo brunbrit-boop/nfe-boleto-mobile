@@ -599,20 +599,10 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       clientes: grupoAtivo.clientes.map((c) => ({
         ...c,
         idContaFinanceiraBling: novoId,
+        nomeContaFinanceiraBling: contaObj?.descricao,
         banco: bancoDefinido,
         idFormaPagamentoBling: formaId,
       })),
-    };
-    atualizarGrupo(atualizado);
-  };
-
-  const handleUpdateItemBanco = (clienteId: number, banco: BankProvider) => {
-    if (!grupoAtivo) return;
-    const atualizado: GrupoClientes = {
-      ...grupoAtivo,
-      clientes: grupoAtivo.clientes.map((c) =>
-        c.clienteId === clienteId ? { ...c, banco } : c
-      ),
     };
     atualizarGrupo(atualizado);
   };
@@ -631,6 +621,7 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
           ? {
               ...c,
               idContaFinanceiraBling: idConta,
+              nomeContaFinanceiraBling: contaObj?.descricao,
               banco: bancoDetectado || c.banco || grupoAtivo.bancoPadrao || bancoAtual,
               idFormaPagamentoBling: formaId || c.idFormaPagamentoBling,
             }
@@ -953,7 +944,8 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
           const bancoParaEmitir = item.banco || grupoAtivo?.bancoPadrao || bancoAtual;
           const formaPagId = item.idFormaPagamentoBling || grupoAtivo?.idFormaPagamentoBling;
           const contaFinId = item.idContaFinanceiraBling || grupoAtivo?.idContaFinanceiraBling;
-          const res = await emitirNFeItemGrupo(item, empresa, company, bancoParaEmitir, grupoAtivo?.nome, formaPagId, contaFinId);
+          const nomeBancoConta = item.nomeContaFinanceiraBling || contasFinanceirasBling.find((c) => c.id === contaFinId)?.descricao || (item.banco ? BANKS[item.banco]?.name : undefined) || BANKS[bancoParaEmitir]?.name || grupoAtivo?.nome;
+          const res = await emitirNFeItemGrupo(item, empresa, company, bancoParaEmitir, nomeBancoConta, formaPagId, contaFinId);
           if (res.sucesso && res.nfe) {
             sucessoCount++;
             grupoEmProcessamento = {
@@ -1125,7 +1117,8 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
       const bancoParaEmitir = item.banco || grupoAtivo?.bancoPadrao || bancoAtual;
       const formaPagId = item.idFormaPagamentoBling || grupoAtivo?.idFormaPagamentoBling;
       const contaFinId = item.idContaFinanceiraBling || grupoAtivo?.idContaFinanceiraBling;
-      const res = await emitirNFeItemGrupo(item, empresa, company, bancoParaEmitir, grupoAtivo?.nome, formaPagId, contaFinId);
+      const nomeBancoConta = item.nomeContaFinanceiraBling || contasFinanceirasBling.find((c) => c.id === contaFinId)?.descricao || (item.banco ? BANKS[item.banco]?.name : undefined) || BANKS[bancoParaEmitir]?.name || grupoAtivo?.nome;
+      const res = await emitirNFeItemGrupo(item, empresa, company, bancoParaEmitir, nomeBancoConta, formaPagId, contaFinId);
       if (res.sucesso && res.nfe) {
         // Atualiza o item com a NF-e emitida e remove eventuais erros anteriores
         if (grupoAtivo) {
@@ -1194,7 +1187,8 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
           const bancoParaEmitir = item.banco || grupoAtivo?.bancoPadrao || bancoAtual;
           const formaPagId = item.idFormaPagamentoBling || grupoAtivo?.idFormaPagamentoBling;
           const contaFinId = item.idContaFinanceiraBling || grupoAtivo?.idContaFinanceiraBling;
-          const res = await emitirNFeItemGrupo(item, empresa, company, bancoParaEmitir, grupoAtivo?.nome, formaPagId, contaFinId);
+          const nomeBancoConta = item.nomeContaFinanceiraBling || contasFinanceirasBling.find((c) => c.id === contaFinId)?.descricao || (item.banco ? BANKS[item.banco]?.name : undefined) || BANKS[bancoParaEmitir]?.name || grupoAtivo?.nome;
+          const res = await emitirNFeItemGrupo(item, empresa, company, bancoParaEmitir, nomeBancoConta, formaPagId, contaFinId);
           if (res.sucesso && res.nfe) {
             grupoEmProcessamento = {
               ...grupoEmProcessamento,
@@ -2991,39 +2985,26 @@ export const GruposClientesView: React.FC<GruposClientesViewProps> = ({
                             return null;
                           })()}
 
-                          {/* Linha 4: Conta Financeira e Banco */}
-                          <div className="pt-1 mt-1 border-t border-slate-200 dark:border-slate-800/80 flex items-center justify-between gap-1 text-[10px]">
-                            <div className="flex items-center gap-1 text-slate-500 dark:text-slate-400 min-w-0">
-                              <Landmark className="w-3 h-3 text-sky-500 shrink-0" />
+                          {/* Linha 4: Conta Financeira no Bling (Previsão de Entrada) */}
+                          <div className="pt-1 mt-1 border-t border-slate-200 dark:border-slate-800/80">
+                            <div className="flex items-center gap-1.5 bg-sky-50 dark:bg-sky-950/40 border border-sky-200 dark:border-sky-800/60 rounded-lg px-2 py-1">
+                              <Landmark className="w-3.5 h-3.5 text-sky-600 dark:text-sky-400 shrink-0" />
                               <select
                                 value={item.idContaFinanceiraBling ?? grupoAtivo?.idContaFinanceiraBling ?? ''}
                                 onChange={(e) => {
                                   const val = e.target.value ? Number(e.target.value) : undefined;
                                   handleUpdateItemContaFinanceira(item.clienteId, val);
                                 }}
-                                className="bg-transparent border-0 text-[10px] font-bold text-sky-600 dark:text-sky-400 focus:outline-none cursor-pointer max-w-[110px] truncate"
-                                title="Conta Financeira no Bling (Previsão de Entrada)"
+                                disabled={carregandoContasFinanceiras}
+                                className="w-full bg-transparent border-0 text-[10px] font-bold text-sky-800 dark:text-sky-300 focus:outline-none cursor-pointer truncate disabled:opacity-50"
+                                title="Conta Financeira cadastrada no Bling para este cliente"
                               >
                                 <option value="" className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">
-                                  Conta Financeira...
+                                  {carregandoContasFinanceiras ? 'Carregando contas...' : 'Conta Financeira (Bling)...'}
                                 </option>
                                 {contasFinanceirasBling.map((c) => (
                                   <option key={c.id} value={c.id} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">
-                                    {c.descricao}
-                                  </option>
-                                ))}
-                              </select>
-                            </div>
-                            <div className="shrink-0">
-                              <select
-                                value={item.banco || grupoAtivo?.bancoPadrao || bancoAtual}
-                                onChange={(e) => handleUpdateItemBanco(item.clienteId, e.target.value as BankProvider)}
-                                className="bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 rounded text-[9px] font-semibold px-1 py-0.5 max-w-[85px] truncate focus:outline-none cursor-pointer"
-                                title="Banco emissor do boleto"
-                              >
-                                {Object.entries(BANKS).map(([k, b]) => (
-                                  <option key={k} value={k} className="bg-white dark:bg-slate-900 text-slate-800 dark:text-white">
-                                    {b.name}
+                                    {c.descricao} {c.tipo ? `(${c.tipo})` : ''}
                                   </option>
                                 ))}
                               </select>
