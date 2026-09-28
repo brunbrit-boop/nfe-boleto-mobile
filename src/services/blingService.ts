@@ -2103,8 +2103,31 @@ export async function sincronizarGruposNasContasReceberBling(
     for (let i = 0; i < contasVinculadasNFe.length; i++) {
       const c = contasVinculadasNFe[i];
       const r = c as any;
-      const nfNumero = r.origem?.numero || (c.numeroDocumento && c.numeroDocumento.includes('/') ? c.numeroDocumento.split('/')[0] : (c.numeroDocumento || ''));
-      const numParcela = c.numeroDocumento && c.numeroDocumento.includes('/') ? c.numeroDocumento.split('/')[1] : '';
+      const histTexto = (c.historico || c.observacoes || '').trim();
+
+      // Extração precisa do número da NF
+      let nfNumero = '';
+      const matchHist = histTexto.match(/(?:Ref\.?\s*(?:a\s*)?NF\s*n[ºo°]?|NF\s*n[ºo°]?|Nota\s*Fiscal\s*n[ºo°]?|NF-e|NF)\s*0*([0-9]{1,6})\b/i);
+      if (matchHist && matchHist[1]) {
+        nfNumero = matchHist[1];
+      } else if (r.origem?.numero) {
+        nfNumero = String(r.origem.numero).replace(/\D/g, '');
+      } else if (c.numeroDocumento && c.numeroDocumento.includes('/')) {
+        nfNumero = c.numeroDocumento.split('/')[0].replace(/\D/g, '');
+      } else if (c.numeroDocumento && /^\d{1,6}$/.test(c.numeroDocumento.trim())) {
+        nfNumero = c.numeroDocumento.trim();
+      }
+
+      // Extração ou preservação da parcela existente
+      let parcelaExistente = '';
+      const matchParcela = histTexto.match(/\|\s*Parcela\s*([0-9]+\/[0-9]+|[0-9]+)/i) || histTexto.match(/Parcela\s*([0-9]+\/[0-9]+|[0-9]+)/i);
+      if (matchParcela && matchParcela[1]) {
+        parcelaExistente = matchParcela[1].includes('/') ? matchParcela[1] : `${matchParcela[1]}/1`;
+      } else if (c.numeroDocumento && c.numeroDocumento.includes('/')) {
+        const parteParc = c.numeroDocumento.split('/')[1].trim();
+        parcelaExistente = parteParc.includes('/') ? parteParc : `${parseInt(parteParc, 10) || 1}/1`;
+      }
+
       const idNotaOrigem = r.origem?.id ? String(r.origem.id) : '';
       const docCli = (c.contato?.numeroDocumento || '').replace(/\D/g, '');
 
@@ -2129,7 +2152,6 @@ export async function sincronizarGruposNasContasReceberBling(
             });
             const obsNota = (notaRes?.data?.observacoes || '').trim();
             if (obsNota) {
-              // A primeira linha das observações é o nome do banco/conta gerado
               const primeiraLinha = obsNota.split('\n')[0].replace(/Condições de Pagamento.*$/i, '').trim();
               if (primeiraLinha && !primeiraLinha.toLowerCase().startsWith('condiç')) {
                 nomeBanco = primeiraLinha;
@@ -2149,21 +2171,21 @@ export async function sincronizarGruposNasContasReceberBling(
         if (!idContaFin) idContaFin = fallback?.idContaFinanceira;
       }
 
-      // Se encontramos banco/conta ou ID de conta financeira para preencher:
       if (nomeBanco || idContaFin) {
-        const histAtual = c.historico || c.observacoes || '';
-        const jaTemNomeBanco = nomeBanco ? histAtual.toLowerCase().includes(nomeBanco.toLowerCase()) : false;
+        const jaTemNomeBanco = nomeBanco ? histTexto.toLowerCase().includes(nomeBanco.toLowerCase()) : false;
         const jaTemContaFinanceira = Boolean(c.contaFinanceira?.id || r.contaContabil?.id);
+        const temParcelaNoHist = histTexto.toLowerCase().includes('parcela');
 
-        // Atualiza se o histórico ainda não tem o nome do banco OU se a conta financeira no Bling ainda não foi preenchida
-        if (!jaTemNomeBanco || (!jaTemContaFinanceira && idContaFin)) {
-          let novoHistorico = histAtual;
-          if (nomeBanco && !jaTemNomeBanco) {
-            if (nfNumero) {
-              novoHistorico = `Ref. a NF nº ${nfNumero} - ${nomeBanco}${numParcela ? ` | Parcela ${numParcela}` : ''}`;
-            } else {
-              novoHistorico = `Ref. doc. ${c.numeroDocumento || c.id} - ${nomeBanco}`;
-            }
+        // Atualiza se falta o banco, se falta a conta financeira OU se falta a identificação da parcela
+        if (!jaTemNomeBanco || (!jaTemContaFinanceira && idContaFin) || !temParcelaNoHist) {
+          let novoHistorico = histTexto;
+          const parcelaInfo = parcelaExistente ? ` | Parcela ${parcelaExistente}` : '';
+
+          if (nfNumero) {
+            const nfFormatada = nfNumero.padStart(6, '0');
+            novoHistorico = `Ref. a NF nº ${nfFormatada} - ${nomeBanco || 'Financeiro'}${parcelaInfo}`;
+          } else {
+            novoHistorico = `Ref. doc. ${c.numeroDocumento || c.id} - ${nomeBanco || 'Financeiro'}${parcelaInfo}`;
           }
 
           onProgress?.(`Atualizando parcela ${c.numeroDocumento || c.id} no Bling (${i + 1}/${total})...`, i + 1, total);
@@ -2221,6 +2243,9 @@ export async function sincronizarGruposNasContasReceberBling(
  * - Notas 160 a 165: Bradesco
  * - Notas 166 a 170: Itaú
  * - Notas 171 a 182: Santander
+ *
+ * GRAVA OBRIGATORIAMENTE NO HISTÓRICO:
+ * "Ref. a NF nº 000171 - Santander | Parcela 1/3" (com número exato da parcela e total).
  */
 export async function atualizarContasReceberFaixaNotasBling(
   empresaId: string,
@@ -2265,23 +2290,101 @@ export async function atualizarContasReceberFaixaNotasBling(
       };
     }
 
-    // 2. Busca todas as contas a receber com paginação completa no Bling
-    onProgress?.('Buscando cobranças do Bling...', 0, 0);
-    let contasParaProcessar = obterContasReceberCacheLocal(empresaId);
+    // 2. Mapeamento das Notas e Parcelas a partir dos Grupos de Clientes Locais
+    interface InfoNotaLocal {
+      numeroNF: number;
+      totalParcelas: number;
+      idNotaBling?: string;
+      parcelasDatas?: string[];
+    }
+    const mapaNFsLocais = new Map<number, InfoNotaLocal>();
+    const mapaIdNotaParaNF = new Map<string, number>();
 
-    // Se no cache temos poucas ou queremos garantir cobertura total das notas 160-182:
     try {
-      const contasApi: BlingContaReceber[] = [];
+      const rawGrupos = localStorage.getItem(`nfe_grupos_clientes_${empresaId}`);
+      if (rawGrupos) {
+        const grupos = JSON.parse(rawGrupos);
+        if (Array.isArray(grupos)) {
+          for (const g of grupos) {
+            if (Array.isArray(g.clientes)) {
+              for (const cli of g.clientes) {
+                let numNfCand: number | null = null;
+                if (cli.nfeEmitida?.numeroNFe) {
+                  const limpo = String(cli.nfeEmitida.numeroNFe).replace(/\D/g, '');
+                  if (limpo) numNfCand = parseInt(limpo, 10);
+                }
+                const idNotaStr = cli.idNotaBling ? String(cli.idNotaBling) : '';
+
+                const count = cli.parcelasCount || (Array.isArray(cli.nfeEmitida?.parcelas) ? cli.nfeEmitida.parcelas.length : 0) || 1;
+                const parcelasDatas: string[] = [];
+                if (Array.isArray(cli.nfeEmitida?.parcelas)) {
+                  cli.nfeEmitida.parcelas.forEach((p: any) => {
+                    if (p.data) parcelasDatas.push(p.data);
+                  });
+                }
+
+                if (numNfCand) {
+                  mapaNFsLocais.set(numNfCand, {
+                    numeroNF: numNfCand,
+                    totalParcelas: Math.max(count, 1),
+                    idNotaBling: idNotaStr,
+                    parcelasDatas,
+                  });
+                }
+                if (idNotaStr && numNfCand) {
+                  mapaIdNotaParaNF.set(idNotaStr, numNfCand);
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Bling Faixas] Erro ao carregar grupos locais:', e);
+    }
+
+    // 3. Busca todas as contas a receber no Bling (varrendo até 15 páginas para cobertura completa)
+    onProgress?.('Buscando contas a receber no Bling...', 0, 0);
+    const todasContasBling: BlingContaReceber[] = [];
+    const idsJaCarregados = new Set<number>();
+
+    // Inicializa com as contas do cache local
+    const contasCache = obterContasReceberCacheLocal(empresaId);
+    for (const c of contasCache) {
+      if (c.id && !idsJaCarregados.has(c.id)) {
+        todasContasBling.push(c);
+        idsJaCarregados.add(c.id);
+      }
+    }
+
+    // Consulta páginas completas da API do Bling (sem filtro restritivo de situação)
+    try {
       let p = 1;
-      while (p <= 5) {
+      const maxPaginas = 15;
+      while (p <= maxPaginas) {
         onProgress?.(`Consultando página ${p} de cobranças no Bling...`, 0, 0);
-        const resCR = await callBlingApi(`/contas/receber?limite=100&pagina=${p}&situacao=1`, {
-          method: 'GET',
-          customToken: token,
-          empresaId,
-        });
+        let resCR: any = null;
+        try {
+          resCR = await callBlingApi(`/contas/receber?limite=100&pagina=${p}`, {
+            method: 'GET',
+            customToken: token,
+            empresaId,
+          });
+        } catch {
+          resCR = await callBlingApi(`/contas-receber?limite=100&pagina=${p}`, {
+            method: 'GET',
+            customToken: token,
+            empresaId,
+          }).catch(() => null);
+        }
+
         if (resCR?.data && Array.isArray(resCR.data) && resCR.data.length > 0) {
-          contasApi.push(...resCR.data);
+          for (const item of resCR.data) {
+            if (item.id && !idsJaCarregados.has(item.id)) {
+              todasContasBling.push(item);
+              idsJaCarregados.add(item.id);
+            }
+          }
           if (resCR.data.length < 100) break;
           p++;
           await new Promise((r) => setTimeout(r, 250));
@@ -2289,35 +2392,66 @@ export async function atualizarContasReceberFaixaNotasBling(
           break;
         }
       }
-      if (contasApi.length > 0) {
-        contasParaProcessar = contasApi;
-      }
-    } catch {}
+    } catch (errApi) {
+      console.warn('[Bling Faixas] Erro ao consultar páginas de contas a receber:', errApi);
+    }
 
-    // 3. Filtra as contas que pertencem às notas 160 a 182
-    const contasAlvo: Array<{ conta: BlingContaReceber; numNF: number; numParcela?: string }> = [];
+    // 4. Identifica com precisão as contas que pertencem às notas 160 a 182
+    const contasAlvo: Array<{ conta: BlingContaReceber; numNF: number; numParcelaDoc?: string }> = [];
 
-    for (const c of contasParaProcessar) {
+    for (const c of todasContasBling) {
       const r = c as any;
-      const nfRaw = r.origem?.numero || (c.numeroDocumento && c.numeroDocumento.includes('/') ? c.numeroDocumento.split('/')[0] : (c.numeroDocumento || ''));
-      const numParcela = c.numeroDocumento && c.numeroDocumento.includes('/') ? c.numeroDocumento.split('/')[1] : '';
-
+      const histTexto = (c.historico || c.observacoes || '').trim();
       let numNF: number | null = null;
-      if (nfRaw) {
-        const clean = nfRaw.replace(/\D/g, '');
-        if (clean) numNF = parseInt(clean, 10);
+      let numParcelaDoc = '';
+
+      // Prioridade 1: Extrai do Histórico ou Observações (ex: "Ref. a NF nº 000171 - Santander", "NF 171", etc.)
+      if (histTexto) {
+        const matchHist = histTexto.match(/(?:Ref\.?\s*(?:a\s*)?NF\s*n[ºo°]?|NF\s*n[ºo°]?|Nota\s*Fiscal\s*n[ºo°]?|NF-e|NF)\s*0*([0-9]{1,6})\b/i);
+        if (matchHist && matchHist[1]) {
+          const cand = parseInt(matchHist[1], 10);
+          if (cand >= 10 && cand <= 999999) {
+            numNF = cand;
+          }
+        }
       }
 
-      // Se não achou na origem ou número, tenta achar no histórico (ex: "Ref. a NF nº 000172" ou "NF 172")
-      if (!numNF && (c.historico || c.observacoes)) {
-        const match = (c.historico || c.observacoes || '').match(/(?:NF|Nota|nº|doc\.?)\s*(?:nº)?\s*0*([0-9]{2,6})/i);
-        if (match && match[1]) {
-          numNF = parseInt(match[1], 10);
+      // Prioridade 2: Origem da nota no Bling (r.origem?.numero)
+      if (!numNF && r.origem?.numero) {
+        const clean = String(r.origem.numero).replace(/\D/g, '');
+        if (clean && clean.length <= 6) {
+          numNF = parseInt(clean, 10);
+        }
+      }
+
+      // Prioridade 3: ID da nota de origem associado no Bling
+      if (!numNF && r.origem?.id && mapaIdNotaParaNF.has(String(r.origem.id))) {
+        numNF = mapaIdNotaParaNF.get(String(r.origem.id))!;
+      }
+
+      // Prioridade 4: Documento com barra (ex: "000171/01" ou "171/2")
+      if (!numNF && c.numeroDocumento && c.numeroDocumento.includes('/')) {
+        const partes = c.numeroDocumento.split('/');
+        const cleanNF = partes[0].replace(/\D/g, '');
+        if (cleanNF && cleanNF.length <= 6) {
+          numNF = parseInt(cleanNF, 10);
+        }
+        numParcelaDoc = partes[1].trim();
+      }
+
+      // Prioridade 5: Documento numérico simples de até 6 dígitos
+      if (!numNF && c.numeroDocumento) {
+        const clean = c.numeroDocumento.replace(/\D/g, '');
+        if (clean && clean.length <= 6) {
+          const cand = parseInt(clean, 10);
+          if (cand >= 160 && cand <= 182) {
+            numNF = cand;
+          }
         }
       }
 
       if (numNF !== null && numNF >= 160 && numNF <= 182) {
-        contasAlvo.push({ conta: c, numNF, numParcela });
+        contasAlvo.push({ conta: c, numNF, numParcelaDoc });
       }
     }
 
@@ -2330,10 +2464,10 @@ export async function atualizarContasReceberFaixaNotasBling(
       };
     }
 
-    onProgress?.(`Encontradas ${contasAlvo.length} parcelas das notas 160 a 182. Analisando parcelamento...`, 0, contasAlvo.length);
+    onProgress?.(`Encontradas ${contasAlvo.length} parcelas das notas 160 a 182. Mapeando numeração das parcelas...`, 0, contasAlvo.length);
 
-    // Agrupa as contas por número da nota fiscal para determinar a numeração exata de parcelas (ex: 1/3, 2/3, 3/3)
-    const contasPorNF = new Map<number, Array<{ conta: BlingContaReceber; numNF: number; numParcela?: string }>>();
+    // 5. Agrupa as contas por número da nota fiscal para determinar a numeração exata de parcelas (ex: 1/3, 2/3, 3/3)
+    const contasPorNF = new Map<number, Array<{ conta: BlingContaReceber; numNF: number; numParcelaDoc?: string }>>();
     for (const item of contasAlvo) {
       if (!contasPorNF.has(item.numNF)) {
         contasPorNF.set(item.numNF, []);
@@ -2355,7 +2489,22 @@ export async function atualizarContasReceberFaixaNotasBling(
         return (a.conta.id || 0) - (b.conta.id || 0);
       });
 
-      const totalParcelasNota = listaContas.length;
+      const infoLocal = mapaNFsLocais.get(numNF);
+
+      // Determina o total de parcelas da nota
+      let totalParcelasCalculado = Math.max(infoLocal?.totalParcelas || 1, listaContas.length, 1);
+
+      // Checa se no histórico ou documento de alguma conta havia menção ao total de parcelas (ex: "Parcela 1/3" -> total é 3)
+      for (const item of listaContas) {
+        const texto = `${item.conta.historico || ''} ${item.conta.observacoes || ''} ${item.conta.numeroDocumento || ''}`;
+        const matchTotal = texto.match(/Parcela\s*[0-9]+\/([0-9]+)/i);
+        if (matchTotal && matchTotal[1]) {
+          const tot = parseInt(matchTotal[1], 10);
+          if (tot > totalParcelasCalculado) {
+            totalParcelasCalculado = tot;
+          }
+        }
+      }
 
       let contaFinAlvo: BlingContaFinanceira | undefined;
       let nomeBancoPadrao = '';
@@ -2373,30 +2522,51 @@ export async function atualizarContasReceberFaixaNotasBling(
 
       for (let idx = 0; idx < listaContas.length; idx++) {
         indiceGeral++;
-        const { conta: c, numParcela: numParcelaDoc } = listaContas[idx];
+        const { conta: c, numParcelaDoc } = listaContas[idx];
         const r = c as any;
 
-        // Determina a parcela: ex: 1/3, 2/3 ou se já tinha no doc ou histórico
-        let parcelaStr = '';
-        if (numParcelaDoc && numParcelaDoc.includes('/')) {
-          parcelaStr = numParcelaDoc;
-        } else if (totalParcelasNota > 1) {
-          parcelaStr = `${idx + 1}/${totalParcelasNota}`;
-        } else if (totalParcelasNota === 1) {
-          // Se for única, tenta ver se no documento ou histórico havia algo como 1/2 ou 1/3
-          const matchAntigo = (c.historico || c.observacoes || '').match(/Parcela\s*([0-9]+\/[0-9]+|[0-9]+)/i);
-          if (matchAntigo && matchAntigo[1]) {
-            parcelaStr = matchAntigo[1];
-          } else {
-            parcelaStr = '1/1';
+        // Determina o índice da parcela (1, 2, 3...)
+        let indiceParcela = idx + 1;
+
+        // Se o documento tiver numeração de parcela (ex: "000171/02" -> parcela 2)
+        if (numParcelaDoc) {
+          const numParte = numParcelaDoc.replace(/\D/g, '');
+          if (numParte) {
+            const pIdx = parseInt(numParte, 10);
+            if (pIdx > 0 && pIdx <= totalParcelasCalculado) {
+              indiceParcela = pIdx;
+            }
+          }
+        } else if (c.numeroDocumento && c.numeroDocumento.includes('/')) {
+          const numParte = c.numeroDocumento.split('/')[1].replace(/\D/g, '');
+          if (numParte) {
+            const pIdx = parseInt(numParte, 10);
+            if (pIdx > 0 && pIdx <= totalParcelasCalculado) {
+              indiceParcela = pIdx;
+            }
+          }
+        } else {
+          // Se no histórico anterior tinha "Parcela X/Y" ou "Parcela X"
+          const matchAnterior = (c.historico || c.observacoes || '').match(/Parcela\s*([0-9]+)(?:\/([0-9]+))?/i);
+          if (matchAnterior && matchAnterior[1]) {
+            const pIdx = parseInt(matchAnterior[1], 10);
+            if (pIdx > 0 && pIdx <= totalParcelasCalculado) {
+              indiceParcela = pIdx;
+            }
           }
         }
 
-        const nfNumFormatado = String(numNF).padStart(6, '0');
-        const parcelaInfo = parcelaStr ? ` | Parcela ${parcelaStr}` : '';
-        const novoHistorico = `Ref. a NF nº ${nfNumFormatado} - ${nomeBancoPadrao}${parcelaInfo}`;
+        // Se por algum motivo o índice for maior que o total calculado, eleva o total
+        if (indiceParcela > totalParcelasCalculado) {
+          totalParcelasCalculado = indiceParcela;
+        }
 
-        onProgress?.(`Atualizando NF ${numNF}${parcelaInfo} -> ${nomeBancoPadrao} (${indiceGeral}/${total})...`, indiceGeral, total);
+        const parcelaStr = `${indiceParcela}/${totalParcelasCalculado}`;
+        const nfNumFormatado = String(numNF).padStart(6, '0');
+        // Histórico padronizado OBRIGATORIAMENTE com a Parcela:
+        const novoHistorico = `Ref. a NF nº ${nfNumFormatado} - ${nomeBancoPadrao} | Parcela ${parcelaStr}`;
+
+        onProgress?.(`Atualizando NF ${numNF} (${parcelaStr}) -> ${nomeBancoPadrao} (${indiceGeral}/${total})...`, indiceGeral, total);
 
         const payloadUpdate: any = { historico: novoHistorico };
         if (contaFinAlvo?.id) {
@@ -2414,12 +2584,12 @@ export async function atualizarContasReceberFaixaNotasBling(
           atualizados++;
         }
 
-        // Intervalo de 350ms para respeitar taxa do Bling
+        // Intervalo de 350ms para respeitar o rate-limit do Bling API v3
         await new Promise((res) => setTimeout(res, 350));
       }
     }
 
-    salvarContasReceberCacheLocal(empresaId, contasParaProcessar);
+    salvarContasReceberCacheLocal(empresaId, todasContasBling);
 
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('bling_sync_update'));
@@ -2430,7 +2600,7 @@ export async function atualizarContasReceberFaixaNotasBling(
       sucesso: true,
       atualizados,
       total,
-      mensagem: `${atualizados} de ${total} cobrança(s) das notas 160 a 182 foram atualizadas com sucesso no Bling com suas respectivas contas financeiras!`,
+      mensagem: `${atualizados} de ${total} cobrança(s) das notas 160 a 182 foram atualizadas com sucesso no Bling com suas respectivas contas financeiras e número de parcelas gravado no histórico!`,
     };
   } catch (err: any) {
     console.error('Erro ao atualizar faixa de notas:', err);
