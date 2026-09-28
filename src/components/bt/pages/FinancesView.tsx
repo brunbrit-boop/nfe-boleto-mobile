@@ -27,6 +27,7 @@ import {
   obterContasReceberCacheLocal,
   salvarContasReceberCacheLocal,
   sincronizarGruposNasContasReceberBling,
+  atualizarContasReceberFaixaNotasBling,
 } from '../../../services/blingService';
 
 export interface FinanceTransaction {
@@ -703,6 +704,58 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
     } finally {
       setSincronizandoGrupos(false);
       setTimeout(() => setEnvioFeedback(null), 6000);
+    }
+  };
+
+  // --- Correção em Lote das Notas 160 a 182 (Bradesco / Itaú / Santander) ---
+  const [corrigindoFaixaNotas, setCorrigindoFaixaNotas] = useState<boolean>(false);
+
+  const handleCorrigirNotasFaixaBling = async () => {
+    const empId = localStorage.getItem('nfe_empresa_ativa_id') || undefined;
+    if (!empId) {
+      alert('Selecione uma empresa antes de executar a correção das notas.');
+      return;
+    }
+
+    const confirma = window.confirm(
+      'Deseja atualizar as cobranças das notas 160 a 182 no Bling agora?\n\n' +
+      '• Notas 160 a 165: Conta Financeira Bradesco\n' +
+      '• Notas 166 a 170: Conta Financeira Itaú\n' +
+      '• Notas 171 a 182: Conta Financeira Santander\n\n' +
+      'As contas a receber receberão o vínculo da Conta Financeira e o histórico atualizado no Bling ERP.'
+    );
+    if (!confirma) return;
+
+    setCorrigindoFaixaNotas(true);
+    setEnvioFeedback({
+      tipo: 'sucesso',
+      mensagem: 'Iniciando correção em lote das notas 160 a 182 no Bling...',
+    });
+
+    try {
+      const res = await atualizarContasReceberFaixaNotasBling(empId, undefined, (msg) => {
+        setEnvioFeedback({
+          tipo: 'sucesso',
+          mensagem: msg,
+        });
+      });
+
+      setEnvioFeedback({
+        tipo: res.sucesso ? 'sucesso' : 'erro',
+        mensagem: res.mensagem,
+      });
+
+      if (res.sucesso && onRefreshBling) {
+        onRefreshBling();
+      }
+    } catch (err: any) {
+      setEnvioFeedback({
+        tipo: 'erro',
+        mensagem: err?.message || 'Erro inesperado na correção das notas.',
+      });
+    } finally {
+      setCorrigindoFaixaNotas(false);
+      setTimeout(() => setEnvioFeedback(null), 8000);
     }
   };
 
@@ -1661,7 +1714,7 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
           {/* Botão Sincronizar Grupos nas Cobranças */}
           <button
             onClick={handleSincronizarGruposCobrancas}
-            disabled={sincronizandoGrupos || carregando}
+            disabled={sincronizandoGrupos || corrigindoFaixaNotas || carregando}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xs border cursor-pointer ${
               sincronizandoGrupos
                 ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200 border-amber-300 dark:border-amber-700 animate-pulse'
@@ -1674,6 +1727,25 @@ export const FinancesView: React.FC<FinancesViewProps> = ({
             </span>
             <span>
               {sincronizandoGrupos ? 'Atualizando Grupos...' : 'Grupos nas Cobranças'}
+            </span>
+          </button>
+
+          {/* Botão Correção em Lote Notas 160 a 182 */}
+          <button
+            onClick={handleCorrigirNotasFaixaBling}
+            disabled={corrigindoFaixaNotas || sincronizandoGrupos || carregando}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all shadow-xs border cursor-pointer ${
+              corrigindoFaixaNotas
+                ? 'bg-amber-100 text-amber-900 dark:bg-amber-950/60 dark:text-amber-200 border-amber-300 dark:border-amber-700 animate-pulse'
+                : 'bg-sky-50 text-sky-700 hover:bg-sky-100 dark:bg-sky-950/40 dark:text-sky-300 dark:hover:bg-sky-900/60 border-sky-200/80 dark:border-sky-800/60'
+            }`}
+            title="Atualizar contas a receber das notas 160 a 182 atribuindo Bradesco (160-165), Itaú (166-170) e Santander (171-182)"
+          >
+            <span className={`material-symbols-outlined text-base ${corrigindoFaixaNotas ? 'animate-spin' : ''}`}>
+              {corrigindoFaixaNotas ? 'progress_activity' : 'account_balance'}
+            </span>
+            <span>
+              {corrigindoFaixaNotas ? 'Atualizando 160-182...' : 'Corrigir Notas 160-182'}
             </span>
           </button>
 

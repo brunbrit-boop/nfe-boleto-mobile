@@ -2217,6 +2217,193 @@ export async function sincronizarGruposNasContasReceberBling(
 }
 
 /**
+ * Atualiza em lote no Bling as Contas a Receber vinculadas às notas fiscais específicas:
+ * - Notas 160 a 165: Bradesco
+ * - Notas 166 a 170: Itaú
+ * - Notas 171 a 182: Santander
+ */
+export async function atualizarContasReceberFaixaNotasBling(
+  empresaId: string,
+  tokenParam?: string,
+  onProgress?: (mensagem: string, atual: number, total: number) => void
+): Promise<{ sucesso: boolean; atualizados: number; total: number; mensagem: string }> {
+  try {
+    const token = (
+      tokenParam ||
+      localStorage.getItem(`bling_token_${empresaId}`) ||
+      localStorage.getItem('bling_access_token') ||
+      ''
+    ).trim();
+
+    if (!token) {
+      return { sucesso: false, atualizados: 0, total: 0, mensagem: 'Token do Bling não configurado para esta empresa.' };
+    }
+
+    // 1. Busca as contas financeiras cadastradas no Bling daquela empresa
+    onProgress?.('Localizando Contas Financeiras no Bling (Bradesco, Itaú, Santander)...', 0, 0);
+    const contasFinanceiras = await buscarContasFinanceirasBling(token, empresaId);
+
+    const bradescoConta = contasFinanceiras.find((c) => (c.descricao || '').toLowerCase().includes('bradesco'));
+    const itauConta = contasFinanceiras.find((c) => {
+      const d = (c.descricao || '').toLowerCase();
+      return d.includes('itau') || d.includes('itaú');
+    });
+    const santanderConta = contasFinanceiras.find((c) => (c.descricao || '').toLowerCase().includes('santander'));
+
+    console.log('[Bling Faixas] Contas Financeiras localizadas:', {
+      bradesco: bradescoConta ? `${bradescoConta.id} - ${bradescoConta.descricao}` : 'NÃO ENCONTRADO',
+      itau: itauConta ? `${itauConta.id} - ${itauConta.descricao}` : 'NÃO ENCONTRADO',
+      santander: santanderConta ? `${santanderConta.id} - ${santanderConta.descricao}` : 'NÃO ENCONTRADO',
+    });
+
+    if (!bradescoConta && !itauConta && !santanderConta) {
+      return {
+        sucesso: false,
+        atualizados: 0,
+        total: 0,
+        mensagem: 'Nenhuma das contas financeiras (Bradesco, Itaú, Santander) foi encontrada no Bling desta empresa.',
+      };
+    }
+
+    // 2. Busca todas as contas a receber com paginação completa no Bling
+    onProgress?.('Buscando cobranças do Bling...', 0, 0);
+    let contasParaProcessar = obterContasReceberCacheLocal(empresaId);
+
+    // Se no cache temos poucas ou queremos garantir cobertura total das notas 160-182:
+    try {
+      const contasApi: BlingContaReceber[] = [];
+      let p = 1;
+      while (p <= 5) {
+        onProgress?.(`Consultando página ${p} de cobranças no Bling...`, 0, 0);
+        const resCR = await callBlingApi(`/contas/receber?limite=100&pagina=${p}&situacao=1`, {
+          method: 'GET',
+          customToken: token,
+          empresaId,
+        });
+        if (resCR?.data && Array.isArray(resCR.data) && resCR.data.length > 0) {
+          contasApi.push(...resCR.data);
+          if (resCR.data.length < 100) break;
+          p++;
+          await new Promise((r) => setTimeout(r, 250));
+        } else {
+          break;
+        }
+      }
+      if (contasApi.length > 0) {
+        contasParaProcessar = contasApi;
+      }
+    } catch {}
+
+    // 3. Filtra as contas que pertencem às notas 160 a 182
+    const contasAlvo: Array<{ conta: BlingContaReceber; numNF: number; numParcela?: string }> = [];
+
+    for (const c of contasParaProcessar) {
+      const r = c as any;
+      const nfRaw = r.origem?.numero || (c.numeroDocumento && c.numeroDocumento.includes('/') ? c.numeroDocumento.split('/')[0] : (c.numeroDocumento || ''));
+      const numParcela = c.numeroDocumento && c.numeroDocumento.includes('/') ? c.numeroDocumento.split('/')[1] : '';
+
+      let numNF: number | null = null;
+      if (nfRaw) {
+        const clean = nfRaw.replace(/\D/g, '');
+        if (clean) numNF = parseInt(clean, 10);
+      }
+
+      // Se não achou na origem ou número, tenta achar no histórico (ex: "Ref. a NF nº 000172" ou "NF 172")
+      if (!numNF && (c.historico || c.observacoes)) {
+        const match = (c.historico || c.observacoes || '').match(/(?:NF|Nota|nº|doc\.?)\s*(?:nº)?\s*0*([0-9]{2,6})/i);
+        if (match && match[1]) {
+          numNF = parseInt(match[1], 10);
+        }
+      }
+
+      if (numNF !== null && numNF >= 160 && numNF <= 182) {
+        contasAlvo.push({ conta: c, numNF, numParcela });
+      }
+    }
+
+    if (contasAlvo.length === 0) {
+      return {
+        sucesso: true,
+        atualizados: 0,
+        total: 0,
+        mensagem: 'Nenhuma conta a receber referente às notas 160 a 182 foi encontrada no Bling.',
+      };
+    }
+
+    onProgress?.(`Encontradas ${contasAlvo.length} parcelas das notas 160 a 182. Iniciando atualização...`, 0, contasAlvo.length);
+
+    let atualizados = 0;
+    const total = contasAlvo.length;
+
+    for (let i = 0; i < contasAlvo.length; i++) {
+      const { conta: c, numNF, numParcela } = contasAlvo[i];
+      const r = c as any;
+
+      let contaFinAlvo: BlingContaFinanceira | undefined;
+      let nomeBancoPadrao = '';
+
+      if (numNF >= 160 && numNF <= 165) {
+        contaFinAlvo = bradescoConta;
+        nomeBancoPadrao = bradescoConta?.descricao || 'Banco Bradesco';
+      } else if (numNF >= 166 && numNF <= 170) {
+        contaFinAlvo = itauConta;
+        nomeBancoPadrao = itauConta?.descricao || 'Itaú Unibanco';
+      } else if (numNF >= 171 && numNF <= 182) {
+        contaFinAlvo = santanderConta;
+        nomeBancoPadrao = santanderConta?.descricao || 'Banco Santander';
+      }
+
+      const nfNumFormatado = String(numNF).padStart(6, '0');
+      const novoHistorico = `Ref. a NF nº ${nfNumFormatado} - ${nomeBancoPadrao}${numParcela ? ` | Parcela ${numParcela}` : ''}`;
+
+      onProgress?.(`Atualizando NF ${numNF} -> ${nomeBancoPadrao} (${i + 1}/${total})...`, i + 1, total);
+
+      const payloadUpdate: any = { historico: novoHistorico };
+      if (contaFinAlvo?.id) {
+        payloadUpdate.contaContabilId = contaFinAlvo.id;
+      }
+
+      const resUpdate = await atualizarContaReceberBling(c.id, payloadUpdate, token, empresaId);
+      if (resUpdate.sucesso) {
+        c.historico = novoHistorico;
+        c.observacoes = novoHistorico;
+        if (contaFinAlvo?.id) {
+          c.contaFinanceira = { id: contaFinAlvo.id, descricao: contaFinAlvo.descricao };
+          r.contaContabil = { id: contaFinAlvo.id, descricao: contaFinAlvo.descricao };
+        }
+        atualizados++;
+      }
+
+      // Intervalo seguro de 350ms para respeitar taxa do Bling
+      await new Promise((res) => setTimeout(res, 350));
+    }
+
+    salvarContasReceberCacheLocal(empresaId, contasParaProcessar);
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('bling_sync_update'));
+      window.dispatchEvent(new Event('storage'));
+    }
+
+    return {
+      sucesso: true,
+      atualizados,
+      total,
+      mensagem: `${atualizados} de ${total} cobrança(s) das notas 160 a 182 foram atualizadas com sucesso no Bling com suas respectivas contas financeiras!`,
+    };
+  } catch (err: any) {
+    console.error('Erro ao atualizar faixa de notas:', err);
+    return {
+      sucesso: false,
+      atualizados: 0,
+      total: 0,
+      mensagem: err?.message || 'Erro ao atualizar cobranças das notas 160 a 182.',
+    };
+  }
+}
+
+
+/**
  * Atualiza uma Conta a Pagar no Bling ERP via API (PUT /contas/pagar/{id})
  */
 export async function atualizarContaPagarBling(
