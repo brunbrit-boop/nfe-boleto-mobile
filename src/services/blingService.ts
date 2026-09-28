@@ -2330,14 +2330,32 @@ export async function atualizarContasReceberFaixaNotasBling(
       };
     }
 
-    onProgress?.(`Encontradas ${contasAlvo.length} parcelas das notas 160 a 182. Iniciando atualização...`, 0, contasAlvo.length);
+    onProgress?.(`Encontradas ${contasAlvo.length} parcelas das notas 160 a 182. Analisando parcelamento...`, 0, contasAlvo.length);
+
+    // Agrupa as contas por número da nota fiscal para determinar a numeração exata de parcelas (ex: 1/3, 2/3, 3/3)
+    const contasPorNF = new Map<number, Array<{ conta: BlingContaReceber; numNF: number; numParcela?: string }>>();
+    for (const item of contasAlvo) {
+      if (!contasPorNF.has(item.numNF)) {
+        contasPorNF.set(item.numNF, []);
+      }
+      contasPorNF.get(item.numNF)!.push(item);
+    }
 
     let atualizados = 0;
     const total = contasAlvo.length;
+    let indiceGeral = 0;
 
-    for (let i = 0; i < contasAlvo.length; i++) {
-      const { conta: c, numNF, numParcela } = contasAlvo[i];
-      const r = c as any;
+    for (const [numNF, listaContas] of contasPorNF.entries()) {
+      // Ordena as contas da nota por data de vencimento crescente e por ID
+      listaContas.sort((a, b) => {
+        const dataA = a.conta.vencimento || '';
+        const dataB = b.conta.vencimento || '';
+        const comp = dataA.localeCompare(dataB);
+        if (comp !== 0) return comp;
+        return (a.conta.id || 0) - (b.conta.id || 0);
+      });
+
+      const totalParcelasNota = listaContas.length;
 
       let contaFinAlvo: BlingContaFinanceira | undefined;
       let nomeBancoPadrao = '';
@@ -2353,29 +2371,52 @@ export async function atualizarContasReceberFaixaNotasBling(
         nomeBancoPadrao = santanderConta?.descricao || 'Banco Santander';
       }
 
-      const nfNumFormatado = String(numNF).padStart(6, '0');
-      const novoHistorico = `Ref. a NF nº ${nfNumFormatado} - ${nomeBancoPadrao}${numParcela ? ` | Parcela ${numParcela}` : ''}`;
+      for (let idx = 0; idx < listaContas.length; idx++) {
+        indiceGeral++;
+        const { conta: c, numParcela: numParcelaDoc } = listaContas[idx];
+        const r = c as any;
 
-      onProgress?.(`Atualizando NF ${numNF} -> ${nomeBancoPadrao} (${i + 1}/${total})...`, i + 1, total);
-
-      const payloadUpdate: any = { historico: novoHistorico };
-      if (contaFinAlvo?.id) {
-        payloadUpdate.contaContabilId = contaFinAlvo.id;
-      }
-
-      const resUpdate = await atualizarContaReceberBling(c.id, payloadUpdate, token, empresaId);
-      if (resUpdate.sucesso) {
-        c.historico = novoHistorico;
-        c.observacoes = novoHistorico;
-        if (contaFinAlvo?.id) {
-          c.contaFinanceira = { id: contaFinAlvo.id, descricao: contaFinAlvo.descricao };
-          r.contaContabil = { id: contaFinAlvo.id, descricao: contaFinAlvo.descricao };
+        // Determina a parcela: ex: 1/3, 2/3 ou se já tinha no doc ou histórico
+        let parcelaStr = '';
+        if (numParcelaDoc && numParcelaDoc.includes('/')) {
+          parcelaStr = numParcelaDoc;
+        } else if (totalParcelasNota > 1) {
+          parcelaStr = `${idx + 1}/${totalParcelasNota}`;
+        } else if (totalParcelasNota === 1) {
+          // Se for única, tenta ver se no documento ou histórico havia algo como 1/2 ou 1/3
+          const matchAntigo = (c.historico || c.observacoes || '').match(/Parcela\s*([0-9]+\/[0-9]+|[0-9]+)/i);
+          if (matchAntigo && matchAntigo[1]) {
+            parcelaStr = matchAntigo[1];
+          } else {
+            parcelaStr = '1/1';
+          }
         }
-        atualizados++;
-      }
 
-      // Intervalo seguro de 350ms para respeitar taxa do Bling
-      await new Promise((res) => setTimeout(res, 350));
+        const nfNumFormatado = String(numNF).padStart(6, '0');
+        const parcelaInfo = parcelaStr ? ` | Parcela ${parcelaStr}` : '';
+        const novoHistorico = `Ref. a NF nº ${nfNumFormatado} - ${nomeBancoPadrao}${parcelaInfo}`;
+
+        onProgress?.(`Atualizando NF ${numNF}${parcelaInfo} -> ${nomeBancoPadrao} (${indiceGeral}/${total})...`, indiceGeral, total);
+
+        const payloadUpdate: any = { historico: novoHistorico };
+        if (contaFinAlvo?.id) {
+          payloadUpdate.contaContabilId = contaFinAlvo.id;
+        }
+
+        const resUpdate = await atualizarContaReceberBling(c.id, payloadUpdate, token, empresaId);
+        if (resUpdate.sucesso) {
+          c.historico = novoHistorico;
+          c.observacoes = novoHistorico;
+          if (contaFinAlvo?.id) {
+            c.contaFinanceira = { id: contaFinAlvo.id, descricao: contaFinAlvo.descricao };
+            r.contaContabil = { id: contaFinAlvo.id, descricao: contaFinAlvo.descricao };
+          }
+          atualizados++;
+        }
+
+        // Intervalo de 350ms para respeitar taxa do Bling
+        await new Promise((res) => setTimeout(res, 350));
+      }
     }
 
     salvarContasReceberCacheLocal(empresaId, contasParaProcessar);
